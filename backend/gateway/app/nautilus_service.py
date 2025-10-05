@@ -330,19 +330,30 @@ class MockNautilusService:
         spawn(portfolio_pump())
         spawn(risk_pump())
 
-    def attach_engine(self, engine: NautilusEngineService) -> None:
-        """Attach a real NautilusTrader engine implementation."""
+    def _cancel_background_tasks(self) -> None:
+        if not self._background_tasks:
+            return
 
+        for task in list(self._background_tasks):
+            task.cancel()
+        self._background_tasks.clear()
+
+    def attach_engine(self, engine: Optional[NautilusEngineService]) -> None:
+        """Attach (or re-attach) a NautilusTrader engine implementation."""
+
+        engine = engine or build_engine_service()
         self._engine = engine
         self._bus = engine.bus
 
-        if self._background_tasks and self._bus.external:
-            for task in list(self._background_tasks):
-                task.cancel()
-            self._background_tasks.clear()
-
-        if not self._background_tasks and not self._bus.external:
+        if self._bus.external:
+            self._cancel_background_tasks()
+        elif not self._background_tasks:
             self._schedule_background_jobs()
+
+        # Ensure downstream subscribers receive a fresh snapshot from the new engine context.
+        self._publish_portfolio()
+        self._publish_orders_snapshot()
+        self._publish_risk_snapshot()
 
     # --- Market data & discovery --------------------------------------
 
