@@ -1,0 +1,401 @@
+<section class="keys-page">
+  <header class="keys-page__header">
+    <div>
+      <h1 class="keys-page__title">API keys</h1>
+      <p class="keys-page__subtitle">
+        Store encrypted exchange credentials and manage adapter access across Nautilus Trader nodes.
+      </p>
+    </div>
+    <div class="keys-page__actions">
+      <button
+        type="button"
+        class="btn btn--ghost"
+        (click)="refresh()"
+        [disabled]="isLoading() || isRefreshing()"
+        aria-label="Refresh API keys"
+      >
+        <span *ngIf="isRefreshing(); else refreshLabel">Refreshing…</span>
+        <ng-template #refreshLabel>Refresh</ng-template>
+      </button>
+      <button type="button" class="btn btn--primary" (click)="openCreateDialog()">New key</button>
+    </div>
+  </header>
+
+  <section class="keys-page__meta" *ngIf="lastUpdated() as updated">
+    <div class="meta-card">
+      <span class="meta-card__label">Last synced</span>
+      <span class="meta-card__value">{{ updated | date: 'medium' }}</span>
+    </div>
+    <div class="meta-card" *ngIf="keys().length">
+      <span class="meta-card__label">Provisioned</span>
+      <span class="meta-card__value">{{ keys().length }}</span>
+    </div>
+  </section>
+
+  <p class="keys-page__error" *ngIf="errorText() as error">{{ error }}</p>
+
+  <div class="keys-page__loading" *ngIf="isLoading()" role="status" aria-live="polite">
+    <span class="keys-page__spinner" aria-hidden="true"></span>
+    <span>Loading API keys…</span>
+  </div>
+
+  <ng-container *ngIf="!isLoading()">
+    <section class="keys-table" *ngIf="keys().length > 0; else emptyState">
+      <table>
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Venue</th>
+            <th>Access key</th>
+            <th>Scopes</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let key of keys(); trackBy: trackByKeyId">
+            <td data-label="Label">
+              <div class="cell-main">{{ key.label || key.key_id }}</div>
+              <div class="cell-sub"><code>{{ key.key_id }}</code></div>
+            </td>
+            <td data-label="Venue">
+              <div class="cell-main">{{ key.venue }}</div>
+            </td>
+            <td data-label="Access key">
+              <div class="cell-main">{{ maskSecret(key) }}</div>
+              <div class="cell-sub" *ngIf="key.fingerprint">Fingerprint {{ key.fingerprint }}</div>
+            </td>
+            <td data-label="Scopes">
+              <ul class="scope-list">
+                <li *ngFor="let scope of key.scopes">{{ scope }}</li>
+              </ul>
+            </td>
+            <td data-label="Status">
+              <ng-container *ngIf="keyStatus(key) as status">
+                <span
+                  class="status"
+                  [class.status--active]="status.tone === 'active'"
+                  [class.status--stale]="status.tone === 'stale'"
+                  [class.status--idle]="status.tone === 'idle'"
+                >
+                  {{ status.label }}
+                </span>
+                <div class="cell-sub">{{ status.description }}</div>
+              </ng-container>
+            </td>
+            <td data-label="Created">
+              <div class="cell-main">{{ key.created_at | date: 'medium' }}</div>
+              <div class="cell-sub" *ngIf="key.last_used_at">Last used {{ key.last_used_at | date: 'medium' }}</div>
+            </td>
+            <td data-label="Actions" class="keys-table__actions">
+              <button type="button" class="btn btn--ghost" (click)="openEditDialog(key)">Edit</button>
+              <button type="button" class="btn btn--ghost" (click)="openDeleteDialog(key)">Delete</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </ng-container>
+
+  <ng-template #emptyState>
+    <div class="keys-page__empty">
+      <h2>Securely manage your credentials</h2>
+      <p>
+        Provision encrypted API keys for each venue to unlock trading, data collection and withdrawal
+        workflows across your Nautilus Trader infrastructure.
+      </p>
+      <button type="button" class="btn btn--primary" (click)="openCreateDialog()">Create your first key</button>
+    </div>
+  </ng-template>
+
+  <ng-container *ngIf="isCreateDialogOpen()">
+    <div class="dialog" role="presentation">
+      <div class="dialog__backdrop" (click)="closeCreateDialog()" aria-hidden="true"></div>
+      <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="createKeyTitle">
+        <header class="dialog__header">
+          <div>
+            <p class="dialog__eyebrow">Create credential</p>
+            <h2 class="dialog__title" id="createKeyTitle">New API key</h2>
+            <p class="dialog__subtitle">
+              Encrypt your secret with a passphrase before sending it to the credential vault.
+            </p>
+          </div>
+          <button type="button" class="dialog__close" (click)="closeCreateDialog()" aria-label="Close create dialog">
+            ×
+          </button>
+        </header>
+
+        <form class="dialog__form" [formGroup]="createForm" (ngSubmit)="createKey()">
+          <div class="dialog__body">
+            <label class="field">
+              <span class="field__label">Key label</span>
+              <input class="field__control" formControlName="label" type="text" placeholder="Primary trading key" />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Key identifier</span>
+              <input
+                class="field__control"
+                formControlName="keyId"
+                type="text"
+                placeholder="binance-primary"
+                required
+              />
+              <span class="field__hint" *ngIf="createForm.controls.keyId.invalid && createForm.controls.keyId.touched">
+                Identifier is required.
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field__label">Venue</span>
+              <input class="field__control" formControlName="venue" type="text" placeholder="BINANCE" required />
+              <span class="field__hint" *ngIf="createForm.controls.venue.invalid && createForm.controls.venue.touched">
+                Venue is required.
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field__label">API key</span>
+              <input class="field__control" formControlName="apiKey" type="text" autocomplete="off" required />
+              <span class="field__hint" *ngIf="createForm.controls.apiKey.invalid && createForm.controls.apiKey.touched">
+                API key is required.
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field__label">API secret</span>
+              <textarea
+                class="field__control"
+                formControlName="apiSecret"
+                rows="3"
+                autocomplete="off"
+                required
+              ></textarea>
+              <span class="field__hint" *ngIf="createForm.controls.apiSecret.invalid && createForm.controls.apiSecret.touched">
+                API secret is required.
+              </span>
+            </label>
+
+            <fieldset class="field field--fieldset">
+              <legend class="field__label">Scopes</legend>
+              <div class="scope-options">
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="scopeRead" />
+                  <span>Read</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="scopeTrade" />
+                  <span>Trade</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="scopeWithdraw" />
+                  <span>Withdraw</span>
+                </label>
+              </div>
+              <label class="field field--inline">
+                <span class="field__label">Additional scopes</span>
+                <input
+                  class="field__control"
+                  type="text"
+                  formControlName="scopeCustom"
+                  placeholder="Separate custom scopes with commas"
+                />
+              </label>
+            </fieldset>
+
+            <label class="field">
+              <span class="field__label">Passphrase</span>
+              <input
+                class="field__control"
+                formControlName="passphrase"
+                type="password"
+                autocomplete="new-password"
+                required
+                minlength="8"
+              />
+              <span class="field__hint" *ngIf="createForm.controls.passphrase.invalid && createForm.controls.passphrase.touched">
+                Passphrase must be at least 8 characters.
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field__label">Passphrase hint (optional)</span>
+              <input class="field__control" formControlName="passphraseHint" type="text" placeholder="Production wallet" />
+            </label>
+          </div>
+
+          <p class="dialog__error" *ngIf="createError() as error">{{ error }}</p>
+
+          <footer class="dialog__footer">
+            <button type="button" class="btn btn--ghost" (click)="closeCreateDialog()">Cancel</button>
+            <button type="submit" class="btn btn--primary" [disabled]="isCreateSubmitting()">
+              <span *ngIf="isCreateSubmitting(); else createLabel">Encrypt &amp; save</span>
+              <ng-template #createLabel>Encrypt &amp; save</ng-template>
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="isEditDialogOpen() && editDialogKey() as key">
+    <div class="dialog" role="presentation">
+      <div class="dialog__backdrop" (click)="closeEditDialog()" aria-hidden="true"></div>
+      <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="editKeyTitle">
+        <header class="dialog__header">
+          <div>
+            <p class="dialog__eyebrow">Update credential</p>
+            <h2 class="dialog__title" id="editKeyTitle">{{ key.label || key.key_id }}</h2>
+            <p class="dialog__subtitle">
+              Adjust metadata or rotate secrets by submitting a newly encrypted payload with your passphrase.
+            </p>
+          </div>
+          <button type="button" class="dialog__close" (click)="closeEditDialog()" aria-label="Close edit dialog">×</button>
+        </header>
+
+        <form class="dialog__form" [formGroup]="editForm" (ngSubmit)="updateKey()">
+          <div class="dialog__body">
+            <label class="field">
+              <span class="field__label">Key identifier</span>
+              <input class="field__control" formControlName="keyId" type="text" readonly />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Label</span>
+              <input class="field__control" formControlName="label" type="text" />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Venue</span>
+              <input class="field__control" formControlName="venue" type="text" required />
+            </label>
+
+            <fieldset class="field field--fieldset">
+              <legend class="field__label">Scopes</legend>
+              <div class="scope-options">
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="scopeRead" />
+                  <span>Read</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="scopeTrade" />
+                  <span>Trade</span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="scopeWithdraw" />
+                  <span>Withdraw</span>
+                </label>
+              </div>
+              <label class="field field--inline">
+                <span class="field__label">Additional scopes</span>
+                <input
+                  class="field__control"
+                  type="text"
+                  formControlName="scopeCustom"
+                  placeholder="Separate custom scopes with commas"
+                />
+              </label>
+            </fieldset>
+
+            <label class="checkbox checkbox--inline">
+              <input type="checkbox" formControlName="rotateSecret" />
+              <span>Rotate API key &amp; secret</span>
+            </label>
+
+            <ng-container *ngIf="editForm.controls.rotateSecret.value">
+              <label class="field">
+                <span class="field__label">New API key</span>
+                <input class="field__control" formControlName="apiKey" type="text" autocomplete="off" />
+              </label>
+
+              <label class="field">
+                <span class="field__label">New API secret</span>
+                <textarea class="field__control" formControlName="apiSecret" rows="3" autocomplete="off"></textarea>
+              </label>
+            </ng-container>
+
+            <label class="field">
+              <span class="field__label">Passphrase</span>
+              <input
+                class="field__control"
+                formControlName="passphrase"
+                type="password"
+                autocomplete="current-password"
+                required
+                minlength="8"
+              />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Passphrase hint (optional)</span>
+              <input class="field__control" formControlName="passphraseHint" type="text" />
+            </label>
+          </div>
+
+          <p class="dialog__error" *ngIf="editError() as error">{{ error }}</p>
+
+          <footer class="dialog__footer">
+            <button type="button" class="btn btn--ghost" (click)="closeEditDialog()">Cancel</button>
+            <button type="submit" class="btn btn--primary" [disabled]="isEditSubmitting()">
+              <span *ngIf="isEditSubmitting(); else updateLabel">Encrypt &amp; update</span>
+              <ng-template #updateLabel>Encrypt &amp; update</ng-template>
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="isDeleteDialogOpen() && deleteDialogKey() as key">
+    <div class="dialog" role="presentation">
+      <div class="dialog__backdrop" (click)="closeDeleteDialog()" aria-hidden="true"></div>
+      <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="deleteKeyTitle">
+        <header class="dialog__header dialog__header--danger">
+          <div>
+            <p class="dialog__eyebrow">Delete credential</p>
+            <h2 class="dialog__title" id="deleteKeyTitle">Remove {{ key.label || key.key_id }}?</h2>
+            <p class="dialog__subtitle">
+              Deleting a key immediately revokes adapter access. Confirm the identifier and provide your
+              passphrase to continue.
+            </p>
+          </div>
+          <button type="button" class="dialog__close" (click)="closeDeleteDialog()" aria-label="Close delete dialog">
+            ×
+          </button>
+        </header>
+
+        <form class="dialog__form" [formGroup]="deleteForm" (ngSubmit)="deleteKeyConfirmed()">
+          <div class="dialog__body">
+            <label class="field">
+              <span class="field__label">Type <code>{{ key.key_id }}</code> to confirm</span>
+              <input class="field__control" formControlName="confirmation" type="text" autocomplete="off" required />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Passphrase</span>
+              <input
+                class="field__control"
+                formControlName="passphrase"
+                type="password"
+                autocomplete="current-password"
+                required
+                minlength="8"
+              />
+            </label>
+          </div>
+
+          <p class="dialog__error" *ngIf="deleteError() as error">{{ error }}</p>
+
+          <footer class="dialog__footer">
+            <button type="button" class="btn btn--ghost" (click)="closeDeleteDialog()">Cancel</button>
+            <button type="submit" class="btn btn--primary btn--danger" [disabled]="isDeleteSubmitting()">
+              <span *ngIf="isDeleteSubmitting(); else deleteLabel">Delete permanently</span>
+              <ng-template #deleteLabel>Delete permanently</ng-template>
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </ng-container>
+</section>
