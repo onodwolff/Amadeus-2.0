@@ -1,0 +1,233 @@
+.market-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem;
+}
+
+.market-page__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.market-page__title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+.market-page__subtitle {
+  margin: 0.25rem 0 0;
+  color: #5a6572;
+}
+
+.market-page__filters {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.market-page__status {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.875rem;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.status--loading {
+  color: #2f80ed;
+}
+
+.status--error {
+  color: #d9534f;
+}
+
+.market-page__content {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr;
+  gap: 1.5rem;
+}
+
+.market-panel {
+  background: #fff;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.market-panel__header {
+  margin-bottom: 1rem;
+}
+
+.market-panel__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.market-panel--placeholder {
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+  text-align: center;
+  color: #5a6572;
+}
+
+.instrument-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  max-height: 480px;
+}
+
+.instrument-list__empty {
+  margin: 0;
+  padding: 1.5rem;
+  text-align: center;
+  color: #5a6572;
+  background: #f8fafc;
+  border-radius: 0.5rem;
+}
+
+.instrument-list__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  border: 1px solid transparent;
+}
+
+.instrument-list__item:hover {
+  background: #f5f7fb;
+}
+
+.instrument-list__item--selected {
+  border-color: #2f80ed;
+  background: rgba(47, 128, 237, 0.08);
+  box-shadow: 0 0 0 1px rgba(47, 128, 237, 0.2);
+}
+
+.instrument-list__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.instrument-list__symbol {
+  font-weight: 600;
+}
+
+.instrument-list__meta {
+  font-size: 0.875rem;
+  color: #5a6572;
+}
+
+.instrument-list__id {
+  font-size: 0.75rem;
+  color: #8a95a4;
+}
+
+.instrument-list__watchlist {
+  background: none;
+  border: none;
+  color: #2f80ed;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  transition: background 0.2s ease-in-out;
+}
+
+.instrument-list__watchlist:hover,
+.instrument-list__watchlist[aria-pressed='true'] {
+  background: rgba(47, 128, 237, 0.1);
+}
+
+.instrument-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.instrument-summary__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+
+.instrument-summary__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: #5a6572;
+  letter-spacing: 0.05em;
+}
+
+.instrument-summary__value {
+  font-weight: 600;
+}
+
+.market-empty {
+  padding: 3rem 1.5rem;
+  text-align: center;
+  background: #fff;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+}
+
+.market-empty__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.market-empty__description {
+  margin-top: 0.75rem;
+  color: #5a6572;
+}
+
+@media (max-width: 1200px) {
+  .market-page__content {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .market-panel--watchlist {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 768px) {
+  .market-page {
+    padding: 1rem;
+  }
+
+  .market-page__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .market-page__content {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}

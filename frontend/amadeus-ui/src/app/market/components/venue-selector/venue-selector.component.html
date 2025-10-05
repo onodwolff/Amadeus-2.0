@@ -1,0 +1,15 @@
+<div class="venue-selector">
+  <label class="venue-selector__label" for="venue-select">Venue</label>
+  <div class="venue-selector__controls">
+    <select
+      id="venue-select"
+      class="venue-selector__select"
+      [value]="selectedVenue() ?? ''"
+      (change)="onVenueChange($event)"
+    >
+      <option value="">All venues</option>
+      <option *ngFor="let venue of venues()" [value]="venue">{{ venue }}</option>
+    </select>
+    <button type="button" class="venue-selector__refresh" (click)="refresh()">Refresh</button>
+  </div>
+</div>
