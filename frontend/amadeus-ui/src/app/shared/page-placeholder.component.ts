@@ -4,7 +4,7 @@ import { RouterModule } from '@angular/router';
 
 export interface PagePlaceholderCta {
   label: string;
-  routerLink?: string | any[];
+  routerLink?: string | unknown[];
   href?: string;
   target?: '_self' | '_blank' | '_parent' | '_top';
   rel?: string;
