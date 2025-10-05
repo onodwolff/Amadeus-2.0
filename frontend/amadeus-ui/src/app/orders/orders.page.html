@@ -1,0 +1,195 @@
+<section class="orders-page">
+  <header class="orders-page__header">
+    <div>
+      <h1 class="orders-page__title">Orders &amp; fills</h1>
+      <p class="orders-page__subtitle">
+        Monitor live and historical orders alongside execution reports streamed from Nautilus Trader nodes.
+      </p>
+    </div>
+    <div class="orders-page__meta">
+      <div class="meta-card">
+        <span class="meta-card__label">WebSocket</span>
+        <span class="meta-card__value" [class.meta-card__value--warn]="wsState() !== 'connected'">{{ wsState() }}</span>
+      </div>
+      <div class="meta-card" *ngIf="lastUpdated() as updated">
+        <span class="meta-card__label">Last update</span>
+        <span class="meta-card__value">{{ updated | date: 'medium' }}</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="orders-page__filters">
+    <label class="filter-field">
+      <span>Status</span>
+      <select [ngModel]="statusFilter()" (ngModelChange)="onStatusFilterChange($event)" name="status-filter">
+        <option *ngFor="let status of statusOptions()" [value]="status">
+          {{ status === 'all' ? 'All statuses' : (status | titlecase) }}
+        </option>
+      </select>
+    </label>
+    <label class="filter-field">
+      <span>Venue</span>
+      <select [ngModel]="venueFilter()" (ngModelChange)="onVenueFilterChange($event)" name="venue-filter">
+        <option *ngFor="let venue of venueOptions()" [value]="venue">
+          {{ venue === 'all' ? 'All venues' : venue }}
+        </option>
+      </select>
+    </label>
+    <label class="filter-field">
+      <span>Instrument</span>
+      <select [ngModel]="symbolFilter()" (ngModelChange)="onSymbolFilterChange($event)" name="symbol-filter">
+        <option *ngFor="let symbol of symbolOptions()" [value]="symbol">
+          {{ symbol === 'all' ? 'All instruments' : symbol }}
+        </option>
+      </select>
+    </label>
+    <label class="filter-field">
+      <span>Node</span>
+      <select [ngModel]="nodeFilter()" (ngModelChange)="onNodeFilterChange($event)" name="node-filter">
+        <option *ngFor="let node of nodeOptions()" [value]="node">
+          {{ node === 'all' ? 'All nodes' : node }}
+        </option>
+      </select>
+    </label>
+  </section>
+
+  <div class="orders-page__stats">
+    <div class="stat-card">
+      <span class="stat-card__label">Open</span>
+      <span class="stat-card__value">{{ openOrdersCount() }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__label">Completed</span>
+      <span class="stat-card__value">{{ completedOrdersCount() }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-card__label">Rejected</span>
+      <span class="stat-card__value">{{ rejectedOrdersCount() }}</span>
+    </div>
+  </div>
+
+  <p class="orders-page__error" *ngIf="errorText() as error">{{ error }}</p>
+
+  <ng-container *ngIf="isLoading(); else ordersContent">
+    <div class="orders-page__loading" role="status" aria-live="polite">
+      <span class="orders-page__spinner" aria-hidden="true"></span>
+      <span>Loading orders…</span>
+    </div>
+  </ng-container>
+
+  <ng-template #ordersContent>
+    <ng-container *ngIf="filteredOrders().length > 0; else emptyState">
+      <div class="orders-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Status</th>
+              <th>Side / Type</th>
+              <th>Instrument</th>
+              <th>Qty / Filled</th>
+              <th>Price</th>
+              <th>Node</th>
+              <th>Updated</th>
+              <th>Executions</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              *ngFor="let order of filteredOrders(); trackBy: trackByOrderId"
+              [class.orders-table__row--open]="order.status === 'pending' || order.status === 'working'"
+              [class.orders-table__row--filled]="order.status === 'filled'"
+              [class.orders-table__row--rejected]="order.status === 'rejected'"
+            >
+              <td data-label="Order">
+                <div class="cell-main"><code>{{ order.order_id }}</code></div>
+                <div class="cell-sub" *ngIf="order.client_order_id">Client {{ order.client_order_id }}</div>
+                <div class="cell-sub" *ngIf="order.venue_order_id">Venue {{ order.venue_order_id }}</div>
+              </td>
+              <td data-label="Status">
+                <span
+                  class="status"
+                  [class.status--open]="order.status === 'pending' || order.status === 'working'"
+                  [class.status--filled]="order.status === 'filled'"
+                  [class.status--cancelled]="order.status === 'cancelled'"
+                  [class.status--rejected]="order.status === 'rejected'"
+                >
+                  {{ order.status | titlecase }}
+                </span>
+              </td>
+              <td data-label="Side / Type">
+                <div class="cell-main">
+                  <span class="side" [class.side--buy]="order.side === 'buy'" [class.side--sell]="order.side === 'sell'">
+                    {{ order.side | titlecase }}
+                  </span>
+                  <span class="type-tag">{{ order.type | uppercase }}</span>
+                </div>
+                <div class="cell-sub" *ngIf="order.time_in_force">TIF {{ order.time_in_force }}</div>
+              </td>
+              <td data-label="Instrument">
+                <div class="cell-main">{{ order.symbol }}</div>
+                <div class="cell-sub">{{ order.venue }}</div>
+              </td>
+              <td data-label="Qty / Filled">
+                <div class="cell-main">{{ order.quantity | number: '1.0-4' }}</div>
+                <div class="cell-sub">{{ order.filled_quantity | number: '1.0-4' }}</div>
+              </td>
+              <td data-label="Price">
+                <div class="cell-main">{{ order.price != null ? (order.price | number: '1.2-2') : '—' }}</div>
+                <div class="cell-sub" *ngIf="order.average_price != null">avg {{ order.average_price | number: '1.2-2' }}</div>
+              </td>
+              <td data-label="Node">
+                <div class="cell-main">{{ order.node_id || '—' }}</div>
+              </td>
+              <td data-label="Updated">
+                <div class="cell-main">{{ (order.updated_at || order.created_at) | date: 'short' }}</div>
+                <div class="cell-sub">Created {{ order.created_at | date: 'short' }}</div>
+              </td>
+              <td data-label="Executions">
+                <ng-container *ngIf="orderExecutions(order.order_id) as fills">
+                  <ng-container *ngIf="fills.length > 0; else noExecutions">
+                    <ul class="executions-list">
+                      <li *ngFor="let fill of fills">
+                        <span>{{ fill.quantity | number: '1.0-4' }} @ {{ fill.price | number: '1.2-2' }}</span>
+                        <span class="executions-list__timestamp">{{ fill.timestamp | date: 'shortTime' }}</span>
+                      </li>
+                    </ul>
+                  </ng-container>
+                </ng-container>
+                <ng-template #noExecutions>—</ng-template>
+              </td>
+              <td data-label="Actions" class="orders-table__actions">
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  (click)="onCancel(order, $event)"
+                  [disabled]="!isOrderCancellable(order) || isCancelling(order.order_id)"
+                >
+                  <span *ngIf="isCancelling(order.order_id); else cancelText">Cancelling…</span>
+                  <ng-template #cancelText>Cancel</ng-template>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  (click)="onDuplicate(order, $event)"
+                  [disabled]="isDuplicating(order.order_id)"
+                >
+                  <span *ngIf="isDuplicating(order.order_id); else duplicateText">Duplicating…</span>
+                  <ng-template #duplicateText>Duplicate</ng-template>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </ng-container>
+  </ng-template>
+
+  <ng-template #emptyState>
+    <div class="orders-page__empty">
+      <h2>No orders yet</h2>
+      <p>Orders will appear here once your nodes begin trading or after importing historical activity.</p>
+    </div>
+  </ng-template>
+</section>

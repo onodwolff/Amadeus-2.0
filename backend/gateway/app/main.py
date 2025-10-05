@@ -185,6 +185,27 @@ def get_portfolio_history(limit: int = 720):
     return svc.portfolio_history(limit=limit)
 
 
+@app.get("/orders")
+def get_orders():
+    return svc.orders_snapshot()
+
+
+@app.post("/orders/{order_id}/cancel")
+def cancel_order(order_id: str):
+    try:
+        return svc.cancel_order(order_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/orders/{order_id}/duplicate")
+def duplicate_order(order_id: str):
+    try:
+        return svc.duplicate_order(order_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @app.websocket("/ws/nodes")
 async def ws_nodes(ws: WebSocket):
     await ws.accept()
@@ -261,5 +282,17 @@ async def ws_portfolio_movements(ws: WebSocket):
             payload = svc.portfolio_movements_stream_payload()
             await ws.send_text(json.dumps(payload))
             await asyncio.sleep(1.6)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/orders")
+async def ws_orders(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.orders_stream_payload()
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.2)
     except WebSocketDisconnect:
         return
