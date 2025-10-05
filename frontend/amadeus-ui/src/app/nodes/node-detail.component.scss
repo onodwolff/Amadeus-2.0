@@ -1,0 +1,248 @@
+.node-detail {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+}
+
+.node-detail__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.node-detail__title h2 {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+}
+
+.node-detail__subtitle {
+  margin: 0 0 8px;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.node-detail__status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: rgba(148, 163, 184, 0.85);
+  font-size: 0.85rem;
+}
+
+.node-detail__status {
+  text-transform: capitalize;
+}
+
+.node-detail__status--running {
+  color: #34d399;
+}
+
+.node-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.node-detail__content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+}
+
+.node-detail__section {
+  background: rgba(17, 24, 39, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.node-detail__section-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.03em;
+}
+
+.node-detail__config {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.node-detail__config-group h4 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.node-detail__config-meta {
+  display: flex;
+  gap: 8px;
+  color: rgba(148, 163, 184, 0.85);
+  margin: 0 0 8px;
+}
+
+.node-detail__definition {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.node-detail__definition dt {
+  color: rgba(148, 163, 184, 0.85);
+  font-size: 0.85rem;
+}
+
+.node-detail__definition dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.node-detail__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.node-detail__hint {
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 0.8rem;
+}
+
+.node-detail__timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+}
+
+.node-detail__timeline::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  width: 2px;
+  height: calc(100% - 12px);
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.node-detail__timeline li {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 12px;
+}
+
+.node-detail__timeline-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.6);
+  margin-top: 2px;
+}
+
+.node-detail__timeline-message {
+  margin: 0;
+  font-weight: 600;
+}
+
+.node-detail__timeline-meta {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: rgba(148, 163, 184, 0.75);
+}
+
+.node-detail__logs {
+  background: rgba(17, 24, 39, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.node-detail__logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.node-detail__log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.node-detail__log-item--warn .node-detail__pill {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.node-detail__log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.node-detail__log-message {
+  margin: 4px 0 0;
+  font-family: 'Fira Code', 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.85rem;
+}
+
+.node-detail__loading {
+  padding: 16px;
+  text-align: center;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.node-detail__empty {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.8);
+  font-style: italic;
+}
+
+.node-detail__error {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.4);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #fecaca;
+}
+
+@media (max-width: 1024px) {
+  .node-detail {
+    max-height: none;
+  }
+
+  .node-detail__content {
+    grid-template-columns: 1fr;
+  }
+}

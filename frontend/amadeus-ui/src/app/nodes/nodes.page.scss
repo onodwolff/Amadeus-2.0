@@ -136,8 +136,28 @@
   background: rgba(59, 130, 246, 0.08);
 }
 
+.nodes-table tbody tr {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.nodes-table tbody tr.is-selected {
+  background: rgba(59, 130, 246, 0.15);
+}
+
 .nodes-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.nodes-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.nodes-layout--detail-open {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
 }
 
 .tag {
@@ -239,5 +259,10 @@
     letter-spacing: 0.1em;
     color: rgba(148, 163, 184, 0.9);
     margin-bottom: 2px;
+  }
+
+  .nodes-layout,
+  .nodes-layout--detail-open {
+    grid-template-columns: 1fr;
   }
 }

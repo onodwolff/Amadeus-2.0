@@ -2,7 +2,13 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
-import { NodeLaunchRequest, NodeResponse, NodesListResponse } from '../models';
+import {
+  NodeDetailResponse,
+  NodeLaunchRequest,
+  NodeLogsResponse,
+  NodeResponse,
+  NodesListResponse,
+} from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class NodesApi {
@@ -18,5 +24,23 @@ export class NodesApi {
 
   stopNode(nodeId: string): Observable<NodeResponse> {
     return this.http.post<NodeResponse>(buildApiUrl(`/nodes/${nodeId}/stop`), {});
+  }
+
+  restartNode(nodeId: string): Observable<NodeResponse> {
+    return this.http.post<NodeResponse>(buildApiUrl(`/nodes/${nodeId}/restart`), {});
+  }
+
+  getNodeDetail(nodeId: string): Observable<NodeDetailResponse> {
+    return this.http.get<NodeDetailResponse>(buildApiUrl(`/nodes/${nodeId}`));
+  }
+
+  getNodeLogs(nodeId: string): Observable<NodeLogsResponse> {
+    return this.http.get<NodeLogsResponse>(buildApiUrl(`/nodes/${nodeId}/logs`));
+  }
+
+  downloadNodeLogs(nodeId: string): Observable<Blob> {
+    return this.http.get(buildApiUrl(`/nodes/${nodeId}/logs/export`), {
+      responseType: 'blob',
+    });
   }
 }
