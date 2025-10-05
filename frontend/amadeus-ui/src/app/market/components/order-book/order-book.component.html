@@ -1,0 +1,103 @@
+<div class="order-book">
+  <header class="order-book__header">
+    <div>
+      <h3 class="order-book__title">Order book</h3>
+      <p class="order-book__updated" *ngIf="lastUpdated()">Updated {{ lastUpdated() }}</p>
+    </div>
+    <div class="order-book__controls">
+      <label class="order-book__control">
+        <span>Depth</span>
+        <select [value]="selectedDepth()" (change)="setDepth($any($event.target).value)">
+          <option *ngFor="let depth of depthOptions" [value]="depth">{{ depth }}</option>
+        </select>
+      </label>
+      <label class="order-book__control">
+        <span>Aggregation</span>
+        <select [value]="selectedAggregation()" (change)="setAggregation($any($event.target).value)">
+          <option *ngFor="let option of aggregationOptions()" [value]="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <div class="order-book__status" *ngIf="error() || wsState() !== 'connected'">
+    <span *ngIf="error(); else connectionState">{{ error() }}</span>
+    <ng-template #connectionState>
+      <span class="order-book__state">Stream {{ wsState() }}</span>
+    </ng-template>
+  </div>
+
+  <div class="order-book__body" *ngIf="hasLevels(); else emptyBook">
+    <section class="order-book__side order-book__side--asks">
+      <header class="order-book__side-header">Asks</header>
+      <div class="order-book__row order-book__row--labels">
+        <span>Price</span>
+        <span>Size</span>
+        <span>Total</span>
+      </div>
+      <div class="order-book__rows">
+        <div
+          class="order-book__row order-book__row--ask"
+          *ngFor="let row of asks(); trackBy: trackByPrice"
+        >
+          <div
+            class="order-book__depth-bar order-book__depth-bar--ask"
+            [style.width.%]="maxAskTotal() ? (row.total / maxAskTotal()) * 100 : 0"
+          ></div>
+          <span class="order-book__cell order-book__cell--price order-book__cell--ask">
+            {{
+              row.price
+                | number: '1.' + pricePrecision() + '-' + pricePrecision()
+            }}
+          </span>
+          <span class="order-book__cell order-book__cell--size">
+            {{ row.size | number: '1.0-4' }}
+          </span>
+          <span class="order-book__cell order-book__cell--total">
+            {{ row.total | number: '1.0-4' }}
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="order-book__side order-book__side--bids">
+      <header class="order-book__side-header">Bids</header>
+      <div class="order-book__row order-book__row--labels">
+        <span>Price</span>
+        <span>Size</span>
+        <span>Total</span>
+      </div>
+      <div class="order-book__rows">
+        <div
+          class="order-book__row order-book__row--bid"
+          *ngFor="let row of bids(); trackBy: trackByPrice"
+        >
+          <div
+            class="order-book__depth-bar order-book__depth-bar--bid"
+            [style.width.%]="maxBidTotal() ? (row.total / maxBidTotal()) * 100 : 0"
+          ></div>
+          <span class="order-book__cell order-book__cell--price order-book__cell--bid">
+            {{
+              row.price
+                | number: '1.' + pricePrecision() + '-' + pricePrecision()
+            }}
+          </span>
+          <span class="order-book__cell order-book__cell--size">
+            {{ row.size | number: '1.0-4' }}
+          </span>
+          <span class="order-book__cell order-book__cell--total">
+            {{ row.total | number: '1.0-4' }}
+          </span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <ng-template #emptyBook>
+    <div class="order-book__empty">
+      {{ wsState() === 'connected' ? 'Waiting for depth updates…' : 'No order book data available.' }}
+    </div>
+  </ng-template>
+</div>

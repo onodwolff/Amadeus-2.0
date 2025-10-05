@@ -1,0 +1,51 @@
+<div class="trade-tape">
+  <header class="trade-tape__header">
+    <h3 class="trade-tape__title">Trade tape</h3>
+    <label class="trade-tape__control">
+      <span>Window</span>
+      <select [value]="selectedWindow()" (change)="setWindowSize($any($event.target).value)">
+        <option *ngFor="let option of windowOptions" [value]="option">Last {{ option }}</option>
+      </select>
+    </label>
+  </header>
+
+  <div class="trade-tape__status" *ngIf="error() || wsState() !== 'connected'">
+    <span *ngIf="error(); else tradeState">{{ error() }}</span>
+    <ng-template #tradeState>
+      <span class="trade-tape__state">Stream {{ wsState() }}</span>
+    </ng-template>
+  </div>
+
+  <div class="trade-tape__body" *ngIf="trades().length; else emptyTape">
+    <div class="trade-tape__row trade-tape__row--header">
+      <span>Time</span>
+      <span>Price</span>
+      <span>Size</span>
+    </div>
+    <div class="trade-tape__rows">
+      <div
+        class="trade-tape__row"
+        *ngFor="let trade of trades(); trackBy: trackByTrade"
+        [class.trade-tape__row--buy]="trade.side === 'buy'"
+        [class.trade-tape__row--sell]="trade.side === 'sell'"
+      >
+        <span class="trade-tape__cell trade-tape__cell--time">{{ trade.time }}</span>
+        <span class="trade-tape__cell trade-tape__cell--price">
+          {{
+            trade.price
+              | number: '1.' + pricePrecision() + '-' + pricePrecision()
+          }}
+        </span>
+        <span class="trade-tape__cell trade-tape__cell--volume">
+          {{ trade.volume | number: '1.0-' + volumePrecision() }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <ng-template #emptyTape>
+    <div class="trade-tape__empty">
+      {{ wsState() === 'connected' ? 'Waiting for trades…' : 'No trade data available.' }}
+    </div>
+  </ng-template>
+</div>

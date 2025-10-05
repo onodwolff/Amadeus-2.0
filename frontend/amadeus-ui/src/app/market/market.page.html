@@ -95,12 +95,22 @@
               </label>
             </div>
           </header>
-          <app-price-chart
-            [instrument]="instrument"
-            [timeframe]="selectedTimeframe()"
-            [indicator]="selectedIndicator()"
-            [priceScale]="selectedScale()"
-          ></app-price-chart>
+          <div class="market-panel__chart-grid">
+            <div class="market-panel__chart-main">
+              <app-price-chart
+                [instrument]="instrument"
+                [timeframe]="selectedTimeframe()"
+                [indicator]="selectedIndicator()"
+                [priceScale]="selectedScale()"
+              ></app-price-chart>
+            </div>
+            <div class="market-panel__chart-side">
+              <app-order-book [instrument]="instrument"></app-order-book>
+            </div>
+            <div class="market-panel__chart-side">
+              <app-trade-tape [instrument]="instrument"></app-trade-tape>
+            </div>
+          </div>
         </section>
 
         <section class="market-panel market-panel--summary">

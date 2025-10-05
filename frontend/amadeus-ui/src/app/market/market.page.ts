@@ -11,6 +11,8 @@ import {
   PriceChartIndicator,
   PriceChartScale,
 } from './components/price-chart/price-chart.component';
+import { OrderBookComponent } from './components/order-book/order-book.component';
+import { TradeTapeComponent } from './components/trade-tape/trade-tape.component';
 
 @Component({
   standalone: true,
@@ -21,6 +23,8 @@ import {
     InstrumentFiltersComponent,
     WatchlistPanelComponent,
     PriceChartComponent,
+    OrderBookComponent,
+    TradeTapeComponent,
   ],
   templateUrl: './market.page.html',
   styleUrls: ['./market.page.scss'],
