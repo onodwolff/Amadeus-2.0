@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -8,7 +9,14 @@ import itertools
 import random
 import sys
 import uuid
-from typing import Any, Dict, List, Optional, Tuple, Literal
+from typing import Any, Coroutine, Dict, List, Optional, Tuple, Literal
+
+from .nautilus_engine_service import (
+    EngineEventBus,
+    EngineMode,
+    NautilusEngineService,
+    build_engine_service,
+)
 
 
 def _utcnow_iso() -> str:
@@ -192,8 +200,14 @@ class ExecutionRecord:
     node_id: Optional[str]
 
 
-class NautilusService:
-    def __init__(self) -> None:
+class MockNautilusService:
+    """Mock orchestration layer used when a live Nautilus engine isn't available."""
+
+    def __init__(self, engine: Optional[NautilusEngineService] = None) -> None:
+        self._engine = engine or build_engine_service()
+        self._bus: EngineEventBus = self._engine.bus
+        self._mode = "mock"
+
         self._nodes: Dict[str, NodeState] = {}
         self._seed_portfolio_state()
         self._orders: Dict[str, OrderRecord] = {}
@@ -207,6 +221,89 @@ class NautilusService:
             "margin_call": [],
         }
         self._seed_risk_alerts()
+        self._publish_portfolio()
+        self._publish_orders_snapshot()
+        self._publish_risk_snapshot()
+        self._background_tasks: List[asyncio.Task] = []
+        if not self._bus.external:
+            self._schedule_background_jobs()
+
+    # ------------------------------------------------------------------
+    # Engine / telemetry helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def bus(self) -> EngineEventBus:
+        return self._bus
+
+    def _publish(self, topic: str, payload: Dict[str, Any]) -> None:
+        self._engine.publish(topic, payload)
+
+    def _publish_portfolio(self) -> None:
+        snapshot = self.portfolio_snapshot()
+        self._publish(
+            "engine.portfolio",
+            {"event": "snapshot", **snapshot},
+        )
+
+    def _publish_orders_snapshot(self) -> None:
+        self._publish(
+            "engine.orders",
+            {"event": "snapshot", **self.orders_snapshot()},
+        )
+
+    def _publish_risk_snapshot(self) -> None:
+        self._publish(
+            "engine.risk",
+            {"event": "snapshot", **self.risk_snapshot()},
+        )
+
+    def _publish_risk_alert(self, action: str, alert: RiskAlert) -> None:
+        self._publish(
+            "engine.risk.alerts",
+            {"event": action, "alert": self._risk_alert_to_dict(alert)},
+        )
+
+    def _schedule_background_jobs(self) -> None:
+        loop = self._bus.loop
+
+        async def metrics_pump() -> None:
+            while True:
+                await asyncio.sleep(1.0)
+                for node_id in list(self._nodes.keys()):
+                    try:
+                        self.metrics_series(node_id)
+                    except ValueError:
+                        continue
+
+        async def orders_pump() -> None:
+            while True:
+                await asyncio.sleep(1.4)
+                self.orders_stream_payload()
+
+        async def portfolio_pump() -> None:
+            while True:
+                await asyncio.sleep(1.8)
+                self.portfolio_balances_stream_payload()
+
+        async def risk_pump() -> None:
+            while True:
+                await asyncio.sleep(2.2)
+                self.risk_limit_breaches_stream_payload()
+                self.risk_circuit_breakers_stream_payload()
+                self.risk_margin_calls_stream_payload()
+
+        def spawn(coro: Coroutine[Any, Any, None]) -> None:
+            def register() -> None:
+                task = loop.create_task(coro)
+                self._background_tasks.append(task)
+
+            loop.call_soon_threadsafe(register)
+
+        spawn(metrics_pump())
+        spawn(orders_pump())
+        spawn(portfolio_pump())
+        spawn(risk_pump())
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
@@ -434,6 +531,7 @@ class NautilusService:
         )
         self._portfolio_timestamp = _utcnow_iso()
         self._capture_portfolio_sample()
+        self._publish_portfolio()
 
     def _generate_cash_movement(self) -> CashMovement:
         balance = random.choice(self._portfolio_balances)
@@ -626,6 +724,10 @@ class NautilusService:
     def _register_order(self, order: OrderRecord) -> None:
         self._orders[order.order_id] = order
         self._executions.setdefault(order.order_id, [])
+        self._publish(
+            "engine.orders",
+            {"event": "created", "order": asdict(order)},
+        )
 
     def _bootstrap_executions(self, order: OrderRecord) -> None:
         executed = max(0.0, min(order.filled_quantity, order.quantity))
@@ -671,6 +773,15 @@ class NautilusService:
         order.filled_quantity = round(min(order.quantity, filled_qty), 4)
         if filled_qty > 0:
             order.average_price = round(total_cost / filled_qty, 2)
+        for record in fills:
+            self._publish(
+                "engine.orders",
+                {"event": "execution", "execution": asdict(record)},
+            )
+        self._publish(
+            "engine.orders",
+            {"event": "order_updated", "order": asdict(order)},
+        )
 
     def _trim_orders(self, limit: int = 120) -> None:
         if len(self._orders) <= limit:
@@ -743,15 +854,31 @@ class NautilusService:
         )
         self._executions.setdefault(order.order_id, []).append(record)
         self._executions[order.order_id] = self._executions[order.order_id][-40:]
+        self._publish(
+            "engine.orders",
+            {"event": "order_updated", "order": asdict(order)},
+        )
+        self._publish(
+            "engine.orders",
+            {"event": "execution", "execution": asdict(record)},
+        )
 
     def _apply_cancel(self, order: OrderRecord) -> None:
         order.status = "cancelled"
         order.updated_at = _utcnow_iso()
+        self._publish(
+            "engine.orders",
+            {"event": "order_updated", "order": asdict(order)},
+        )
 
     def _apply_reject(self, order: OrderRecord) -> None:
         order.status = "rejected"
         order.updated_at = _utcnow_iso()
         order.venue_order_id = None
+        self._publish(
+            "engine.orders",
+            {"event": "order_updated", "order": asdict(order)},
+        )
 
     def _advance_orders_state(self) -> None:
         if not self._orders:
@@ -777,6 +904,7 @@ class NautilusService:
             self._create_random_order()
 
         self._trim_orders()
+        self._publish_orders_snapshot()
 
     def orders_snapshot(self) -> dict:
         ordered = sorted(
@@ -832,6 +960,7 @@ class NautilusService:
         )
         self._register_order(order)
         self._trim_orders()
+        self._publish_orders_snapshot()
         return {"order": asdict(order)}
 
     def cancel_order(self, order_id: str) -> dict:
@@ -841,6 +970,7 @@ class NautilusService:
         if order.status in {"filled", "cancelled", "rejected"}:
             return {"order": asdict(order)}
         self._apply_cancel(order)
+        self._publish_orders_snapshot()
         return {"order": asdict(order)}
 
     def duplicate_order(self, order_id: str) -> dict:
@@ -869,6 +999,7 @@ class NautilusService:
         )
         self._register_order(duplicate)
         self._trim_orders()
+        self._publish_orders_snapshot()
         return {"order": asdict(duplicate)}
 
     def risk_snapshot(self) -> dict:
@@ -928,7 +1059,9 @@ class NautilusService:
 
     def update_risk_limits(self, payload: Dict[str, Any]) -> dict:
         self._risk_limits = deepcopy(payload)
-        return self.risk_limits_snapshot()
+        snapshot = self.risk_limits_snapshot()
+        self._publish_risk_snapshot()
+        return snapshot
 
     def _default_risk_limits(self) -> Dict[str, Any]:
         return {
@@ -1060,6 +1193,7 @@ class NautilusService:
         alerts.append(alert)
         if len(alerts) > 50:
             alerts[:] = alerts[-50:]
+        self._publish_risk_alert("created", alert)
         return alert
 
     def _risk_alert_to_dict(self, alert: RiskAlert) -> Dict[str, Any]:
@@ -1214,6 +1348,7 @@ class NautilusService:
             alert.acknowledged = True
             alert.acknowledged_at = _utcnow_iso()
             alert.acknowledged_by = "operator"
+            self._publish_risk_alert("acknowledged", alert)
         return {"alert": self._risk_alert_to_dict(alert)}
 
     def unlock_circuit_breaker(self, alert_id: str) -> dict:
@@ -1231,6 +1366,7 @@ class NautilusService:
             alert.acknowledged = True
             alert.acknowledged_at = alert.resolved_at
             alert.acknowledged_by = "operator"
+        self._publish_risk_alert("unlocked", alert)
         return {"alert": self._risk_alert_to_dict(alert)}
 
     def escalate_margin_call(self, alert_id: str) -> dict:
@@ -1246,6 +1382,7 @@ class NautilusService:
             alert.acknowledged = True
             alert.acknowledged_at = alert.escalated_at
             alert.acknowledged_by = "operator"
+        self._publish_risk_alert("escalated", alert)
         return {"alert": self._risk_alert_to_dict(alert)}
 
     def start_backtest(
@@ -1389,6 +1526,10 @@ class NautilusService:
         self._nodes[node_id] = state
         self._record_lifecycle(node_id, "created", "Node registered")
         self._ensure_metrics_seeded(node_id)
+        self._publish(
+            "engine.nodes",
+            {"event": "created", "node": self.as_dict(handle)},
+        )
 
         if nt is None:
             handle.status = "error"
@@ -1398,6 +1539,10 @@ class NautilusService:
             handle.updated_at = _utcnow_iso()
             self._record_lifecycle(node_id, "error", handle.detail)
             self._append_log(node_id, "error", handle.detail, source="system")
+            self._publish(
+                "engine.nodes",
+                {"event": "error", "node": self.as_dict(handle)},
+            )
             return handle
 
         handle.status = "running"
@@ -1410,26 +1555,36 @@ class NautilusService:
             f"Configuration loaded: {config.get('strategy', {}).get('name', 'strategy')}",
             source="engine",
         )
+        self._publish(
+            "engine.nodes",
+            {"event": "running", "node": self.as_dict(handle)},
+        )
         return handle
 
     def _record_lifecycle(self, node_id: str, status: str, message: str) -> None:
         state = self._require_node(node_id)
-        state.lifecycle.append(
-            NodeLifecycleEvent(timestamp=_utcnow_iso(), status=status, message=message)
+        event = NodeLifecycleEvent(timestamp=_utcnow_iso(), status=status, message=message)
+        state.lifecycle.append(event)
+        self._publish(
+            f"engine.nodes.{node_id}.lifecycle",
+            {"node_id": node_id, "event": asdict(event)},
         )
 
     def _append_log(self, node_id: str, level: str, message: str, source: str) -> None:
         state = self._require_node(node_id)
-        state.logs.append(
-            NodeLogEntry(
-                id=uuid.uuid4().hex,
-                timestamp=_utcnow_iso(),
-                level=level,
-                message=message,
-                source=source,
-            )
+        entry = NodeLogEntry(
+            id=uuid.uuid4().hex,
+            timestamp=_utcnow_iso(),
+            level=level,
+            message=message,
+            source=source,
         )
+        state.logs.append(entry)
         state.handle.updated_at = _utcnow_iso()
+        self._publish(
+            f"engine.nodes.{node_id}.logs",
+            {"node_id": node_id, "log": asdict(entry)},
+        )
 
     def _ensure_metrics_seeded(self, node_id: str) -> None:
         state = self._require_node(node_id)
@@ -1495,6 +1650,19 @@ class NautilusService:
             "memory_mb": latest.memory_mb,
         }
         state.handle.updated_at = _utcnow_iso()
+        self._publish(
+            f"engine.nodes.{node_id}.metrics",
+            {
+                "node_id": node_id,
+                "metrics": {
+                    "pnl": latest.pnl,
+                    "latency_ms": latest.latency_ms,
+                    "cpu_percent": latest.cpu_percent,
+                    "memory_mb": latest.memory_mb,
+                },
+                "timestamp": latest.timestamp,
+            },
+        )
 
     def metrics_series(self, node_id: str, limit: int = 360) -> dict:
         self._advance_metrics(node_id)
@@ -1553,6 +1721,53 @@ class NautilusService:
         if state is None:
             raise ValueError(f"Node '{node_id}' not found")
         return state
+
+
+class NautilusService:
+    """Facade which delegates to the real engine or mock service."""
+
+    def __init__(self, engine: Optional[NautilusEngineService] = None) -> None:
+        self._engine = engine or build_engine_service()
+        self._mock = MockNautilusService(engine=self._engine)
+
+    def __getattr__(self, item: str):  # pragma: no cover - delegation helper
+        return getattr(self._mock, item)
+
+    @property
+    def engine(self) -> NautilusEngineService:
+        return self._engine
+
+    def topic_stream(self, topic: str):
+        async def generator():
+            async with self._engine.bus.subscribe(topic) as subscription:
+                async for payload in subscription:
+                    yield payload
+
+        return generator()
+
+    def node_stream(self):
+        return self.topic_stream("engine.nodes")
+
+    def node_log_stream(self, node_id: str):
+        return self.topic_stream(f"engine.nodes.{node_id}.logs")
+
+    def node_lifecycle_stream(self, node_id: str):
+        return self.topic_stream(f"engine.nodes.{node_id}.lifecycle")
+
+    def node_metrics_stream(self, node_id: str):
+        return self.topic_stream(f"engine.nodes.{node_id}.metrics")
+
+    def orders_stream(self):
+        return self.topic_stream("engine.orders")
+
+    def portfolio_stream(self):
+        return self.topic_stream("engine.portfolio")
+
+    def risk_stream(self):
+        return self.topic_stream("engine.risk")
+
+    def risk_alert_stream(self):
+        return self.topic_stream("engine.risk.alerts")
 
 
 svc = NautilusService()

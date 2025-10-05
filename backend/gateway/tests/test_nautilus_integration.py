@@ -1,0 +1,62 @@
+import asyncio
+
+import pytest
+
+from ..app.nautilus_engine_service import EngineEventBus, build_engine_service
+from ..app.nautilus_service import NautilusService
+
+
+@pytest.mark.asyncio
+async def test_node_stream_emits_after_launch():
+    loop = asyncio.get_event_loop()
+    bus = EngineEventBus(loop=loop)
+    engine = build_engine_service(bus=bus)
+    service = NautilusService(engine=engine)
+
+    node_stream = service.node_stream()
+    task = asyncio.create_task(node_stream.__anext__())
+    await asyncio.sleep(0)
+
+    node = service.start_backtest(detail="integration-test")
+
+    event = await asyncio.wait_for(task, timeout=1.0)
+    assert event["node"]["id"] == node.id
+    assert event["event"] in {"created", "running"}
+
+    await node_stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_orders_stream_tracks_new_order():
+    loop = asyncio.get_event_loop()
+    bus = EngineEventBus(loop=loop)
+    engine = build_engine_service(bus=bus)
+    service = NautilusService(engine=engine)
+
+    order_stream = service.orders_stream()
+
+    async def wait_for(predicate):
+        while True:
+            payload = await order_stream.__anext__()
+            if predicate(payload):
+                return payload
+
+    waiter = asyncio.create_task(wait_for(lambda payload: payload.get("event") == "created"))
+    await asyncio.sleep(0)
+
+    service.create_order(
+        {
+            "symbol": "BTCUSDT",
+            "venue": "BINANCE",
+            "side": "buy",
+            "type": "limit",
+            "quantity": 0.25,
+            "price": 28000.0,
+        }
+    )
+
+    payload = await asyncio.wait_for(waiter, timeout=1.0)
+    assert payload["order"]["symbol"] == "BTCUSDT"
+    assert payload["order"]["venue"] == "BINANCE"
+
+    await order_stream.aclose()
