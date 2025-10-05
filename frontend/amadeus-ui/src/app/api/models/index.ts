@@ -7,3 +7,4 @@ export * from './risk.model';
 export * from './key.model';
 export * from './backtest.model';
 export * from './watchlist.model';
+export * from './market-data.model';

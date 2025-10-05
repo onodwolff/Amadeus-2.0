@@ -1,0 +1,81 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.price-chart {
+  position: relative;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.6) 0%, rgba(241, 245, 249, 0.9) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.price-chart__canvas {
+  width: 100%;
+  height: 360px;
+}
+
+.price-chart__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  color: #1f2937;
+  text-align: center;
+  padding: 1rem;
+}
+
+.price-chart__overlay--error {
+  color: #d9534f;
+  background: rgba(255, 245, 245, 0.9);
+}
+
+.price-chart__overlay--empty {
+  color: #475569;
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.price-chart__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8125rem;
+  color: #64748b;
+  gap: 0.75rem;
+}
+
+.price-chart__connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.price-chart__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d1d5db;
+  box-shadow: 0 0 0 3px rgba(209, 213, 219, 0.4);
+  transition: background 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.price-chart__dot--connected {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+}
+
+.price-chart__dot--connecting {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3);
+}
+
+@media (max-width: 768px) {
+  .price-chart__canvas {
+    height: 300px;
+  }
+}
