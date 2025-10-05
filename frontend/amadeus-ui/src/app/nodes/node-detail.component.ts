@@ -14,11 +14,12 @@ import {
   NodeLogEntry,
 } from '../api/models';
 import { WsConnectionState } from '../ws.service';
+import { NodeMetricsPanelComponent } from './components/node-metrics/node-metrics-panel.component';
 
 @Component({
   selector: 'app-node-detail',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, NodeMetricsPanelComponent],
   templateUrl: './node-detail.component.html',
   styleUrls: ['./node-detail.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

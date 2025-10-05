@@ -1,0 +1,57 @@
+<section class="node-metrics" *ngIf="nodeId as currentId">
+  <header class="node-metrics__header">
+    <div>
+      <h3>Runtime metrics · {{ currentId }}</h3>
+      <p class="node-metrics__state">Stream status: {{ streamState() }}</p>
+    </div>
+    <div class="node-metrics__periods">
+      <button
+        type="button"
+        *ngFor="let option of periodOptions"
+        class="node-metrics__period-btn"
+        [class.node-metrics__period-btn--active]="period() === option.value"
+        (click)="onSelectPeriod(option.value)"
+      >
+        {{ option.label }}
+      </button>
+    </div>
+  </header>
+
+  <div class="node-metrics__carousel">
+    <article class="node-metrics__card" *ngFor="let card of cards(); trackBy: trackCard">
+      <header>
+        <span class="node-metrics__card-label">{{ card.label }}</span>
+        <span
+          class="node-metrics__card-change"
+          [class.node-metrics__card-change--positive]="card.positive === true"
+          [class.node-metrics__card-change--negative]="card.positive === false"
+        >
+          {{ card.changeLabel }}
+        </span>
+      </header>
+      <p class="node-metrics__card-value">{{ card.value }}</p>
+    </article>
+  </div>
+
+  <div class="node-metrics__chart" *ngIf="hasSeries(); else metricsPlaceholder">
+    <app-metrics-chart [series]="chartSeries()"></app-metrics-chart>
+  </div>
+
+  <footer class="node-metrics__toggles">
+    <button
+      type="button"
+      *ngFor="let metric of metricDefinitions"
+      class="node-metrics__toggle"
+      [style.--metric-color]="metric.color"
+      [class.node-metrics__toggle--active]="metricSelected(metric.key)"
+      (click)="onToggleMetric(metric.key)"
+    >
+      <span class="node-metrics__toggle-indicator"></span>
+      {{ metric.shortLabel }}
+    </button>
+  </footer>
+</section>
+
+<ng-template #metricsPlaceholder>
+  <div class="node-metrics__placeholder">Waiting for metric samples…</div>
+</ng-template>

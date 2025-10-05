@@ -1,9 +1,31 @@
 export type NodeMode = 'backtest' | 'live' | string;
 export type NodeStatus = 'created' | 'running' | 'stopped' | 'error' | string;
 
+export type NodeMetricKey = 'pnl' | 'latency_ms' | 'cpu_percent' | 'memory_mb';
+
 export interface NodeMetrics {
   pnl?: number;
   latency_ms?: number;
+  cpu_percent?: number;
+  memory_mb?: number;
+}
+
+export interface NodeMetricPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface NodeMetricsSnapshot {
+  timestamp: string;
+  pnl: number;
+  latency_ms: number;
+  cpu_percent: number;
+  memory_mb: number;
+}
+
+export interface NodeMetricsStreamMessage {
+  series: Partial<Record<NodeMetricKey, NodeMetricPoint[]>>;
+  latest?: NodeMetricsSnapshot | null;
 }
 
 export interface NodeHandle {

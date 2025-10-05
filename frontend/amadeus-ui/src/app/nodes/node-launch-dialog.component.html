@@ -33,11 +33,11 @@
       <section *ngIf="currentStep() === 1" class="launch-dialog__section" formGroupName="strategy" aria-label="Strategy configuration">
         <label class="field">
           <span class="field__label">Strategy template</span>
-          <select class="field__control" formControlName="id" (change)="selectStrategy($event.target.value)">
+          <select class="field__control" formControlName="id" (change)="onTemplateChange($event)">
             <option *ngFor="let option of strategyTemplates" [value]="option.id">{{ option.name }}</option>
           </select>
           <span class="field__hint">
-            {{ strategyTemplates.find((item) => item.id === form.controls.strategy.controls.id.value)?.description || 'Select a template' }}
+            {{ selectedStrategyDescription() }}
           </span>
         </label>
 
