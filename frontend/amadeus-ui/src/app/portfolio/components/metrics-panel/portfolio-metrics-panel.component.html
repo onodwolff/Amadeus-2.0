@@ -1,0 +1,97 @@
+<section class="metrics-panel" aria-labelledby="portfolio-metrics-heading">
+  <header class="metrics-panel__header">
+    <div>
+      <h2 id="portfolio-metrics-heading">Performance analytics</h2>
+      <p class="metrics-panel__subtitle">
+        Historical metrics combined with live position snapshots.
+      </p>
+    </div>
+    <label class="metrics-panel__period">
+      Period
+      <select [ngModel]="store.selectedPeriod()" (ngModelChange)="onPeriodChange($event)">
+        <option *ngFor="let option of store.periodOptions" [value]="option.value">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
+  </header>
+
+  <p class="metrics-panel__status" *ngIf="store.isLoading()">Loading historical metrics…</p>
+  <p class="metrics-panel__error" *ngIf="!store.isLoading() && store.error()">
+    {{ store.error() }}
+  </p>
+
+  <div class="metrics-panel__charts" *ngIf="!store.isLoading()">
+    <article class="metrics-panel__chart">
+      <header class="metrics-panel__chart-header">
+        <div>
+          <h3>Daily PnL</h3>
+          <p>Day-over-day change in total equity.</p>
+        </div>
+        <div class="metrics-panel__actions">
+          <button type="button" (click)="exportDailyCsv()" [disabled]="!hasDailyPnl()">Export CSV</button>
+          <button type="button" (click)="exportDailyPng()" [disabled]="!hasDailyPnl()">Export PNG</button>
+        </div>
+      </header>
+      <div class="metrics-panel__chart-body">
+        <app-time-series-chart
+          *ngIf="hasDailyPnl(); else dailyEmpty"
+          #dailyChart
+          [series]="store.dailyPnlSeries()"
+          [valueFormatter]="currencyFormatter"
+        ></app-time-series-chart>
+        <ng-template #dailyEmpty>
+          <p class="metrics-panel__placeholder">No PnL data for the selected period.</p>
+        </ng-template>
+      </div>
+    </article>
+
+    <article class="metrics-panel__chart">
+      <header class="metrics-panel__chart-header">
+        <div>
+          <h3>Realized vs unrealized PnL</h3>
+          <p>Closing values aggregated by trading day.</p>
+        </div>
+        <div class="metrics-panel__actions">
+          <button type="button" (click)="exportRealizedCsv()" [disabled]="!hasRealized()">Export CSV</button>
+          <button type="button" (click)="exportRealizedPng()" [disabled]="!hasRealized()">Export PNG</button>
+        </div>
+      </header>
+      <div class="metrics-panel__chart-body">
+        <app-time-series-chart
+          *ngIf="hasRealized(); else realizedEmpty"
+          #realizedChart
+          [series]="store.realizedUnrealizedSeries()"
+          [valueFormatter]="currencyFormatter"
+        ></app-time-series-chart>
+        <ng-template #realizedEmpty>
+          <p class="metrics-panel__placeholder">No realized or unrealized data for the selected period.</p>
+        </ng-template>
+      </div>
+    </article>
+
+    <article class="metrics-panel__chart">
+      <header class="metrics-panel__chart-header">
+        <div>
+          <h3>Exposure by asset class</h3>
+          <p>Net mark-to-market notional grouped by inferred asset class.</p>
+        </div>
+        <div class="metrics-panel__actions">
+          <button type="button" (click)="exportExposureCsv()" [disabled]="!hasExposure()">Export CSV</button>
+          <button type="button" (click)="exportExposurePng()" [disabled]="!hasExposure()">Export PNG</button>
+        </div>
+      </header>
+      <div class="metrics-panel__chart-body">
+        <app-time-series-chart
+          *ngIf="hasExposure(); else exposureEmpty"
+          #exposureChart
+          [series]="store.exposureSeries()"
+          [valueFormatter]="currencyFormatter"
+        ></app-time-series-chart>
+        <ng-template #exposureEmpty>
+          <p class="metrics-panel__placeholder">No exposure data for the selected period.</p>
+        </ng-template>
+      </div>
+    </article>
+  </div>
+</section>

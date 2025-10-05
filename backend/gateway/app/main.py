@@ -180,6 +180,11 @@ def get_portfolio():
     return svc.portfolio_snapshot()
 
 
+@app.get("/portfolio/history")
+def get_portfolio_history(limit: int = 720):
+    return svc.portfolio_history(limit=limit)
+
+
 @app.websocket("/ws/nodes")
 async def ws_nodes(ws: WebSocket):
     await ws.accept()

@@ -19,6 +19,8 @@ import {
   observePortfolioMovements,
   observePortfolioPositions,
 } from '../ws';
+import { PortfolioMetricsPanelComponent } from './components/metrics-panel/portfolio-metrics-panel.component';
+import { PortfolioMetricsStore } from './components/metrics-panel/portfolio-metrics.store';
 
 interface FilterableEntity {
   venue?: string | null;
@@ -29,13 +31,15 @@ interface FilterableEntity {
 @Component({
   standalone: true,
   selector: 'app-portfolio-page',
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, PortfolioMetricsPanelComponent],
   templateUrl: './portfolio.page.html',
   styleUrls: ['./portfolio.page.scss'],
+  providers: [PortfolioMetricsStore],
 })
 export class PortfolioPage implements OnInit {
   private readonly portfolioApi = inject(PortfolioApi);
   private readonly ws = inject(WsService);
+  private readonly metricsStore = inject(PortfolioMetricsStore);
 
   readonly isLoading = signal(true);
   readonly errorText = signal<string | null>(null);
@@ -122,6 +126,11 @@ export class PortfolioPage implements OnInit {
         this.balances.set(portfolio.balances ?? []);
         this.positions.set(portfolio.positions ?? []);
         this.movements.set(portfolio.cash_movements ?? []);
+        this.metricsStore.ingestPositions(
+          portfolio.positions ?? [],
+          portfolio.timestamp,
+          portfolio.equity_value,
+        );
         this.isLoading.set(false);
       },
       error: (err) => {
@@ -153,6 +162,17 @@ export class PortfolioPage implements OnInit {
       next: (payload: PortfolioPositionsStreamMessage) => {
         if (Array.isArray(payload?.positions)) {
           this.positions.set(payload.positions);
+          this.metricsStore.ingestPositions(
+            payload.positions,
+            payload.timestamp,
+            payload.equity_value,
+          );
+        } else if (payload) {
+          this.metricsStore.ingestPositions(
+            this.positions(),
+            payload.timestamp,
+            payload.equity_value,
+          );
         }
         this.patchSummary(payload);
       },

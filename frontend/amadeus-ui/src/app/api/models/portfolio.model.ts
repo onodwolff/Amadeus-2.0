@@ -71,3 +71,15 @@ export interface PortfolioMovementsStreamMessage {
   margin_value?: number;
   timestamp: string;
 }
+
+export interface PortfolioHistoryPoint {
+  timestamp: string;
+  equity: number;
+  realized: number;
+  unrealized: number;
+  exposures: Record<string, number>;
+}
+
+export interface PortfolioHistoryResponse {
+  history: PortfolioHistoryPoint[];
+}
