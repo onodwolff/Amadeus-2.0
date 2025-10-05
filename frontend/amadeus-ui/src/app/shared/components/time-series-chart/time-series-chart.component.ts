@@ -174,4 +174,18 @@ export class TimeSeriesChartComponent implements AfterViewInit, OnChanges, OnDes
         value: point.value,
       }));
   }
+
+  captureScreenshot(): string | null {
+    if (!this.chart) {
+      return null;
+    }
+    const screenshot = (this.chart as any).takeScreenshot?.();
+    if (screenshot instanceof HTMLCanvasElement) {
+      return screenshot.toDataURL('image/png');
+    }
+    if (screenshot && typeof screenshot.toDataURL === 'function') {
+      return screenshot.toDataURL('image/png');
+    }
+    return null;
+  }
 }

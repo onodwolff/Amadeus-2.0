@@ -13,6 +13,10 @@ def _utcnow_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
+def _isoformat(dt: datetime) -> str:
+    return dt.replace(microsecond=0).isoformat() + "Z"
+
+
 def _import_nautilus():
     try:
         import nautilus_trader as nt  # установлен в текущем venv
@@ -132,6 +136,7 @@ class NautilusService:
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
+        self._portfolio_history: List[Dict[str, Any]] = []
         self._portfolio_balances: List[PortfolioBalance] = [
             PortfolioBalance(
                 account_id="ACC-USD-PRIMARY",
@@ -256,6 +261,92 @@ class NautilusService:
         self._portfolio_margin = 0.0
         self._portfolio_timestamp = now
         self._recompute_portfolio_totals()
+        self._backfill_portfolio_history()
+
+    def _infer_asset_class(self, symbol: str) -> str:
+        symbol = symbol.upper()
+        crypto_tokens = [
+            "BTC",
+            "ETH",
+            "SOL",
+            "ADA",
+            "XRP",
+            "DOT",
+            "DOGE",
+            "AVAX",
+            "MATIC",
+            "USDT",
+            "USDC",
+        ]
+        equity_tokens = ["AAPL", "TSLA", "MSFT", "AMZN", "GOOG", "META", "NVDA"]
+        fx_pairs = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF"]
+        if any(token in symbol for token in crypto_tokens):
+            return "Crypto"
+        if any(symbol.startswith(code) or symbol.endswith(code) for code in fx_pairs):
+            return "FX"
+        if any(token in symbol for token in equity_tokens):
+            return "Equities"
+        if "FUT" in symbol or "PERP" in symbol:
+            return "Futures"
+        return "Other"
+
+    def _calculate_exposure_breakdown(self) -> Dict[str, float]:
+        breakdown: Dict[str, float] = {}
+        for position in self._portfolio_positions:
+            mark = position.mark_price or position.average_price or 0.0
+            quantity = position.quantity or 0.0
+            exposure = quantity * mark
+            asset_class = self._infer_asset_class(position.symbol)
+            breakdown[asset_class] = round(breakdown.get(asset_class, 0.0) + exposure, 2)
+        return breakdown
+
+    def _capture_portfolio_sample(self) -> None:
+        sample = {
+            "timestamp": self._portfolio_timestamp,
+            "equity": round(self._portfolio_equity, 2),
+            "realized": round(
+                sum(position.realized_pnl for position in self._portfolio_positions), 2
+            ),
+            "unrealized": round(
+                sum(position.unrealized_pnl for position in self._portfolio_positions), 2
+            ),
+            "exposures": self._calculate_exposure_breakdown(),
+        }
+        self._portfolio_history.append(sample)
+        if len(self._portfolio_history) > 1440:
+            self._portfolio_history = self._portfolio_history[-1440:]
+
+    def _backfill_portfolio_history(self, days: int = 90) -> None:
+        if not self._portfolio_history:
+            return
+        latest = self._portfolio_history[-1]
+        now = datetime.utcnow().replace(hour=21, minute=0, second=0, microsecond=0)
+        equity = latest["equity"]
+        realized = latest["realized"]
+        unrealized = latest["unrealized"]
+        exposures = dict(latest.get("exposures", {})) or {"Crypto": equity * 0.6}
+        history: List[Dict[str, Any]] = []
+        for offset in range(days, 0, -1):
+            timestamp = now - timedelta(days=offset)
+            drift_scale = max(900.0, equity * 0.0012)
+            daily_shift = random.gauss(0, drift_scale)
+            equity = max(50_000.0, equity - daily_shift)
+            realized = realized - daily_shift * random.uniform(0.3, 0.55)
+            unrealized = unrealized - daily_shift * random.uniform(0.25, 0.5)
+            exposures = {
+                key: round(value * (1 + random.gauss(0, 0.02)), 2)
+                for key, value in exposures.items()
+            }
+            history.append(
+                {
+                    "timestamp": _isoformat(timestamp),
+                    "equity": round(equity, 2),
+                    "realized": round(realized, 2),
+                    "unrealized": round(unrealized, 2),
+                    "exposures": dict(exposures),
+                }
+            )
+        self._portfolio_history = history + self._portfolio_history
 
     def core_info(self) -> dict:
         return {"nautilus_version": NT_VERSION, "available": nt is not None}
@@ -268,6 +359,7 @@ class NautilusService:
             sum(position.margin_used for position in self._portfolio_positions), 2
         )
         self._portfolio_timestamp = _utcnow_iso()
+        self._capture_portfolio_sample()
 
     def _generate_cash_movement(self) -> CashMovement:
         balance = random.choice(self._portfolio_balances)
@@ -375,6 +467,10 @@ class NautilusService:
             "margin_value": self._portfolio_margin,
             "timestamp": self._portfolio_timestamp,
         }
+
+    def portfolio_history(self, limit: int = 720) -> dict:
+        history = self._portfolio_history[-limit:]
+        return {"history": history}
 
     def start_backtest(
         self,
