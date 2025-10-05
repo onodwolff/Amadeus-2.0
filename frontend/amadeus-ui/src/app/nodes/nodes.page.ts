@@ -25,6 +25,7 @@ export interface NodeHandle {
 })
 export class NodesPage implements OnInit, OnDestroy {
   readonly nodes = signal<NodeHandle[]>([]);
+  readonly isLoading = signal(false);
   readonly wsState = signal<'connecting' | 'connected' | 'disconnected'>('connecting');
   readonly errorText = signal<string | null>(null);
   readonly coreInfo = signal<any>(null);
@@ -112,17 +113,20 @@ export class NodesPage implements OnInit, OnDestroy {
   }
 
   private fetchNodes(): void {
+    this.isLoading.set(true);
     this.api.nodes().subscribe({
       next: (response: any) => {
         const list = Array.isArray(response) ? response : response?.nodes;
         if (Array.isArray(list)) {
           this.nodes.set(list);
         }
+        this.isLoading.set(false);
       },
       error: (err) => {
         console.error(err);
         this.wsState.set('disconnected');
         this.errorText.set('Unable to load nodes list.');
+        this.isLoading.set(false);
       },
     });
   }

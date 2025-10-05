@@ -31,36 +31,45 @@
 
   <p class="nodes-page__error" *ngIf="errorText() as error">{{ error }}</p>
 
-  <div class="nodes-table" *ngIf="hasNodes(); else emptyState">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Mode</th>
-          <th>Status</th>
-          <th>Detail</th>
-          <th>PnL</th>
-          <th>Latency</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let node of nodes()">
-          <td data-label="ID"><code>{{ node.id }}</code></td>
-          <td data-label="Mode"><span class="tag">{{ node.mode }}</span></td>
-          <td data-label="Status">
-            <span class="status" [class.status--running]="node.status === 'running'" [class.status--stopped]="node.status !== 'running'">{{ node.status }}</span>
-          </td>
-          <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
-          <td data-label="PnL">{{ node.metrics?.pnl ?? '—' }}</td>
-          <td data-label="Latency">{{ node.metrics?.latency_ms ? node.metrics?.latency_ms + ' ms' : '—' }}</td>
-          <td data-label="Actions" class="actions">
-            <button type="button" class="btn btn--ghost" (click)="stop(node)" [disabled]="node.status !== 'running'">Stop</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+  <ng-container *ngIf="isLoading(); else nodesContent">
+    <div class="nodes-page__loading" role="status" aria-live="polite">
+      <span class="nodes-page__spinner" aria-hidden="true"></span>
+      <span>Loading nodes…</span>
+    </div>
+  </ng-container>
+
+  <ng-template #nodesContent>
+    <div class="nodes-table" *ngIf="hasNodes(); else emptyState">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Mode</th>
+            <th>Status</th>
+            <th>Detail</th>
+            <th>PnL</th>
+            <th>Latency</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let node of nodes()">
+            <td data-label="ID"><code>{{ node.id }}</code></td>
+            <td data-label="Mode"><span class="tag">{{ node.mode }}</span></td>
+            <td data-label="Status">
+              <span class="status" [class.status--running]="node.status === 'running'" [class.status--stopped]="node.status !== 'running'">{{ node.status }}</span>
+            </td>
+            <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
+            <td data-label="PnL">{{ node.metrics?.pnl ?? '—' }}</td>
+            <td data-label="Latency">{{ node.metrics?.latency_ms ? node.metrics?.latency_ms + ' ms' : '—' }}</td>
+            <td data-label="Actions" class="actions">
+              <button type="button" class="btn btn--ghost" (click)="stop(node)" [disabled]="node.status !== 'running'">Stop</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-template>
 
   <ng-template #emptyState>
     <div class="empty-state">
