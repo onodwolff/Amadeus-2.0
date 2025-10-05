@@ -310,13 +310,11 @@ def duplicate_order(order_id: str):
 @app.websocket("/ws/nodes")
 async def ws_nodes(ws: WebSocket):
     await ws.accept()
+    baseline = [svc.as_dict(n) for n in svc.list_nodes()]
+    await ws.send_text(json.dumps({"event": "snapshot", "nodes": baseline}))
     try:
-        while True:
-            nodes = [svc.as_dict(n) for n in svc.list_nodes()]
-            for node in nodes:
-                node["metrics"] = svc.metrics_snapshot(node["id"])
-            await ws.send_text(json.dumps({"nodes": nodes}))
-            await asyncio.sleep(1.0)
+        async for payload in svc.node_stream():
+            await ws.send_text(json.dumps(payload))
     except WebSocketDisconnect:
         return
 
@@ -325,13 +323,15 @@ async def ws_nodes(ws: WebSocket):
 async def ws_node_logs(node_id: str, ws: WebSocket):
     await ws.accept()
     try:
-        while True:
-            snapshot = svc.stream_snapshot(node_id)
-            await ws.send_text(json.dumps(snapshot))
-            await asyncio.sleep(1.2)
+        await ws.send_text(json.dumps(svc.stream_snapshot(node_id)))
     except ValueError:
         await ws.send_text(json.dumps({"logs": [], "lifecycle": []}))
         await ws.close(code=1008)
+        return
+
+    try:
+        async for payload in svc.node_log_stream(node_id):
+            await ws.send_text(json.dumps(payload))
     except WebSocketDisconnect:
         return
 
@@ -340,13 +340,15 @@ async def ws_node_logs(node_id: str, ws: WebSocket):
 async def ws_node_metrics(node_id: str, ws: WebSocket):
     await ws.accept()
     try:
-        while True:
-            payload = svc.metrics_series(node_id)
-            await ws.send_text(json.dumps(payload))
-            await asyncio.sleep(1.0)
+        await ws.send_text(json.dumps(svc.metrics_series(node_id)))
     except ValueError:
         await ws.send_text(json.dumps({"series": {}, "latest": None}))
         await ws.close(code=1008)
+        return
+
+    try:
+        async for payload in svc.node_metrics_stream(node_id):
+            await ws.send_text(json.dumps(payload))
     except WebSocketDisconnect:
         return
 
@@ -354,11 +356,11 @@ async def ws_node_metrics(node_id: str, ws: WebSocket):
 @app.websocket("/ws/risk/limit-breaches")
 async def ws_risk_limit_breaches(ws: WebSocket):
     await ws.accept()
+    await ws.send_text(json.dumps(svc.risk_limit_breaches_stream_payload()))
     try:
-        while True:
-            payload = svc.risk_limit_breaches_stream_payload()
-            await ws.send_text(json.dumps(payload))
-            await asyncio.sleep(1.0)
+        async for payload in svc.risk_alert_stream():
+            if payload.get("alert", {}).get("category") == "limit_breach":
+                await ws.send_text(json.dumps(payload))
     except WebSocketDisconnect:
         return
 
@@ -366,11 +368,11 @@ async def ws_risk_limit_breaches(ws: WebSocket):
 @app.websocket("/ws/risk/circuit-breakers")
 async def ws_risk_circuit_breakers(ws: WebSocket):
     await ws.accept()
+    await ws.send_text(json.dumps(svc.risk_circuit_breakers_stream_payload()))
     try:
-        while True:
-            payload = svc.risk_circuit_breakers_stream_payload()
-            await ws.send_text(json.dumps(payload))
-            await asyncio.sleep(1.1)
+        async for payload in svc.risk_alert_stream():
+            if payload.get("alert", {}).get("category") == "circuit_breaker":
+                await ws.send_text(json.dumps(payload))
     except WebSocketDisconnect:
         return
 
@@ -378,11 +380,11 @@ async def ws_risk_circuit_breakers(ws: WebSocket):
 @app.websocket("/ws/risk/margin-calls")
 async def ws_risk_margin_calls(ws: WebSocket):
     await ws.accept()
+    await ws.send_text(json.dumps(svc.risk_margin_calls_stream_payload()))
     try:
-        while True:
-            payload = svc.risk_margin_calls_stream_payload()
-            await ws.send_text(json.dumps(payload))
-            await asyncio.sleep(1.2)
+        async for payload in svc.risk_alert_stream():
+            if payload.get("alert", {}).get("category") == "margin_call":
+                await ws.send_text(json.dumps(payload))
     except WebSocketDisconnect:
         return
 
@@ -390,11 +392,10 @@ async def ws_risk_margin_calls(ws: WebSocket):
 @app.websocket("/ws/portfolio/balances")
 async def ws_portfolio_balances(ws: WebSocket):
     await ws.accept()
+    await ws.send_text(json.dumps(svc.portfolio_balances_stream_payload()))
     try:
-        while True:
-            payload = svc.portfolio_balances_stream_payload()
+        async for payload in svc.portfolio_stream():
             await ws.send_text(json.dumps(payload))
-            await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         return
 
