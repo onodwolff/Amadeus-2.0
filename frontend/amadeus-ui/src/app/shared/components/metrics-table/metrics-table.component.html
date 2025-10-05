@@ -1,0 +1,15 @@
+<ng-container *ngIf="rows.length > 0; else emptyState">
+  <table class="metrics-table">
+    <tbody>
+      <tr *ngFor="let row of rows">
+        <th scope="row">{{ row.label }}</th>
+        <td>{{ row.value }}</td>
+        <td class="metrics-table__hint" *ngIf="row.hint">{{ row.hint }}</td>
+      </tr>
+    </tbody>
+  </table>
+</ng-container>
+
+<ng-template #emptyState>
+  <p class="metrics-table__empty">No data available yet.</p>
+</ng-template>

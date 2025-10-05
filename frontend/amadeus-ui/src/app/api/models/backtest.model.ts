@@ -39,6 +39,29 @@ export interface BacktestRunCreateRequest {
   engine: BacktestEngineParametersDto;
 }
 
+export interface BacktestMetricPointDto {
+  timestamp: string;
+  value: number;
+}
+
+export interface BacktestTradeStatDto {
+  label: string;
+  value: string | number;
+  hint?: string;
+}
+
+export interface BacktestRunMetricsDto {
+  equityCurve: BacktestMetricPointDto[];
+  drawdownCurve: BacktestMetricPointDto[];
+  tradeStats: BacktestTradeStatDto[];
+}
+
+export interface BacktestRunSummaryMetricDto {
+  label: string;
+  value: string | number;
+  hint?: string;
+}
+
 export interface BacktestRunSummaryDto {
   id: string;
   name: string;
@@ -48,4 +71,34 @@ export interface BacktestRunSummaryDto {
 
 export interface BacktestRunResponse {
   run: BacktestRunSummaryDto;
+}
+
+export interface BacktestRunDetailDto {
+  id: string;
+  name: string;
+  status: string;
+  createdAt: string;
+  updatedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  archivedAt?: string | null;
+  progress?: number | null;
+  progressStage?: string | null;
+  metrics?: BacktestRunMetricsDto | null;
+  summary?: BacktestRunSummaryMetricDto[] | null;
+  strategy?: BacktestStrategyConfigDto | null;
+  dataset?: BacktestDatasetDto | null;
+  engine?: BacktestEngineParametersDto | null;
+}
+
+export interface BacktestRunDetailResponse {
+  run: BacktestRunDetailDto;
+}
+
+export interface BacktestRunProgressMessage {
+  status?: string;
+  progress?: number;
+  stage?: string;
+  metrics?: Partial<BacktestRunMetricsDto> | null;
+  summary?: BacktestRunSummaryMetricDto[] | null;
 }

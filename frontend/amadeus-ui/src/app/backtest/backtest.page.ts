@@ -240,7 +240,7 @@ export class BacktestPage {
         next: response => {
           const runId = response.run?.id;
           if (runId) {
-            this.router.navigate(['/backtest', 'runs', runId]).catch(() => undefined);
+            this.router.navigate(['/backtest', runId]).catch(() => undefined);
           } else {
             this.submissionError.set('Backtest run created but response did not include an identifier.');
           }

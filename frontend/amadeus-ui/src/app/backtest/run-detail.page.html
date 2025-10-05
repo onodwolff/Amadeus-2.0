@@ -1,0 +1,100 @@
+<section class="run-detail" *ngIf="run() as current; else loadingState">
+  <header class="run-detail__header">
+    <div>
+      <nav class="run-detail__breadcrumbs" aria-label="Breadcrumb">
+        <a routerLink="/backtest">Backtests</a>
+        <span aria-hidden="true">/</span>
+        <span>{{ current.name || current.id }}</span>
+      </nav>
+      <h1>{{ current.name || 'Backtest run' }}</h1>
+      <p class="run-detail__subtitle">Inspect performance outputs and live progress for this run.</p>
+    </div>
+    <div class="run-detail__meta">
+      <span class="run-detail__status" [class.run-detail__status--completed]="current.status === 'completed'">
+        {{ current.status }}
+      </span>
+      <span *ngIf="current.createdAt">• started {{ current.createdAt | date: 'medium' }}</span>
+      <span *ngIf="current.completedAt">• completed {{ current.completedAt | date: 'medium' }}</span>
+      <span *ngIf="current.archivedAt">• archived {{ current.archivedAt | date: 'medium' }}</span>
+    </div>
+  </header>
+
+  <section class="run-detail__progress" *ngIf="progress() as state">
+    <div>
+      <span class="run-detail__progress-label">Progress</span>
+      <span class="run-detail__progress-value" *ngIf="progressPercentDisplay() as pct">{{ pct | number: '1.0-1' }}%</span>
+      <span class="run-detail__progress-value" *ngIf="!progressPercentDisplay()">—</span>
+    </div>
+    <div class="run-detail__progress-stage" *ngIf="state.stage">{{ state.stage }}</div>
+    <div class="run-detail__progress-status">
+      <span>WebSocket: {{ wsState() }}</span>
+      <span *ngIf="state.status">• {{ state.status }}</span>
+    </div>
+  </section>
+
+  <p class="run-detail__error" *ngIf="error() as err">{{ err }}</p>
+  <p class="run-detail__message" *ngIf="actionMessage() as message">{{ message }}</p>
+
+  <div class="run-detail__actions">
+    <button type="button" class="btn" (click)="refresh()" [disabled]="isLoading()">Refresh metadata</button>
+    <button
+      type="button"
+      class="btn"
+      (click)="downloadReport()"
+      [disabled]="!canDownload() || isDownloadingReport()"
+    >
+      {{ isDownloadingReport() ? 'Preparing report…' : 'Download report' }}
+    </button>
+    <button
+      type="button"
+      class="btn"
+      (click)="exportTrades()"
+      [disabled]="!canDownload() || isExportingTrades()"
+    >
+      {{ isExportingTrades() ? 'Generating CSV…' : 'Export trades' }}
+    </button>
+    <button
+      type="button"
+      class="btn btn--primary"
+      (click)="archiveRun()"
+      [disabled]="!canArchive() || isArchiving()"
+    >
+      {{ isArchiving() ? 'Archiving…' : 'Archive run' }}
+    </button>
+  </div>
+
+  <section class="run-detail__summary" *ngIf="summary().length > 0">
+    <h2>Performance summary</h2>
+    <ul>
+      <li *ngFor="let metric of summary()">
+        <span class="run-detail__summary-label">{{ metric.label }}</span>
+        <span class="run-detail__summary-value">{{ metric.value }}</span>
+        <span class="run-detail__summary-hint" *ngIf="metric.hint">{{ metric.hint }}</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="run-detail__charts" *ngIf="hasMetrics()">
+    <div class="run-detail__chart">
+      <h2>Equity curve</h2>
+      <app-time-series-chart [series]="equitySeries()"></app-time-series-chart>
+    </div>
+    <div class="run-detail__chart">
+      <h2>Drawdown</h2>
+      <app-time-series-chart [series]="drawdownSeries()" [valueFormatter]="drawdownFormatter">
+      </app-time-series-chart>
+    </div>
+  </section>
+
+  <section class="run-detail__trades">
+    <h2>Trade statistics</h2>
+    <app-metrics-table [rows]="tradeStats()"></app-metrics-table>
+  </section>
+</section>
+
+<ng-template #loadingState>
+  <div class="run-detail__loading">
+    <span class="run-detail__spinner" aria-hidden="true"></span>
+    <span>Loading backtest run…</span>
+  </div>
+</ng-template>
