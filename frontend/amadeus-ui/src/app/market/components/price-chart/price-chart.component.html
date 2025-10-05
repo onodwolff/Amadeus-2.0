@@ -1,0 +1,25 @@
+<div class="price-chart">
+  <div #chartContainer class="price-chart__canvas"></div>
+
+  <div class="price-chart__overlay" *ngIf="isLoading()">Loading price history…</div>
+  <div class="price-chart__overlay price-chart__overlay--error" *ngIf="!isLoading() && error()">
+    {{ error() }}
+  </div>
+  <div
+    class="price-chart__overlay price-chart__overlay--empty"
+    *ngIf="!isLoading() && !error() && !hasData()"
+  >
+    No price data available for the selected timeframe.
+  </div>
+</div>
+<div class="price-chart__footer">
+  <span *ngIf="lastUpdated() as updated">Last updated {{ updated | date: 'medium' }}</span>
+  <span class="price-chart__connection">
+    <span
+      class="price-chart__dot"
+      [class.price-chart__dot--connected]="wsState() === 'connected'"
+      [class.price-chart__dot--connecting]="wsState() === 'connecting'"
+    ></span>
+    Stream: {{ wsState() | titlecase }}
+  </span>
+</div>
