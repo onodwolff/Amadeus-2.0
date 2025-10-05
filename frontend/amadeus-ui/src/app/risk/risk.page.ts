@@ -26,6 +26,9 @@ import {
   TradeLockConfig,
 } from '../api/models';
 import { NotificationService } from '../shared/notifications/notification.service';
+import { RiskLimitBreachesWidgetComponent } from './components/limit-breaches-widget/limit-breaches-widget.component';
+import { RiskCircuitBreakersWidgetComponent } from './components/circuit-breakers-widget/circuit-breakers-widget.component';
+import { RiskMarginCallsWidgetComponent } from './components/margin-calls-widget/margin-calls-widget.component';
 
 type PositionLimitFormGroup = FormGroup<{
   venue: FormControl<string>;
@@ -68,7 +71,13 @@ type RiskFormGroup = FormGroup<{
 @Component({
   standalone: true,
   selector: 'app-risk-page',
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    RiskLimitBreachesWidgetComponent,
+    RiskCircuitBreakersWidgetComponent,
+    RiskMarginCallsWidgetComponent,
+  ],
   templateUrl: './risk.page.html',
   styleUrls: ['./risk.page.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

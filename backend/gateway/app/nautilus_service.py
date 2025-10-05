@@ -8,7 +8,7 @@ import itertools
 import random
 import sys
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Literal
 
 
 def _utcnow_iso() -> str:
@@ -131,6 +131,32 @@ class CashMovement:
     timestamp: str
 
 
+RiskAlertCategory = Literal["limit_breach", "circuit_breaker", "margin_call"]
+RiskAlertSeverity = Literal["low", "medium", "high", "critical"]
+
+
+@dataclass
+class RiskAlert:
+    alert_id: str
+    category: RiskAlertCategory
+    title: str
+    message: str
+    severity: RiskAlertSeverity
+    timestamp: str
+    context: Dict[str, Any] = field(default_factory=dict)
+    acknowledged: bool = False
+    acknowledged_at: Optional[str] = None
+    acknowledged_by: Optional[str] = None
+    unlockable: bool = False
+    locked: bool = False
+    escalatable: bool = False
+    escalated: bool = False
+    escalated_at: Optional[str] = None
+    resolved: bool = False
+    resolved_at: Optional[str] = None
+    resolved_by: Optional[str] = None
+
+
 @dataclass
 class OrderRecord:
     order_id: str
@@ -175,6 +201,12 @@ class NautilusService:
         self._order_counter = 0
         self._seed_orders_state()
         self._risk_limits: Dict[str, Any] = self._default_risk_limits()
+        self._risk_alerts: Dict[RiskAlertCategory, List[RiskAlert]] = {
+            "limit_breach": [],
+            "circuit_breaker": [],
+            "margin_call": [],
+        }
+        self._seed_risk_alerts()
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
@@ -928,6 +960,293 @@ class NautilusService:
                 ],
             },
         }
+
+    def _seed_risk_alerts(self) -> None:
+        if not self._portfolio_positions:
+            return
+
+        # Seed an initial limit breach to showcase the widget.
+        position = random.choice(self._portfolio_positions)
+        limit_entry = next(
+            (
+                item
+                for item in self._risk_limits.get("position_limits", {})
+                .get("limits", [])
+                if item.get("venue") == position.venue
+            ),
+            None,
+        )
+        limit_value = limit_entry.get("limit", 500000.0) if limit_entry else 500000.0
+        breach_value = round(limit_value * 1.18, 2)
+        self._add_risk_alert(
+            category="limit_breach",
+            severity="high",
+            title=f"Limit breach on {position.symbol}",
+            message=(
+                f"Net exposure on {position.symbol} at {position.venue} reached ${breach_value:,.0f} "
+                f"against a limit of ${limit_value:,.0f}."
+            ),
+            context={
+                "symbol": position.symbol,
+                "venue": position.venue,
+                "node": position.node_id,
+                "limit": limit_value,
+                "breach": breach_value,
+            },
+        )
+
+        # Seed a circuit breaker alert.
+        account = random.choice(self._portfolio_balances)
+        circuit = self._add_risk_alert(
+            category="circuit_breaker",
+            severity="critical",
+            title=f"Circuit breaker triggered on {account.venue}",
+            message=(
+                f"{account.account_name} trading halted on {account.venue} after latency spike."
+            ),
+            context={
+                "venue": account.venue,
+                "account": account.account_name,
+                "node": account.node_id,
+                "reason": "Latency breach",
+            },
+            unlockable=True,
+        )
+        circuit.locked = True
+
+        # Seed a margin call alert.
+        balance = random.choice(self._portfolio_balances)
+        deficit = round(balance.total * 0.12, 2)
+        self._add_risk_alert(
+            category="margin_call",
+            severity="medium",
+            title=f"Margin call for {balance.account_name}",
+            message=(
+                f"Additional {deficit} {balance.currency} required for {balance.account_name} at {balance.venue}."
+            ),
+            context={
+                "account": balance.account_name,
+                "venue": balance.venue,
+                "currency": balance.currency,
+                "deficit": deficit,
+            },
+            escalatable=True,
+        )
+
+    def _add_risk_alert(
+        self,
+        *,
+        category: RiskAlertCategory,
+        severity: RiskAlertSeverity,
+        title: str,
+        message: str,
+        context: Optional[Dict[str, Any]] = None,
+        unlockable: bool = False,
+        escalatable: bool = False,
+    ) -> RiskAlert:
+        alert = RiskAlert(
+            alert_id=uuid.uuid4().hex,
+            category=category,
+            title=title,
+            message=message,
+            severity=severity,
+            timestamp=_utcnow_iso(),
+            context=context or {},
+            unlockable=unlockable,
+            locked=unlockable,
+            escalatable=escalatable,
+        )
+        alerts = self._risk_alerts.setdefault(category, [])
+        alerts.append(alert)
+        if len(alerts) > 50:
+            alerts[:] = alerts[-50:]
+        return alert
+
+    def _risk_alert_to_dict(self, alert: RiskAlert) -> Dict[str, Any]:
+        payload = asdict(alert)
+        payload["id"] = payload.pop("alert_id")
+        return payload
+
+    def _risk_alerts_stream_payload(self, category: RiskAlertCategory) -> dict:
+        events = [self._risk_alert_to_dict(alert) for alert in self._risk_alerts.get(category, [])]
+        events.sort(key=lambda item: item.get("timestamp", ""))
+        return {"events": events, "timestamp": _utcnow_iso()}
+
+    def _maybe_generate_limit_breach(self) -> None:
+        if not self._portfolio_positions or random.random() >= 0.32:
+            return
+
+        position = random.choice(self._portfolio_positions)
+        mark = position.mark_price or position.average_price or 0.0
+        notional = abs(round(position.quantity * mark, 2))
+        limit_entry = next(
+            (
+                item
+                for item in self._risk_limits.get("position_limits", {})
+                .get("limits", [])
+                if item.get("venue") == position.venue
+            ),
+            None,
+        )
+        limit_value = limit_entry.get("limit", 500000.0) if limit_entry else 500000.0
+        breach_value = max(limit_value * random.uniform(1.05, 1.45), notional * 1.15)
+        breach_value = round(breach_value, 2)
+        ratio = breach_value / max(limit_value, 1)
+        severity: RiskAlertSeverity
+        if ratio >= 1.35:
+            severity = "critical"
+        elif ratio >= 1.2:
+            severity = "high"
+        else:
+            severity = "medium"
+
+        reasons = [
+            "Volatility spike", "Order flow imbalance", "Position accumulation", "Hedging delay"
+        ]
+        reason = random.choice(reasons)
+
+        self._add_risk_alert(
+            category="limit_breach",
+            severity=severity,
+            title=f"Limit breach on {position.symbol}",
+            message=(
+                f"Exposure on {position.symbol} at {position.venue} now ${breach_value:,.0f} "
+                f"vs limit ${limit_value:,.0f} ({reason})."
+            ),
+            context={
+                "symbol": position.symbol,
+                "venue": position.venue,
+                "node": position.node_id,
+                "limit": round(limit_value, 2),
+                "breach": breach_value,
+                "reason": reason,
+            },
+        )
+
+    def _maybe_generate_circuit_breaker(self) -> None:
+        if not self._portfolio_balances or random.random() >= 0.27:
+            return
+
+        account = random.choice(self._portfolio_balances)
+        reasons = [
+            "Latency spike",
+            "Gateway disconnect",
+            "Rapid drawdown",
+            "Manual safety trigger",
+        ]
+        reason = random.choice(reasons)
+        severity = random.choices([
+            "high",
+            "critical",
+        ], weights=[0.6, 0.4])[0]
+
+        alert = self._add_risk_alert(
+            category="circuit_breaker",
+            severity=severity,
+            title=f"Circuit breaker triggered on {account.venue}",
+            message=(
+                f"{account.account_name} halted on {account.venue} due to {reason.lower()}."
+            ),
+            context={
+                "venue": account.venue,
+                "account": account.account_name,
+                "node": account.node_id,
+                "reason": reason,
+            },
+            unlockable=True,
+        )
+        alert.locked = True
+
+    def _maybe_generate_margin_call(self) -> None:
+        if not self._portfolio_balances or random.random() >= 0.3:
+            return
+
+        balance = random.choice(self._portfolio_balances)
+        deficit = round(balance.total * random.uniform(0.08, 0.22), 2)
+        ratio = deficit / max(balance.total, 1)
+        severity: RiskAlertSeverity
+        if ratio >= 0.18:
+            severity = "critical"
+        elif ratio >= 0.14:
+            severity = "high"
+        else:
+            severity = "medium"
+
+        self._add_risk_alert(
+            category="margin_call",
+            severity=severity,
+            title=f"Margin call for {balance.account_name}",
+            message=(
+                f"{balance.account_name} at {balance.venue} requires {deficit} {balance.currency} "
+                "to restore maintenance levels."
+            ),
+            context={
+                "account": balance.account_name,
+                "venue": balance.venue,
+                "currency": balance.currency,
+                "deficit": deficit,
+            },
+            escalatable=True,
+        )
+
+    def risk_limit_breaches_stream_payload(self) -> dict:
+        self._maybe_generate_limit_breach()
+        return self._risk_alerts_stream_payload("limit_breach")
+
+    def risk_circuit_breakers_stream_payload(self) -> dict:
+        self._maybe_generate_circuit_breaker()
+        return self._risk_alerts_stream_payload("circuit_breaker")
+
+    def risk_margin_calls_stream_payload(self) -> dict:
+        self._maybe_generate_margin_call()
+        return self._risk_alerts_stream_payload("margin_call")
+
+    def _find_risk_alert(self, alert_id: str) -> RiskAlert:
+        for alerts in self._risk_alerts.values():
+            for alert in alerts:
+                if alert.alert_id == alert_id:
+                    return alert
+        raise ValueError(f"Alert '{alert_id}' not found")
+
+    def acknowledge_risk_alert(self, alert_id: str) -> dict:
+        alert = self._find_risk_alert(alert_id)
+        if not alert.acknowledged:
+            alert.acknowledged = True
+            alert.acknowledged_at = _utcnow_iso()
+            alert.acknowledged_by = "operator"
+        return {"alert": self._risk_alert_to_dict(alert)}
+
+    def unlock_circuit_breaker(self, alert_id: str) -> dict:
+        alert = self._find_risk_alert(alert_id)
+        if not alert.unlockable:
+            raise RuntimeError("Alert cannot be unlocked")
+        if not alert.locked:
+            return {"alert": self._risk_alert_to_dict(alert)}
+
+        alert.locked = False
+        alert.resolved = True
+        alert.resolved_at = _utcnow_iso()
+        alert.resolved_by = "operator"
+        if not alert.acknowledged:
+            alert.acknowledged = True
+            alert.acknowledged_at = alert.resolved_at
+            alert.acknowledged_by = "operator"
+        return {"alert": self._risk_alert_to_dict(alert)}
+
+    def escalate_margin_call(self, alert_id: str) -> dict:
+        alert = self._find_risk_alert(alert_id)
+        if not alert.escalatable:
+            raise RuntimeError("Alert cannot be escalated")
+        if alert.escalated:
+            return {"alert": self._risk_alert_to_dict(alert)}
+
+        alert.escalated = True
+        alert.escalated_at = _utcnow_iso()
+        if not alert.acknowledged:
+            alert.acknowledged = True
+            alert.acknowledged_at = alert.escalated_at
+            alert.acknowledged_by = "operator"
+        return {"alert": self._risk_alert_to_dict(alert)}
 
     def start_backtest(
         self,
