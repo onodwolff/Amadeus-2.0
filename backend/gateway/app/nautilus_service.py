@@ -330,10 +330,19 @@ class MockNautilusService:
         spawn(portfolio_pump())
         spawn(risk_pump())
 
-    def attach_engine(self, engine: Any) -> None:
+    def attach_engine(self, engine: NautilusEngineService) -> None:
         """Attach a real NautilusTrader engine implementation."""
 
         self._engine = engine
+        self._bus = engine.bus
+
+        if self._background_tasks and self._bus.external:
+            for task in list(self._background_tasks):
+                task.cancel()
+            self._background_tasks.clear()
+
+        if not self._background_tasks and not self._bus.external:
+            self._schedule_background_jobs()
 
     # --- Market data & discovery --------------------------------------
 
