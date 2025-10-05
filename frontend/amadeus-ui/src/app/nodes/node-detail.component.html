@@ -41,6 +41,10 @@
   </header>
 
   <div class="node-detail__content">
+    <section class="node-detail__metrics">
+      <app-node-metrics-panel [nodeId]="current.id"></app-node-metrics-panel>
+    </section>
+
     <section class="node-detail__section">
       <header class="node-detail__section-header">
         <h3>Configuration</h3>

@@ -144,6 +144,11 @@ export class NodeLaunchDialogComponent {
   ] as const;
 
   readonly currentStepDescriptor = computed(() => this.steps[this.currentStep()]);
+  readonly selectedStrategyDescription = computed(() => {
+    const id = this.form.controls.strategy.controls.id.value;
+    const template = this.strategyTemplates.find((item) => item.id === id);
+    return template?.description ?? 'Select a template';
+  });
 
   readonly form = this.fb.nonNullable.group({
     nodeType: this.fb.nonNullable.control<NodeMode>('backtest'),
@@ -251,6 +256,14 @@ export class NodeLaunchDialogComponent {
 
   removeKeyReference(index: number): void {
     this.keyReferencesArray().removeAt(index);
+  }
+
+  onTemplateChange(event: Event): void {
+    const target = event.target as HTMLSelectElement | null;
+    if (!target) {
+      return;
+    }
+    this.selectStrategy(target.value);
   }
 
   selectStrategy(templateId: string): void {

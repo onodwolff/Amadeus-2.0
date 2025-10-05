@@ -56,6 +56,10 @@
   gap: 24px;
 }
 
+.node-detail__metrics {
+  grid-column: 1 / -1;
+}
+
 .node-detail__section {
   background: rgba(17, 24, 39, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.16);

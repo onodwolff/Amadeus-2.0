@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio, json, random
+import asyncio, json
 from typing import List
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -177,19 +177,11 @@ def export_node_logs(node_id: str):
 @app.websocket("/ws/nodes")
 async def ws_nodes(ws: WebSocket):
     await ws.accept()
-    pnl: dict[str, float] = {}
-    lat: dict[str, float] = {}
     try:
         while True:
             nodes = [svc.as_dict(n) for n in svc.list_nodes()]
-            for n in nodes:
-                nid = n["id"]
-                if nid not in pnl:
-                    pnl[nid] = 0.0
-                    lat[nid] = random.uniform(3, 15)
-                pnl[nid] += random.gauss(0, 0.5)
-                lat[nid] = max(1.0, lat[nid] + random.uniform(-0.8, 0.8))
-                n["metrics"] = {"pnl": round(pnl[nid], 2), "latency_ms": round(lat[nid], 1)}
+            for node in nodes:
+                node["metrics"] = svc.metrics_snapshot(node["id"])
             await ws.send_text(json.dumps({"nodes": nodes}))
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
@@ -206,6 +198,21 @@ async def ws_node_logs(node_id: str, ws: WebSocket):
             await asyncio.sleep(1.2)
     except ValueError:
         await ws.send_text(json.dumps({"logs": [], "lifecycle": []}))
+        await ws.close(code=1008)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/nodes/{node_id}/metrics")
+async def ws_node_metrics(node_id: str, ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.metrics_series(node_id)
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.0)
+    except ValueError:
+        await ws.send_text(json.dumps({"series": {}, "latest": None}))
         await ws.close(code=1008)
     except WebSocketDisconnect:
         return

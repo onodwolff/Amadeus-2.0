@@ -1,0 +1,40 @@
+.metrics-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 260px;
+}
+
+.metrics-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.78rem;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.metrics-chart__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.82;
+  transition: opacity 0.2s ease;
+}
+
+.metrics-chart__legend-item:hover {
+  opacity: 1;
+}
+
+.metrics-chart__legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--legend-color, #38bdf8);
+  box-shadow: 0 0 6px rgba(148, 163, 184, 0.35);
+}
+
+.metrics-chart__canvas {
+  flex: 1 1 auto;
+  min-height: 200px;
+}

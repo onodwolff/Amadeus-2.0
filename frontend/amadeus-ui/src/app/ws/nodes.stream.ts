@@ -1,5 +1,14 @@
 import { map, Observable } from 'rxjs';
-import { NodeEventsStreamMessage, NodeHandle, NodeMetrics, NodesStreamMessage } from '../api/models';
+import {
+  NodeEventsStreamMessage,
+  NodeHandle,
+  NodeMetricKey,
+  NodeMetricPoint,
+  NodeMetrics,
+  NodeMetricsSnapshot,
+  NodeMetricsStreamMessage,
+  NodesStreamMessage,
+} from '../api/models';
 import { WsService, WsConnectionState } from '../ws.service';
 
 export interface NodesStreamObservables {
@@ -19,6 +28,16 @@ export interface NodesMetricsObservables {
 
 export interface NodeEventsStreamObservables {
   readonly events$: Observable<NodeEventsStreamMessage>;
+  readonly state$: Observable<WsConnectionState>;
+}
+
+export interface NodeMetricSeriesPayload {
+  readonly series: Record<NodeMetricKey, NodeMetricPoint[]>;
+  readonly latest: NodeMetricsSnapshot | null;
+}
+
+export interface NodeMetricSeriesObservables {
+  readonly metrics$: Observable<NodeMetricSeriesPayload>;
   readonly state$: Observable<WsConnectionState>;
 }
 
@@ -70,6 +89,51 @@ export function observeNodeEventsStream(
 
   return {
     events$: channel.messages$,
+    state$: channel.state$,
+  };
+}
+
+export function observeNodeMetricsStream(
+  nodeId: string,
+  ws: WsService,
+): NodeMetricSeriesObservables {
+  const channel = ws.channel<NodeMetricsStreamMessage>({
+    name: `node-metrics-${nodeId}`,
+    path: `/ws/nodes/${encodeURIComponent(nodeId)}/metrics`,
+    retryAttempts: Infinity,
+    retryDelay: 1000,
+  });
+
+  const metrics$ = channel.messages$.pipe(
+    map((message): NodeMetricSeriesPayload => {
+      const series = message?.series ?? {};
+      const coerce = (key: NodeMetricKey): NodeMetricPoint[] => {
+        const points = series[key];
+        if (!Array.isArray(points)) {
+          return [];
+        }
+        return points
+          .filter((point): point is NodeMetricPoint =>
+            typeof point === 'object' && point !== null && typeof point.timestamp === 'string' &&
+            typeof point.value === 'number',
+          )
+          .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+      };
+
+      return {
+        series: {
+          pnl: coerce('pnl'),
+          latency_ms: coerce('latency_ms'),
+          cpu_percent: coerce('cpu_percent'),
+          memory_mb: coerce('memory_mb'),
+        },
+        latest: message?.latest ?? null,
+      };
+    }),
+  );
+
+  return {
+    metrics$,
     state$: channel.state$,
   };
 }

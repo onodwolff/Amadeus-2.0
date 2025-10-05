@@ -1,0 +1,13 @@
+<div class="metrics-chart">
+  <div class="metrics-chart__legend" *ngIf="series.length > 0">
+    <span
+      class="metrics-chart__legend-item"
+      *ngFor="let entry of series; trackBy: trackById"
+      [style.--legend-color]="entry.color"
+    >
+      <span class="metrics-chart__legend-dot"></span>
+      {{ entry.name }}
+    </span>
+  </div>
+  <div class="metrics-chart__canvas" #container></div>
+</div>
