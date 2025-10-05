@@ -78,6 +78,8 @@
                   [class.status--active]="status.tone === 'active'"
                   [class.status--stale]="status.tone === 'stale'"
                   [class.status--idle]="status.tone === 'idle'"
+                  [class.status--expiring]="status.tone === 'expiring'"
+                  [class.status--expired]="status.tone === 'expired'"
                 >
                   {{ status.label }}
                 </span>
@@ -108,6 +110,95 @@
       <button type="button" class="btn btn--primary" (click)="openCreateDialog()">Create your first key</button>
     </div>
   </ng-template>
+
+  <section class="keys-assignment" aria-label="Credential assignments">
+    <header class="keys-assignment__header">
+      <div>
+        <h2 class="keys-assignment__title">Adapter credential assignments</h2>
+        <p class="keys-assignment__subtitle">
+          Link provisioned API keys to node adapters and execution strategies to ensure venue access.
+        </p>
+      </div>
+      <button
+        type="button"
+        class="btn btn--ghost"
+        (click)="reloadAssignments()"
+        [disabled]="isAssignmentsLoading()"
+      >
+        <span *ngIf="isAssignmentsLoading(); else syncLabel">Syncing…</span>
+        <ng-template #syncLabel>Sync context</ng-template>
+      </button>
+    </header>
+
+    <p class="keys-assignment__error" *ngIf="assignmentsError() as assignError">{{ assignError }}</p>
+
+    <div class="keys-assignment__loading" *ngIf="isAssignmentsLoading()" role="status" aria-live="polite">
+      Loading node context…
+    </div>
+
+    <ng-container *ngIf="assignmentsView().length > 0; else noAssignments">
+      <article
+        class="assignment-card"
+        *ngFor="let assignment of assignmentsView()"
+        [class.assignment-card--warning]="assignment.hasWarnings"
+      >
+        <header class="assignment-card__header">
+          <div>
+            <h3 class="assignment-card__title">Node {{ assignment.nodeId }}</h3>
+            <p class="assignment-card__subtitle">
+              {{ assignment.strategyName }} • {{ formatMode(assignment.nodeMode) }}
+            </p>
+          </div>
+          <span class="assignment-card__badge" *ngIf="assignment.hasWarnings">Attention</span>
+        </header>
+
+        <div class="assignment-card__body" *ngIf="assignment.adapters.length; else noAdapters">
+          <section class="adapter-card" *ngFor="let adapter of assignment.adapters">
+            <header class="adapter-card__header">
+              <div>
+                <h4 class="adapter-card__title">{{ adapter.label }}</h4>
+                <p class="adapter-card__meta">
+                  Venue: {{ formatVenue(adapter.venue) }} •
+                  Environment: {{ formatEnvironment(adapter.environment) }} •
+                  Mode: {{ formatMode(adapter.mode) }}
+                </p>
+              </div>
+            </header>
+
+            <div class="adapter-card__controls">
+              <label class="field">
+                <span class="field__label">Assigned key</span>
+                <select
+                  class="field__control field__control--select"
+                  [value]="adapter.assignedKeyId || ''"
+                  (change)="onAssignmentChange(adapter.selectionKey, $any($event.target).value)"
+                >
+                  <option value="">Not assigned</option>
+                  <option *ngFor="let option of adapter.options" [value]="option.key.key_id">
+                    {{ adapterOptionLabel(option) }}
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <ul class="adapter-card__warnings" *ngIf="adapter.warnings.length">
+              <li *ngFor="let warning of adapter.warnings">{{ warning }}</li>
+            </ul>
+          </section>
+        </div>
+
+        <ng-template #noAdapters>
+          <p class="assignment-card__empty">No adapters reported for this node.</p>
+        </ng-template>
+      </article>
+    </ng-container>
+
+    <ng-template #noAssignments>
+      <p class="keys-assignment__empty">
+        No active nodes require credential assignments. Launch a node to begin mapping API keys.
+      </p>
+    </ng-template>
+  </section>
 
   <ng-container *ngIf="isCreateDialogOpen()">
     <div class="dialog" role="presentation">

@@ -17,6 +17,7 @@ export interface ApiKey {
   scopes: KeyScope[];
   created_at: string;
   last_used_at?: string;
+  expires_at?: string;
   fingerprint?: string;
   passphrase_hint?: string;
 }

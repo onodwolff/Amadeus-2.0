@@ -4,6 +4,7 @@ import {
   Component,
   OnInit,
   WritableSignal,
+  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -16,12 +17,16 @@ import {
 } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { KeysApi } from '../api/clients/keys.api';
+import { MarketApi } from '../api/clients/market.api';
+import { NodesApi } from '../api/clients/nodes.api';
 import {
   ApiKey,
   KeyCreateRequest,
   KeyDeleteRequest,
   KeyScope,
   KeyUpdateRequest,
+  NodeDetailResponse,
+  NodeMode,
 } from '../api/models';
 import { NotificationService } from '../shared/notifications/notification.service';
 import { encryptSecret, hashPassphrase } from './secret-crypto';
@@ -60,12 +65,47 @@ type KeyDeleteFormGroup = FormGroup<{
   passphrase: FormControl<string>;
 }>;
 
-type KeyStatusTone = 'active' | 'stale' | 'idle';
+type KeyStatusTone = 'active' | 'stale' | 'idle' | 'expiring' | 'expired';
 
 interface KeyStatusDescriptor {
   label: string;
   description: string;
   tone: KeyStatusTone;
+}
+
+type AdapterEnvironment = 'live' | 'historical' | 'simulation';
+
+interface AdapterContext {
+  alias: string;
+  label: string;
+  selectionKey: string;
+  required: boolean;
+  venue: string | null;
+  environment: AdapterEnvironment;
+  mode: string;
+  assignedKeyId?: string;
+}
+
+interface AdapterOption {
+  key: ApiKey;
+  compatible: boolean;
+}
+
+interface AdapterView extends AdapterContext {
+  options: AdapterOption[];
+  warnings: string[];
+}
+
+interface NodeAssignmentContext {
+  nodeId: string;
+  nodeMode: NodeMode;
+  strategyName: string;
+  adapters: AdapterContext[];
+}
+
+interface NodeAssignmentView extends NodeAssignmentContext {
+  adapters: AdapterView[];
+  hasWarnings: boolean;
 }
 
 @Component({
@@ -78,6 +118,8 @@ interface KeyStatusDescriptor {
 })
 export class KeysPage implements OnInit {
   private readonly keysApi = inject(KeysApi);
+  private readonly nodesApi = inject(NodesApi);
+  private readonly marketApi = inject(MarketApi);
   private readonly fb = inject(FormBuilder);
   private readonly notifications = inject(NotificationService);
 
@@ -101,6 +143,15 @@ export class KeysPage implements OnInit {
   readonly deleteError = signal<string | null>(null);
   readonly deleteDialogKey = signal<ApiKey | null>(null);
 
+  readonly assignmentPanels = signal<NodeAssignmentContext[]>([]);
+  readonly assignmentSelections = signal<Record<string, string | null>>({});
+  readonly knownVenues = signal<string[]>([]);
+  readonly isAssignmentsLoading = signal(false);
+  readonly assignmentsError = signal<string | null>(null);
+  readonly assignmentsView = computed<NodeAssignmentView[]>(() => this.computeAssignmentView());
+
+  private readonly healthAlertsDisplayed = new Set<string>();
+
   private readonly rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
 
   readonly createForm: KeyCreateFormGroup = this.createKeyForm();
@@ -109,6 +160,7 @@ export class KeysPage implements OnInit {
 
   ngOnInit(): void {
     this.fetchKeys();
+    void this.loadAssignmentContext();
   }
 
   refresh(): void {
@@ -164,11 +216,85 @@ export class KeysPage implements OnInit {
     return '••••••••';
   }
 
+  reloadAssignments(): void {
+    void this.loadAssignmentContext();
+  }
+
+  onAssignmentChange(selectionKey: string, keyId: string): void {
+    const normalized = keyId && keyId.trim().length > 0 ? keyId : null;
+    this.assignmentSelections.update((current) => ({ ...current, [selectionKey]: normalized }));
+
+    const adapter = this
+      .assignmentsView()
+      .flatMap((node) => node.adapters)
+      .find((item) => item.selectionKey === selectionKey);
+
+    if (!adapter) {
+      return;
+    }
+
+    if (normalized) {
+      const option = adapter.options.find((opt) => opt.key.key_id === normalized);
+      const keyLabel = option?.key.label || option?.key.key_id || normalized;
+      this.notifications.success(`Assigned ${keyLabel} to ${adapter.label}.`, 'Key assignments');
+    } else {
+      this.notifications.info(`Cleared credential assignment for ${adapter.label}.`, 'Key assignments');
+    }
+  }
+
+  adapterOptionLabel(option: AdapterOption): string {
+    const label = option.key.label || option.key.key_id;
+    const venue = option.key.venue ? ` (${option.key.venue})` : '';
+    const compatibility = option.compatible ? '' : ' — incompatible';
+    return `${label}${venue}${compatibility}`;
+  }
+
+  formatEnvironment(environment: AdapterEnvironment): string {
+    switch (environment) {
+      case 'historical':
+        return 'Historical';
+      case 'simulation':
+        return 'Simulation';
+      default:
+        return 'Live';
+    }
+  }
+
+  formatMode(mode: string): string {
+    if (!mode) {
+      return '—';
+    }
+    const lower = mode.toLowerCase();
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }
+
+  formatVenue(venue: string | null): string {
+    return venue ?? 'Unknown';
+  }
+
   keyStatus(key: ApiKey): KeyStatusDescriptor {
+    const now = Date.now();
+    if (key.expires_at) {
+      const expiresAt = new Date(key.expires_at);
+      if (!Number.isNaN(expiresAt.getTime())) {
+        const diffMs = expiresAt.getTime() - now;
+        const description = diffMs >= 0
+          ? `Expires ${this.formatRelativeTime(expiresAt)}`
+          : `Expired ${this.formatRelativeTime(expiresAt)}`;
+        if (diffMs <= 0) {
+          return { label: 'Expired', description, tone: 'expired' };
+        }
+        const sevenDays = 1000 * 60 * 60 * 24 * 7;
+        if (diffMs <= sevenDays) {
+          return { label: 'Expiring', description, tone: 'expiring' };
+        }
+      }
+    }
+
     if (key.last_used_at) {
       const lastUsed = new Date(key.last_used_at);
       if (!Number.isNaN(lastUsed.getTime())) {
-        const diffMs = Date.now() - lastUsed.getTime();
+        const diffMs = now - lastUsed.getTime();
         const diffHours = diffMs / (1000 * 60 * 60);
         const description = `Last used ${this.formatRelativeTime(lastUsed)}`;
         if (diffHours <= 24) {
@@ -363,6 +489,359 @@ export class KeysPage implements OnInit {
     }
   }
 
+  private computeAssignmentView(): NodeAssignmentView[] {
+    const contexts = this.assignmentPanels();
+    if (contexts.length === 0) {
+      return [];
+    }
+
+    const keys = this.keys();
+    const selections = this.assignmentSelections();
+    const knownVenues = new Set(this.knownVenues());
+
+    return contexts.map((context) => {
+      const adapters = context.adapters.map<AdapterView>((adapter) => {
+        const selected =
+          selections.hasOwnProperty(adapter.selectionKey)
+            ? selections[adapter.selectionKey]
+            : adapter.assignedKeyId ?? null;
+        const compatibleKeys = this.filterCompatibleKeys(keys, adapter);
+        const options: AdapterOption[] = compatibleKeys.map((key) => ({ key, compatible: true }));
+
+        if (selected) {
+          const selectedKey = keys.find((key) => key.key_id === selected);
+          if (selectedKey) {
+            if (!options.some((option) => option.key.key_id === selectedKey.key_id)) {
+              options.unshift({ key: selectedKey, compatible: false });
+            }
+          } else {
+            options.unshift({ key: this.createPlaceholderKey(selected), compatible: false });
+          }
+        }
+
+        const warnings = this.collectAdapterWarnings(
+          adapter,
+          selected,
+          keys,
+          context.nodeMode,
+          knownVenues,
+          options,
+        );
+
+        return {
+          ...adapter,
+          assignedKeyId: selected ?? undefined,
+          options,
+          warnings,
+        };
+      });
+
+      return {
+        ...context,
+        adapters,
+        hasWarnings: adapters.some((adapter) => adapter.warnings.length > 0),
+      };
+    });
+  }
+
+  private sortKeys(keys: ApiKey[]): ApiKey[] {
+    return [...keys].sort((a, b) => {
+      const aLabel = (a.label || a.key_id).toLowerCase();
+      const bLabel = (b.label || b.key_id).toLowerCase();
+      return aLabel.localeCompare(bLabel);
+    });
+  }
+
+  private filterCompatibleKeys(keys: ApiKey[], adapter: AdapterContext): ApiKey[] {
+    return this.sortKeys(keys.filter((key) => this.isKeyCompatibleWithAdapter(key, adapter)));
+  }
+
+  private isKeyCompatibleWithAdapter(key: ApiKey, adapter: AdapterContext): boolean {
+    if (adapter.venue) {
+      const keyVenue = (key.venue || '').toUpperCase();
+      if (keyVenue !== adapter.venue) {
+        return false;
+      }
+    }
+
+    const scopes = new Set(key.scopes || []);
+    const mode = adapter.mode.toLowerCase();
+    if (mode === 'write') {
+      return scopes.has('trade');
+    }
+    return scopes.has('read') || scopes.has('trade');
+  }
+
+  private collectAdapterWarnings(
+    adapter: AdapterContext,
+    selectedKeyId: string | null,
+    keys: ApiKey[],
+    nodeMode: NodeMode,
+    knownVenues: Set<string>,
+    options: AdapterOption[],
+  ): string[] {
+    const warnings = new Set<string>();
+    const nodeModeNormalized = (nodeMode || '').toLowerCase();
+
+    if (adapter.environment === 'live' && nodeModeNormalized !== 'live') {
+      warnings.add('Live adapter configured on non-live node.');
+    }
+    if (adapter.environment === 'historical' && nodeModeNormalized === 'live') {
+      warnings.add('Historical adapter configured on a live node.');
+    }
+
+    if (!adapter.venue) {
+      warnings.add('Adapter venue could not be determined from node or market services.');
+    } else if (knownVenues.size > 0 && !knownVenues.has(adapter.venue)) {
+      warnings.add(`Adapter venue ${adapter.venue} is not registered in the market service.`);
+    }
+
+    const compatibleOptions = options.filter((option) => option.compatible).length;
+    if (compatibleOptions === 0) {
+      warnings.add('No compatible keys available for this adapter.');
+    }
+
+    const selectedKey = selectedKeyId ? keys.find((key) => key.key_id === selectedKeyId) : undefined;
+    if (selectedKeyId && !selectedKey) {
+      warnings.add('Assigned key is no longer provisioned.');
+    }
+
+    if (selectedKey) {
+      const keyVenue = (selectedKey.venue || '').toUpperCase();
+      if (adapter.venue && keyVenue !== adapter.venue) {
+        warnings.add(`Assigned key venue ${selectedKey.venue} does not match ${adapter.venue}.`);
+      }
+      const scopes = new Set(selectedKey.scopes || []);
+      const mode = adapter.mode.toLowerCase();
+      if (mode === 'write' && !scopes.has('trade')) {
+        warnings.add('Assigned key is missing the trade scope required for execution adapters.');
+      }
+      if (mode !== 'write' && !scopes.has('read')) {
+        warnings.add('Assigned key is missing the read scope required for data adapters.');
+      }
+    } else if (adapter.required) {
+      warnings.add('This adapter requires a credential assignment.');
+    }
+
+    return Array.from(warnings);
+  }
+
+  private async loadAssignmentContext(): Promise<void> {
+    this.isAssignmentsLoading.set(true);
+    this.assignmentsError.set(null);
+
+    try {
+      const [nodesResponse, instrumentsResponse] = await Promise.all([
+        firstValueFrom(this.nodesApi.listNodes()),
+        firstValueFrom(this.marketApi.listInstruments()),
+      ]);
+
+      const venueSet = new Set<string>();
+      instrumentsResponse.instruments.forEach((instrument) => {
+        if (instrument.venue) {
+          venueSet.add(instrument.venue.toUpperCase());
+        }
+      });
+      this.knownVenues.set(Array.from(venueSet));
+
+      const nodes = nodesResponse.nodes ?? [];
+      const details = await Promise.all(
+        nodes.map((node) =>
+          firstValueFrom(this.nodesApi.getNodeDetail(node.id)).catch((error) => {
+            console.error(error);
+            return null;
+          }),
+        ),
+      );
+
+      const contexts: NodeAssignmentContext[] = [];
+      const selections: Record<string, string | null> = {};
+
+      for (const detail of details) {
+        if (!detail) {
+          continue;
+        }
+        const context = this.buildNodeAssignmentContext(detail, venueSet);
+        contexts.push(context);
+        context.adapters.forEach((adapter) => {
+          selections[adapter.selectionKey] = adapter.assignedKeyId ?? null;
+        });
+      }
+
+      this.assignmentPanels.set(contexts);
+      this.assignmentSelections.set(selections);
+    } catch (error) {
+      console.error(error);
+      this.assignmentsError.set('Unable to load node assignment context.');
+    } finally {
+      this.isAssignmentsLoading.set(false);
+    }
+  }
+
+  private buildNodeAssignmentContext(
+    detail: NodeDetailResponse,
+    knownVenues: Set<string>,
+  ): NodeAssignmentContext {
+    const nodeMode = detail.node.mode ?? 'live';
+    const strategy = detail.config.strategy;
+    const strategyName = strategy?.name || strategy?.id || 'Unnamed strategy';
+    const dataSources = detail.config.dataSources ?? [];
+    const keyReferences = detail.config.keyReferences ?? [];
+    const adapters: AdapterContext[] = [];
+
+    const dataSourceMeta = dataSources.map((source, index) => {
+      const venueToken = this.extractVenueToken(source.label) ?? this.extractVenueToken(source.id);
+      return {
+        source,
+        id: source.id || `data-source-${index}`,
+        label: source.label || source.id || `Adapter ${index + 1}`,
+        venue: this.normalizeVenue(venueToken),
+        environment: this.deriveEnvironment(nodeMode, source.type),
+        mode: (source.mode || '').toLowerCase() || 'read',
+      };
+    });
+
+    if (keyReferences.length > 0) {
+      keyReferences.forEach((reference, index) => {
+        const alias = reference.alias || `Credential ${index + 1}`;
+        const selectionKey = `${detail.node.id}::${alias.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index}`;
+        const matchedSource = dataSourceMeta.find((meta) =>
+          this.isAliasMatch(meta.label, alias) || this.isAliasMatch(meta.id, alias),
+        );
+
+        const venueToken =
+          matchedSource?.venue ??
+          this.normalizeVenue(this.extractVenueToken(alias) ?? this.extractVenueToken(reference.keyId));
+
+        adapters.push({
+          alias,
+          label: matchedSource?.label ?? alias,
+          selectionKey,
+          required: reference.required ?? false,
+          venue: venueToken,
+          environment: matchedSource?.environment ?? this.deriveEnvironment(nodeMode, undefined),
+          mode: matchedSource?.mode ?? (reference.required ? 'write' : 'read'),
+          assignedKeyId: reference.keyId,
+        });
+      });
+    } else if (dataSourceMeta.length > 0) {
+      dataSourceMeta.forEach((meta, index) => {
+        const selectionKey = `${detail.node.id}::${meta.id || index}`;
+        adapters.push({
+          alias: meta.label,
+          label: meta.label,
+          selectionKey,
+          required: meta.mode === 'write',
+          venue: meta.venue,
+          environment: meta.environment,
+          mode: meta.mode,
+        });
+      });
+    }
+
+    return {
+      nodeId: detail.node.id,
+      nodeMode,
+      strategyName,
+      adapters,
+    };
+  }
+
+  private deriveEnvironment(nodeMode: NodeMode, sourceType?: string | null): AdapterEnvironment {
+    const type = (sourceType || '').toLowerCase();
+    if (type.includes('live')) {
+      return 'live';
+    }
+    if (type.includes('hist') || type.includes('backtest')) {
+      return 'historical';
+    }
+
+    const normalizedMode = (nodeMode || '').toLowerCase();
+    if (normalizedMode === 'live') {
+      return 'live';
+    }
+    if (normalizedMode === 'backtest') {
+      return 'historical';
+    }
+    return 'simulation';
+  }
+
+  private extractVenueToken(value?: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+    const match = value.match(/[a-zA-Z]{2,}/);
+    return match ? match[0].toUpperCase() : null;
+  }
+
+  private normalizeVenue(token: string | null): string | null {
+    if (!token) {
+      return null;
+    }
+    const normalized = token.replace(/[^a-z0-9]/gi, '').toUpperCase();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private isAliasMatch(source?: string | null, target?: string | null): boolean {
+    if (!source || !target) {
+      return false;
+    }
+    const normalSource = source.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const normalTarget = target.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!normalSource || !normalTarget) {
+      return false;
+    }
+    const tokens = normalSource.split(' ').filter(Boolean);
+    return tokens.some((token) => normalTarget.includes(token));
+  }
+
+  private createPlaceholderKey(keyId: string): ApiKey {
+    return {
+      key_id: keyId,
+      venue: 'UNKNOWN',
+      scopes: [],
+      created_at: new Date(0).toISOString(),
+    };
+  }
+
+  private evaluateKeyHealth(keys: ApiKey[]): void {
+    const now = Date.now();
+    const expiringThreshold = 1000 * 60 * 60 * 24 * 7;
+    const unusedThreshold = 1000 * 60 * 60 * 24 * 30;
+
+    for (const key of keys) {
+      if (key.expires_at) {
+        const expiresAt = new Date(key.expires_at);
+        if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() - now <= expiringThreshold) {
+          const id = `${key.key_id}-expiring`;
+          if (!this.healthAlertsDisplayed.has(id)) {
+            const message = `${key.label || key.key_id} expires ${this.formatRelativeTime(expiresAt)}.`;
+            this.notifications.warning(message, 'Key health', 10000);
+            this.healthAlertsDisplayed.add(id);
+          }
+        }
+      }
+
+      const lastUsed = key.last_used_at ? new Date(key.last_used_at) : null;
+      const createdAt = new Date(key.created_at);
+      const isNewKey = !Number.isNaN(createdAt.getTime()) && now - createdAt.getTime() < 1000 * 60 * 60 * 48;
+      const isStale =
+        !lastUsed || Number.isNaN(lastUsed.getTime()) || now - lastUsed.getTime() > unusedThreshold;
+
+      if (!isNewKey && isStale) {
+        const id = `${key.key_id}-unused`;
+        if (!this.healthAlertsDisplayed.has(id)) {
+          const label = key.label || key.key_id;
+          const message = lastUsed
+            ? `${label} was last used ${this.formatRelativeTime(lastUsed)}.`
+            : `${label} has not been used yet.`;
+          this.notifications.warning(message, 'Key health', 10000);
+          this.healthAlertsDisplayed.add(id);
+        }
+      }
+    }
+  }
+
   private fetchKeys(options?: { silent?: boolean }): void {
     if (options?.silent) {
       if (this.isRefreshing()) {
@@ -381,6 +860,7 @@ export class KeysPage implements OnInit {
           return labelA.localeCompare(labelB);
         });
         this.keys.set(sorted);
+        this.evaluateKeyHealth(sorted);
         this.lastUpdated.set(new Date());
         this.errorText.set(null);
       },
