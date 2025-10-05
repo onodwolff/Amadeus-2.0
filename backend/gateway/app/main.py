@@ -60,6 +60,14 @@ class OrderCreatePayload(BaseModel):
     quantity: float
     price: Optional[float] = None
     time_in_force: Optional[str] = None
+    expire_time: Optional[str] = None
+    post_only: Optional[bool] = None
+    reduce_only: Optional[bool] = None
+    limit_offset: Optional[float] = None
+    contingency_type: Optional[str] = None
+    order_list_id: Optional[str] = None
+    linked_order_ids: Optional[List[str]] = None
+    parent_order_id: Optional[str] = None
     client_order_id: Optional[str] = None
     node_id: Optional[str] = None
 
