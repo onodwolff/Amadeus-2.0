@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+import itertools
 import random
 import sys
 import uuid
@@ -129,10 +130,49 @@ class CashMovement:
     timestamp: str
 
 
+@dataclass
+class OrderRecord:
+    order_id: str
+    client_order_id: Optional[str]
+    venue_order_id: Optional[str]
+    symbol: str
+    venue: str
+    side: str
+    type: str
+    quantity: float
+    filled_quantity: float
+    price: Optional[float]
+    average_price: Optional[float]
+    status: str
+    time_in_force: Optional[str]
+    node_id: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class ExecutionRecord:
+    execution_id: str
+    order_id: str
+    symbol: str
+    venue: str
+    price: float
+    quantity: float
+    side: str
+    liquidity: Optional[str]
+    fees: float
+    timestamp: str
+    node_id: Optional[str]
+
+
 class NautilusService:
     def __init__(self) -> None:
         self._nodes: Dict[str, NodeState] = {}
         self._seed_portfolio_state()
+        self._orders: Dict[str, OrderRecord] = {}
+        self._executions: Dict[str, List[ExecutionRecord]] = {}
+        self._order_counter = 0
+        self._seed_orders_state()
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
@@ -471,6 +511,297 @@ class NautilusService:
     def portfolio_history(self, limit: int = 720) -> dict:
         history = self._portfolio_history[-limit:]
         return {"history": history}
+
+    # --- Orders state --------------------------------------------------
+
+    def _seed_orders_state(self) -> None:
+        self._orders.clear()
+        self._executions.clear()
+        self._order_counter = 0
+
+        nodes = ["lv-00112233", "bt-00ffaacc", "rv-0099abba"]
+        venues = ["BINANCE", "COINBASE", "NASDAQ", "FTX"]
+        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ADAUSDT", "AAPL.XNAS", "MSFT.XNAS"]
+        statuses = [
+            "pending",
+            "pending",
+            "working",
+            "working",
+            "filled",
+            "filled",
+            "cancelled",
+            "cancelled",
+            "rejected",
+            "working",
+            "filled",
+            "pending",
+        ]
+
+        base_time = datetime.utcnow() - timedelta(hours=6)
+
+        for index, status in enumerate(statuses):
+            quantity = round(random.uniform(0.5, 9.5), 4)
+            price = round(random.uniform(25.0, 48000.0), 2)
+            side = random.choice(["buy", "sell"])
+            order_type = random.choice(["limit", "market", "stop", "stop_limit"])
+            tif = random.choice(["GTC", "IOC", "FOK"])
+            node_id = random.choice(nodes)
+            created = base_time + timedelta(minutes=index * 11)
+            updated = created + timedelta(minutes=random.randint(1, 240))
+
+            filled_quantity = 0.0
+            average_price: Optional[float] = None
+            if status in {"filled", "cancelled"}:
+                filled_quantity = quantity if status == "filled" else round(quantity * random.uniform(0.25, 0.85), 4)
+                average_price = round(price * random.uniform(0.98, 1.02), 2)
+            elif status == "working":
+                filled_quantity = round(quantity * random.uniform(0.1, 0.6), 4)
+                average_price = round(price * random.uniform(0.98, 1.02), 2) if filled_quantity > 0 else None
+            elif status == "rejected":
+                updated = created + timedelta(minutes=random.randint(1, 8))
+
+            order = OrderRecord(
+                order_id=self._next_order_id(),
+                client_order_id=f"CL-{1000 + index}",
+                venue_order_id=(f"VN-{random.randint(100000, 999999)}" if status != "pending" else None),
+                symbol=random.choice(symbols),
+                venue=random.choice(venues),
+                side=side,
+                type=order_type,
+                quantity=round(quantity, 4),
+                filled_quantity=round(min(filled_quantity, quantity), 4),
+                price=round(price, 2),
+                average_price=average_price if filled_quantity > 0 else None,
+                status=status,
+                time_in_force=tif,
+                node_id=node_id,
+                created_at=_isoformat(created),
+                updated_at=_isoformat(updated if status != "pending" else created),
+            )
+            self._register_order(order)
+
+            if order.filled_quantity > 0:
+                self._bootstrap_executions(order)
+
+        self._trim_orders()
+
+    def _next_order_id(self) -> str:
+        self._order_counter += 1
+        return f"ORD-{self._order_counter:06d}"
+
+    def _register_order(self, order: OrderRecord) -> None:
+        self._orders[order.order_id] = order
+        self._executions.setdefault(order.order_id, [])
+
+    def _bootstrap_executions(self, order: OrderRecord) -> None:
+        executed = max(0.0, min(order.filled_quantity, order.quantity))
+        if executed <= 0:
+            return
+
+        remaining = executed
+        slices = 1 if executed < 0.01 else random.randint(1, min(3, int(max(1, round(executed)))))
+        total_cost = 0.0
+        fills: List[ExecutionRecord] = []
+        for slice_index in range(slices):
+            if remaining <= 0:
+                break
+            if slice_index == slices - 1:
+                qty = remaining
+            else:
+                qty = round(remaining * random.uniform(0.35, 0.7), 4)
+                qty = max(0.0001, min(qty, remaining))
+            price = order.average_price or order.price or round(random.uniform(25.0, 48000.0), 2)
+            timestamp = order.updated_at
+            record = ExecutionRecord(
+                execution_id=str(uuid.uuid4()),
+                order_id=order.order_id,
+                symbol=order.symbol,
+                venue=order.venue,
+                price=round(price, 2),
+                quantity=round(qty, 4),
+                side=order.side,
+                liquidity=random.choice(["maker", "taker"]),
+                fees=round(price * qty * 0.0004, 4),
+                timestamp=timestamp,
+                node_id=order.node_id,
+            )
+            fills.append(record)
+            total_cost += record.price * record.quantity
+            remaining = round(max(0.0, remaining - qty), 4)
+
+        if not fills:
+            return
+
+        self._executions[order.order_id].extend(fills)
+        filled_qty = sum(fill.quantity for fill in fills)
+        order.filled_quantity = round(min(order.quantity, filled_qty), 4)
+        if filled_qty > 0:
+            order.average_price = round(total_cost / filled_qty, 2)
+
+    def _trim_orders(self, limit: int = 120) -> None:
+        if len(self._orders) <= limit:
+            return
+        ordered = sorted(self._orders.values(), key=lambda o: o.created_at)
+        for stale in ordered[: len(self._orders) - limit]:
+            self._orders.pop(stale.order_id, None)
+            self._executions.pop(stale.order_id, None)
+
+    def _create_random_order(self) -> OrderRecord:
+        now = datetime.utcnow()
+        order = OrderRecord(
+            order_id=self._next_order_id(),
+            client_order_id=f"CL-{1000 + self._order_counter}",
+            venue_order_id=None,
+            symbol=random.choice(["BTCUSDT", "ETHUSDT", "SOLUSDT", "ADAUSDT", "AAPL.XNAS", "MSFT.XNAS"]),
+            venue=random.choice(["BINANCE", "COINBASE", "NASDAQ", "FTX"]),
+            side=random.choice(["buy", "sell"]),
+            type=random.choice(["limit", "market", "stop", "stop_limit"]),
+            quantity=round(random.uniform(0.2, 8.0), 4),
+            filled_quantity=0.0,
+            price=round(random.uniform(20.0, 50000.0), 2),
+            average_price=None,
+            status="pending",
+            time_in_force=random.choice(["GTC", "IOC", "FOK"]),
+            node_id=random.choice(["lv-00112233", "bt-00ffaacc", "rv-0099abba"]),
+            created_at=_isoformat(now),
+            updated_at=_isoformat(now),
+        )
+        self._register_order(order)
+        self._trim_orders()
+        return order
+
+    def _apply_fill(self, order: OrderRecord) -> None:
+        remaining = max(0.0, order.quantity - order.filled_quantity)
+        if remaining <= 0:
+            order.status = "filled"
+            return
+
+        partial = remaining > 0.05 and random.random() < 0.6
+        fill_qty = remaining if not partial else round(remaining * random.uniform(0.25, 0.75), 4)
+        fill_qty = max(0.0001, min(fill_qty, remaining))
+
+        prev_qty = order.filled_quantity
+        prev_cost = (order.average_price or 0.0) * prev_qty
+        price = order.price or round(random.uniform(25.0, 48000.0), 2)
+        timestamp = _utcnow_iso()
+
+        order.filled_quantity = round(min(order.quantity, prev_qty + fill_qty), 4)
+        total_cost = prev_cost + price * fill_qty
+        if order.filled_quantity > 0:
+            order.average_price = round(total_cost / order.filled_quantity, 2)
+
+        order.status = "filled" if abs(order.quantity - order.filled_quantity) < 1e-6 else "working"
+        order.updated_at = timestamp
+        order.venue_order_id = order.venue_order_id or f"VN-{random.randint(100000, 999999)}"
+
+        record = ExecutionRecord(
+            execution_id=str(uuid.uuid4()),
+            order_id=order.order_id,
+            symbol=order.symbol,
+            venue=order.venue,
+            price=round(price, 2),
+            quantity=round(fill_qty, 4),
+            side=order.side,
+            liquidity=random.choice(["maker", "taker"]),
+            fees=round(price * fill_qty * 0.0004, 4),
+            timestamp=timestamp,
+            node_id=order.node_id,
+        )
+        self._executions.setdefault(order.order_id, []).append(record)
+        self._executions[order.order_id] = self._executions[order.order_id][-40:]
+
+    def _apply_cancel(self, order: OrderRecord) -> None:
+        order.status = "cancelled"
+        order.updated_at = _utcnow_iso()
+
+    def _apply_reject(self, order: OrderRecord) -> None:
+        order.status = "rejected"
+        order.updated_at = _utcnow_iso()
+        order.venue_order_id = None
+
+    def _advance_orders_state(self) -> None:
+        if not self._orders:
+            return
+
+        open_orders = [
+            order
+            for order in self._orders.values()
+            if order.status in {"pending", "working"}
+        ]
+
+        if open_orders and random.random() < 0.75:
+            order = random.choice(open_orders)
+            action_roll = random.random()
+            if action_roll < 0.65:
+                self._apply_fill(order)
+            elif action_roll < 0.82:
+                self._apply_cancel(order)
+            elif order.status == "pending" and action_roll < 0.9:
+                self._apply_reject(order)
+
+        if random.random() < 0.4:
+            self._create_random_order()
+
+        self._trim_orders()
+
+    def orders_snapshot(self) -> dict:
+        ordered = sorted(
+            self._orders.values(),
+            key=lambda order: (order.created_at, order.order_id),
+            reverse=True,
+        )
+        executions = list(
+            itertools.chain.from_iterable(
+                self._executions.get(order.order_id, []) for order in ordered
+            )
+        )
+        executions.sort(key=lambda execution: execution.timestamp, reverse=True)
+
+        return {
+            "orders": [asdict(order) for order in ordered],
+            "executions": [asdict(execution) for execution in executions],
+        }
+
+    def orders_stream_payload(self) -> dict:
+        self._advance_orders_state()
+        return self.orders_snapshot()
+
+    def cancel_order(self, order_id: str) -> dict:
+        order = self._orders.get(order_id)
+        if order is None:
+            raise ValueError(f"Order '{order_id}' not found")
+        if order.status in {"filled", "cancelled", "rejected"}:
+            return {"order": asdict(order)}
+        self._apply_cancel(order)
+        return {"order": asdict(order)}
+
+    def duplicate_order(self, order_id: str) -> dict:
+        original = self._orders.get(order_id)
+        if original is None:
+            raise ValueError(f"Order '{order_id}' not found")
+
+        now = _utcnow_iso()
+        duplicate = OrderRecord(
+            order_id=self._next_order_id(),
+            client_order_id=(f"{original.client_order_id}-COPY" if original.client_order_id else None),
+            venue_order_id=None,
+            symbol=original.symbol,
+            venue=original.venue,
+            side=original.side,
+            type=original.type,
+            quantity=original.quantity,
+            filled_quantity=0.0,
+            price=original.price,
+            average_price=None,
+            status="pending",
+            time_in_force=original.time_in_force,
+            node_id=original.node_id,
+            created_at=now,
+            updated_at=now,
+        )
+        self._register_order(duplicate)
+        self._trim_orders()
+        return {"order": asdict(duplicate)}
 
     def start_backtest(
         self,

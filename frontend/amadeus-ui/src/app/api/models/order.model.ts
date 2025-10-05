@@ -5,20 +5,21 @@ export type TimeInForce = 'GTC' | 'IOC' | 'FOK' | 'GTD' | string;
 
 export interface OrderSummary {
   order_id: string;
-  client_order_id?: string;
-  venue_order_id?: string;
+  client_order_id?: string | null;
+  venue_order_id?: string | null;
   symbol: string;
   venue: string;
   side: OrderSide;
   type: OrderType;
   quantity: number;
   filled_quantity: number;
-  price?: number;
-  average_price?: number;
+  price?: number | null;
+  average_price?: number | null;
   status: OrderStatus;
-  time_in_force?: TimeInForce;
+  time_in_force?: TimeInForce | null;
+  node_id?: string | null;
   created_at: string;
-  updated_at?: string;
+  updated_at?: string | null;
 }
 
 export interface ExecutionReport {
@@ -29,9 +30,10 @@ export interface ExecutionReport {
   price: number;
   quantity: number;
   side: OrderSide;
-  liquidity?: 'maker' | 'taker' | string;
-  fees?: number;
+  liquidity?: 'maker' | 'taker' | string | null;
+  fees?: number | null;
   timestamp: string;
+  node_id?: string | null;
 }
 
 export interface OrdersResponse {
@@ -41,4 +43,9 @@ export interface OrdersResponse {
 
 export interface OrderResponse {
   order: OrderSummary;
+}
+
+export interface OrdersStreamMessage {
+  orders?: OrderSummary[];
+  executions?: ExecutionReport[];
 }

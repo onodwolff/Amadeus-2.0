@@ -15,4 +15,12 @@ export class OrdersApi {
   getOrder(orderId: string): Observable<OrderResponse> {
     return this.http.get<OrderResponse>(buildApiUrl(`/orders/${orderId}`));
   }
+
+  cancelOrder(orderId: string): Observable<OrderResponse> {
+    return this.http.post<OrderResponse>(buildApiUrl(`/orders/${orderId}/cancel`), {});
+  }
+
+  duplicateOrder(orderId: string): Observable<OrderResponse> {
+    return this.http.post<OrderResponse>(buildApiUrl(`/orders/${orderId}/duplicate`), {});
+  }
 }

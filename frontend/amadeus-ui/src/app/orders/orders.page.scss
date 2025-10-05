@@ -1,0 +1,350 @@
+.orders-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.orders-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.orders-page__title {
+  font-size: 2rem;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.orders-page__subtitle {
+  margin: 0;
+  max-width: 640px;
+  color: rgba(229, 231, 235, 0.72);
+}
+
+.orders-page__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.meta-card {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(17, 24, 39, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meta-card__label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.meta-card__value {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.meta-card__value--warn {
+  color: #f97316;
+}
+
+.orders-page__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: rgba(226, 232, 240, 0.86);
+}
+
+.filter-field select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(17, 24, 39, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #f9fafb;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.filter-field select:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.65);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.orders-page__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.stat-card {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-card__label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.stat-card__value {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.orders-page__error {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.45);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #fecaca;
+}
+
+.orders-page__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.orders-page__spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(59, 130, 246, 0.6);
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.orders-table table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.orders-table thead {
+  background: rgba(30, 41, 59, 0.88);
+}
+
+.orders-table th,
+.orders-table td {
+  padding: 14px 18px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  vertical-align: top;
+}
+
+.orders-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.orders-table__row--open {
+  border-left: 4px solid rgba(59, 130, 246, 0.6);
+}
+
+.orders-table__row--filled {
+  border-left: 4px solid rgba(52, 211, 153, 0.65);
+}
+
+.orders-table__row--rejected {
+  border-left: 4px solid rgba(248, 113, 113, 0.65);
+}
+
+.cell-main {
+  font-weight: 500;
+}
+
+.cell-sub {
+  color: rgba(226, 232, 240, 0.64);
+  font-size: 0.8rem;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.status--open {
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+}
+
+.status--filled {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
+.status--cancelled {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fcd34d;
+}
+
+.status--rejected {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+}
+
+.side {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+  background: rgba(148, 163, 184, 0.16);
+  margin-right: 6px;
+}
+
+.side--buy {
+  background: rgba(52, 211, 153, 0.2);
+  color: #6ee7b7;
+}
+
+.side--sell {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fecaca;
+}
+
+.type-tag {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+  letter-spacing: 0.05em;
+}
+
+.executions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.executions-list__timestamp {
+  display: inline-block;
+  margin-left: 8px;
+  color: rgba(226, 232, 240, 0.56);
+  font-size: 0.75rem;
+}
+
+.orders-table__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(17, 24, 39, 0.8);
+  color: #f9fafb;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.45);
+  transform: translateY(-1px);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn--ghost {
+  background: transparent;
+}
+
+.orders-page__empty {
+  padding: 48px;
+  border-radius: 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.3);
+  text-align: center;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+@media (max-width: 960px) {
+  .orders-table thead {
+    display: none;
+  }
+
+  .orders-table table,
+  .orders-table tbody,
+  .orders-table tr,
+  .orders-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .orders-table tr {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    padding: 12px 0;
+  }
+
+  .orders-table td {
+    border: none;
+    padding: 8px 0;
+  }
+
+  .orders-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(148, 163, 184, 0.7);
+    margin-bottom: 2px;
+  }
+
+  .orders-table__actions {
+    justify-content: flex-start;
+  }
+}
