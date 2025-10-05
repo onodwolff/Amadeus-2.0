@@ -1,92 +1,223 @@
 import { Injectable } from '@angular/core';
+import { BehaviorSubject, Observable, Subscription } from 'rxjs';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
-import { Subscription } from 'rxjs';
 import { buildWebSocketUrl } from './api-base';
 
-interface SubscribeOptions {
-  onOpen?: () => void;
-  onClose?: () => void;
-  onError?: (err: unknown) => void;
+export type WsConnectionState = 'connecting' | 'connected' | 'disconnected';
+
+export interface WsChannelConfig<T> {
+  /**
+   * Logical channel name. Channels with the same name reuse the same underlying connection.
+   */
+  name: string;
+  /**
+   * Relative websocket path (e.g. `/ws/nodes`) or an absolute websocket URL.
+   */
+  path: string;
+  /**
+   * Number of reconnection attempts before failing the stream. `Infinity` by default.
+   */
   retryAttempts?: number;
+  /**
+   * Base delay in milliseconds for exponential back-off reconnection attempts.
+   */
   retryDelay?: number;
+}
+
+export interface WsChannelHandle<T> {
+  readonly name: string;
+  readonly messages$: Observable<T>;
+  readonly state$: Observable<WsConnectionState>;
+}
+
+interface ResolvedChannelConfig<T> {
+  name: string;
+  url: string;
+  retryAttempts: number;
+  retryDelay: number;
+}
+
+interface InternalChannelState<T> {
+  config: ResolvedChannelConfig<T>;
+  source$: Observable<T>;
+  statusSubject: BehaviorSubject<WsConnectionState>;
+  refCount: number;
 }
 
 @Injectable({ providedIn: 'root' })
 export class WsService {
-  subscribe<T>(path: string, next: (msg: T) => void, options: SubscribeOptions = {}): () => void {
-    const url = path.startsWith('ws') ? path : buildWebSocketUrl(path);
-    const maxAttempts = options.retryAttempts ?? 0;
-    const baseDelay = options.retryDelay ?? 1000;
+  private readonly channels = new Map<string, InternalChannelState<unknown>>();
 
-    let socket: WebSocketSubject<T> | undefined;
-    let subscription: Subscription | undefined;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-    let attempt = 0;
-    let isStopped = false;
+  channel<T>(config: WsChannelConfig<T>): WsChannelHandle<T> {
+    const resolved = this.resolveConfig(config);
+    const existing = this.channels.get(resolved.name) as InternalChannelState<T> | undefined;
 
-    const clearReconnectTimer = () => {
-      if (reconnectTimer !== undefined) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
+    if (existing) {
+      if (existing.config.url !== resolved.url) {
+        throw new Error(
+          `WebSocket channel "${resolved.name}" already exists with a different target URL`,
+        );
       }
+      return this.createHandle(resolved.name, existing);
+    }
+
+    const statusSubject = new BehaviorSubject<WsConnectionState>('connecting');
+    const source$ = this.createSourceObservable(resolved, statusSubject);
+    const state: InternalChannelState<T> = {
+      config: resolved,
+      source$,
+      statusSubject,
+      refCount: 0,
     };
 
-    const cleanup = () => {
-      subscription?.unsubscribe();
-      subscription = undefined;
-      socket?.complete();
-      socket = undefined;
+    this.channels.set(resolved.name, state as InternalChannelState<unknown>);
+
+    return this.createHandle(resolved.name, state);
+  }
+
+  private resolveConfig<T>(config: WsChannelConfig<T>): ResolvedChannelConfig<T> {
+    const url = config.path.startsWith('ws') ? config.path : buildWebSocketUrl(config.path);
+    const retryAttempts = config.retryAttempts ?? Infinity;
+    const retryDelay = config.retryDelay ?? 1000;
+
+    return {
+      name: config.name,
+      url,
+      retryAttempts,
+      retryDelay,
     };
+  }
 
-    const handleDisconnect = (err?: unknown) => {
-      if (err !== undefined) {
-        console.error(`[ws] error from ${url}`, err);
-      } else {
-        console.warn(`[ws] connection closed for ${url}`);
-      }
+  private createSourceObservable<T>(
+    config: ResolvedChannelConfig<T>,
+    statusSubject: BehaviorSubject<WsConnectionState>,
+  ): Observable<T> {
+    return new Observable<T>((subscriber) => {
+      let socket: WebSocketSubject<T> | undefined;
+      let subscription: Subscription | undefined;
+      let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+      let attempt = 0;
+      let isStopped = false;
 
-      if (!isStopped && (maxAttempts === Infinity || attempt < maxAttempts)) {
-        const delay = baseDelay * Math.pow(2, attempt);
-        attempt += 1;
-        clearReconnectTimer();
-        options.onError?.(err ?? new Error('WebSocket disconnected'));
-        reconnectTimer = setTimeout(() => {
+      const clearReconnectTimer = () => {
+        if (reconnectTimer !== undefined) {
+          clearTimeout(reconnectTimer);
           reconnectTimer = undefined;
-          if (!isStopped) {
-            connect();
+        }
+      };
+
+      const cleanup = () => {
+        subscription?.unsubscribe();
+        subscription = undefined;
+        socket?.complete();
+        socket = undefined;
+      };
+
+      const scheduleReconnect = (err?: unknown) => {
+        cleanup();
+        statusSubject.next('disconnected');
+
+        if (
+          !isStopped &&
+          (config.retryAttempts === Infinity || attempt < config.retryAttempts)
+        ) {
+          const delay = config.retryDelay * Math.pow(2, attempt);
+          attempt += 1;
+          clearReconnectTimer();
+          if (err !== undefined) {
+            console.error(`[ws] error from ${config.url}`, err);
+          } else {
+            console.warn(`[ws] connection closed for ${config.url}`);
           }
-        }, delay);
-      } else {
-        options.onClose?.();
-      }
-    };
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined;
+            if (!isStopped) {
+              connect();
+            }
+          }, delay);
+        } else if (err !== undefined) {
+          subscriber.error(err);
+        } else {
+          subscriber.complete();
+        }
+      };
 
-    const connect = () => {
-      clearReconnectTimer();
-      socket = webSocket<T>({
-        url,
-        openObserver: {
-          next: () => {
-            attempt = 0;
-            options.onOpen?.();
+      const connect = () => {
+        statusSubject.next('connecting');
+        socket = webSocket<T>({
+          url: config.url,
+          openObserver: {
+            next: () => {
+              attempt = 0;
+              statusSubject.next('connected');
+            },
           },
-        },
+        });
+
+        subscription = socket.subscribe({
+          next: (value) => subscriber.next(value),
+          error: (err) => scheduleReconnect(err),
+          complete: () => scheduleReconnect(),
+        });
+      };
+
+      connect();
+
+      return () => {
+        isStopped = true;
+        clearReconnectTimer();
+        cleanup();
+        statusSubject.next('disconnected');
+      };
+    });
+  }
+
+  private createHandle<T>(name: string, state: InternalChannelState<T>): WsChannelHandle<T> {
+    const messages$ = this.createManagedObservable(name, state, state.source$);
+    const state$ = this.createManagedObservable(
+      name,
+      state,
+      state.statusSubject.asObservable(),
+    );
+
+    return {
+      name,
+      messages$,
+      state$,
+    };
+  }
+
+  private createManagedObservable<T>(
+    name: string,
+    state: InternalChannelState<unknown>,
+    source$: Observable<T>,
+  ): Observable<T> {
+    return new Observable<T>((observer) => {
+      state.refCount += 1;
+      const subscription = source$.subscribe({
+        next: (value) => observer.next(value),
+        error: (err) => observer.error(err),
+        complete: () => observer.complete(),
       });
 
-      subscription = socket.subscribe({
-        next,
-        error: (err) => handleDisconnect(err),
-        complete: () => handleDisconnect(),
-      });
-    };
+      return () => {
+        subscription.unsubscribe();
+        state.refCount = Math.max(0, state.refCount - 1);
+        if (state.refCount === 0) {
+          this.disposeChannel(name, state);
+        }
+      };
+    });
+  }
 
-    connect();
+  private disposeChannel(name: string, state: InternalChannelState<unknown>): void {
+    const tracked = this.channels.get(name);
+    if (tracked !== state) {
+      return;
+    }
 
-    return () => {
-      isStopped = true;
-      clearReconnectTimer();
-      cleanup();
-      options.onClose?.();
-    };
+    this.channels.delete(name);
+    state.statusSubject.next('disconnected');
+    state.statusSubject.complete();
   }
 }
