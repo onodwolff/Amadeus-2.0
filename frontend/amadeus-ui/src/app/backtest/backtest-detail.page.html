@@ -1,0 +1,15 @@
+<section class="backtest-detail">
+  <header>
+    <h1>Backtest run</h1>
+    <p>Review run status, configuration and simulation outputs.</p>
+  </header>
+
+  <div class="backtest-detail__content" *ngIf="runId$ | async as runId; else loading">
+    <p class="backtest-detail__run-id"><span>Run ID:</span> <code>{{ runId }}</code></p>
+    <p>This view will surface equity curves, fills and diagnostics in upcoming iterations.</p>
+  </div>
+
+  <ng-template #loading>
+    <p class="backtest-detail__loading">Loading backtest run…</p>
+  </ng-template>
+</section>
