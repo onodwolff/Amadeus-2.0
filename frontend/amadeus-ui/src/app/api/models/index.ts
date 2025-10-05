@@ -4,6 +4,7 @@ export * from './order.model';
 export * from './instrument.model';
 export * from './portfolio.model';
 export * from './risk.model';
+export * from './risk-alerts.model';
 export * from './key.model';
 export * from './backtest.model';
 export * from './watchlist.model';

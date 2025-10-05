@@ -6,6 +6,12 @@
   color: #0f172a;
 }
 
+.risk-streams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: 1.5rem;
+}
+
 .risk-page__header {
   display: flex;
   flex-direction: column;

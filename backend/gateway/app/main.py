@@ -253,6 +253,34 @@ def update_risk_limits(payload: RiskLimitsPayload):
     return svc.update_risk_limits(payload.dict())
 
 
+@app.post("/risk/alerts/{alert_id}/ack")
+def acknowledge_risk_alert(alert_id: str):
+    try:
+        return svc.acknowledge_risk_alert(alert_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/risk/alerts/{alert_id}/unlock")
+def unlock_risk_alert(alert_id: str):
+    try:
+        return svc.unlock_circuit_breaker(alert_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/risk/alerts/{alert_id}/escalate")
+def escalate_margin_call(alert_id: str):
+    try:
+        return svc.escalate_margin_call(alert_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.get("/orders")
 def get_orders():
     return svc.orders_snapshot()
@@ -319,6 +347,42 @@ async def ws_node_metrics(node_id: str, ws: WebSocket):
     except ValueError:
         await ws.send_text(json.dumps({"series": {}, "latest": None}))
         await ws.close(code=1008)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/risk/limit-breaches")
+async def ws_risk_limit_breaches(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.risk_limit_breaches_stream_payload()
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.0)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/risk/circuit-breakers")
+async def ws_risk_circuit_breakers(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.risk_circuit_breakers_stream_payload()
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.1)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/risk/margin-calls")
+async def ws_risk_margin_calls(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.risk_margin_calls_stream_payload()
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.2)
     except WebSocketDisconnect:
         return
 

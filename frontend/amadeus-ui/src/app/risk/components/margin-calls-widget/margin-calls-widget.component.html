@@ -1,0 +1,76 @@
+<section class="risk-alert-widget">
+  <header class="risk-alert-widget__header">
+    <h2>Margin calls</h2>
+    <ng-container *ngIf="state$ | async as state; else pendingState">
+      <span class="risk-alert-widget__status" [ngClass]="connectionClass(state)">
+        {{ connectionLabel(state) }}
+      </span>
+    </ng-container>
+    <ng-template #pendingState>
+      <span class="risk-alert-widget__status risk-alert-widget__status--connecting">Connecting</span>
+    </ng-template>
+  </header>
+
+  <ng-container *ngIf="alerts$ | async as alerts; else loading">
+    <div class="risk-alert-widget__body">
+      <p *ngIf="alerts.length === 0" class="risk-alert-widget__empty">
+        No outstanding margin calls.
+      </p>
+
+      <article *ngFor="let alert of alerts" class="risk-alert">
+        <div class="risk-alert__header">
+          <h3 class="risk-alert__title">{{ alert.title }}</h3>
+          <div class="risk-alert__meta">
+            <span class="risk-alert__severity" [ngClass]="'risk-alert__severity--' + alert.severity">
+              {{ severityLabel(alert.severity) }}
+            </span>
+            <span>{{ alert.timestamp | date: 'short' }}</span>
+          </div>
+        </div>
+
+        <p class="risk-alert__message">{{ alert.message }}</p>
+
+        <div class="risk-alert__context" *ngIf="contextEntries(alert).length > 0">
+          <span class="risk-alert__context-badge" *ngFor="let entry of contextEntries(alert)">
+            {{ entry.key }}: {{ entry.value }}
+          </span>
+        </div>
+
+        <div class="risk-alert__actions">
+          <button
+            type="button"
+            (click)="acknowledge(alert)"
+            [disabled]="alert.acknowledged || isActionPending(alert, 'ack')"
+          >
+            {{ alert.acknowledged ? 'Acknowledged' : 'Acknowledge' }}
+          </button>
+          <button
+            type="button"
+            class="danger"
+            (click)="escalate(alert)"
+            [disabled]="!alert.escalatable || alert.escalated || isActionPending(alert, 'escalate')"
+          >
+            {{ alert.escalated ? 'Escalated' : 'Escalate' }}
+          </button>
+        </div>
+
+        <p class="risk-alert__status" *ngIf="alert.escalated">
+          <span>Escalated at <strong>{{ alert.escalated_at | date: 'shortTime' }}</strong></span>
+        </p>
+
+        <p class="risk-alert__status" *ngIf="alert.acknowledged">
+          <span>
+            Acknowledged by <strong>{{ alert.acknowledged_by || 'operator' }}</strong>
+          </span>
+          <span *ngIf="alert.acknowledged_at">
+            at {{ alert.acknowledged_at | date: 'shortTime' }}
+          </span>
+        </p>
+      </article>
+    </div>
+  </ng-container>
+
+  <ng-template #loading>
+    <p class="risk-alert-widget__loading">Listening for margin call updates…</p>
+  </ng-template>
+</section>

@@ -16,6 +16,12 @@
     </section>
 
     <ng-template #content>
+      <section class="risk-streams">
+        <app-risk-limit-breaches-widget></app-risk-limit-breaches-widget>
+        <app-risk-circuit-breakers-widget></app-risk-circuit-breakers-widget>
+        <app-risk-margin-calls-widget></app-risk-margin-calls-widget>
+      </section>
+
       <form class="risk-form" [formGroup]="form" (ngSubmit)="onSubmit()">
         <section class="risk-module" [formGroup]="positionLimitsGroup">
           <header class="risk-module__header">
