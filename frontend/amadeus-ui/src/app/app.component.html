@@ -1,48 +1,17 @@
-<div style="font-family: Arial; margin: 16px;">
-  <h1>{{ title }}</h1>
-
-  <section>
-    <h3>Status</h3>
-    <div>WS: {{ wsState }}</div>
-    <pre>health: {{ health | json }}</pre>
-    <pre>core:   {{ core | json }}</pre>
-    <div *ngIf="errorText" style="color:crimson">{{ errorText }}</div>
-  </section>
-
-  <section style="margin: 12px 0;">
-    <button (click)="startBacktest()">Start Backtest</button>
-    <button (click)="startLive()" style="margin-left: 8px;">Start Live</button>
-    <button (click)="refreshOnce()" style="margin-left: 8px;">Refresh</button>
-  </section>
-
-  <section>
-    <h3>Nodes (live)</h3>
-
-    <!-- Таблица для наглядности -->
-    <table border="1" cellpadding="6" cellspacing="0">
-      <thead>
-      <tr>
-        <th>ID</th><th>Mode</th><th>Status</th><th>Detail</th><th>PnL</th><th>Latency</th><th>Actions</th>
-      </tr>
-      </thead>
-      <tbody>
-      <tr *ngFor="let n of nodes.nodes">
-        <td>{{ n.id }}</td>
-        <td>{{ n.mode }}</td>
-        <td>{{ n.status }}</td>
-        <td>{{ n.detail }}</td>
-        <td>{{ n.metrics?.pnl }}</td>
-        <td>{{ n.metrics?.latency_ms }} ms</td>
-        <td><button (click)="stop(n.id)">Stop</button></td>
-      </tr>
-      <tr *ngIf="!nodes?.nodes?.length">
-        <td colspan="7"><i>No nodes yet</i></td>
-      </tr>
-      </tbody>
-    </table>
-
-    <!-- Сырой JSON для дебага -->
-    <h4>Raw</h4>
-    <pre>{{ nodes | json }}</pre>
-  </section>
-</div>
+<header class="app-header">
+  <div class="app-header__inner">
+    <a routerLink="/" class="app-brand">Amadeus</a>
+    <nav class="app-nav">
+      <a routerLink="/nodes" routerLinkActive="active" class="app-nav__link">Nodes</a>
+      <a routerLink="/market" routerLinkActive="active" class="app-nav__link">Market</a>
+      <a routerLink="/portfolio" routerLinkActive="active" class="app-nav__link">Portfolio</a>
+      <a routerLink="/orders" routerLinkActive="active" class="app-nav__link">Orders</a>
+      <a routerLink="/backtest" routerLinkActive="active" class="app-nav__link">Backtest</a>
+      <a routerLink="/risk" routerLinkActive="active" class="app-nav__link">Risk</a>
+      <a routerLink="/keys" routerLinkActive="active" class="app-nav__link">Keys</a>
+    </nav>
+  </div>
+</header>
+<main class="app-main">
+  <router-outlet></router-outlet>
+</main>
