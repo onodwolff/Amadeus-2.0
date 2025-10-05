@@ -45,6 +45,18 @@ export interface OrderResponse {
   order: OrderSummary;
 }
 
+export interface CreateOrderPayload {
+  symbol: string;
+  venue: string;
+  side: OrderSide;
+  type: OrderType;
+  quantity: number;
+  price?: number;
+  time_in_force?: TimeInForce | string;
+  node_id?: string;
+  client_order_id?: string;
+}
+
 export interface OrdersStreamMessage {
   orders?: OrderSummary[];
   executions?: ExecutionReport[];

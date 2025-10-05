@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio, json
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
@@ -50,6 +50,18 @@ class NodeLaunchPayload(BaseModel):
     dataSources: List[NodeLaunchDataSource] = Field(default_factory=list)
     keyReferences: List[NodeLaunchKeyReference] = Field(default_factory=list)
     constraints: NodeLaunchConstraints = Field(default_factory=NodeLaunchConstraints)
+
+
+class OrderCreatePayload(BaseModel):
+    symbol: str
+    venue: str
+    side: str
+    type: str
+    quantity: float
+    price: Optional[float] = None
+    time_in_force: Optional[str] = None
+    client_order_id: Optional[str] = None
+    node_id: Optional[str] = None
 
 
 def build_launch_detail(payload: NodeLaunchPayload) -> str:
@@ -185,9 +197,19 @@ def get_portfolio_history(limit: int = 720):
     return svc.portfolio_history(limit=limit)
 
 
+@app.get("/risk")
+def get_risk():
+    return svc.risk_snapshot()
+
+
 @app.get("/orders")
 def get_orders():
     return svc.orders_snapshot()
+
+
+@app.post("/orders")
+def create_order(payload: OrderCreatePayload):
+    return svc.create_order(payload.dict())
 
 
 @app.post("/orders/{order_id}/cancel")

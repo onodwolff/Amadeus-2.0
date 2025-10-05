@@ -1,0 +1,103 @@
+<section class="order-ticket" [class.order-ticket--loading]="isLoading()">
+  <header class="order-ticket__header">
+    <div>
+      <h2>New order</h2>
+      <p>Submit trade instructions directly to Nautilus nodes.</p>
+    </div>
+    <span class="order-ticket__status" *ngIf="isLoading()">Loading portfolio…</span>
+  </header>
+  <form class="order-ticket__form" [formGroup]="form" (ngSubmit)="onSubmit()">
+    <div class="order-ticket__row">
+      <label class="form-field">
+        <span>Symbol</span>
+        <input formControlName="symbol" placeholder="BTCUSDT" autocomplete="off" />
+      </label>
+      <label class="form-field">
+        <span>Venue</span>
+        <input formControlName="venue" placeholder="BINANCE" autocomplete="off" />
+      </label>
+    </div>
+    <div class="order-ticket__row">
+      <label class="form-field">
+        <span>Side</span>
+        <select formControlName="side">
+          <option value="buy">Buy</option>
+          <option value="sell">Sell</option>
+        </select>
+      </label>
+      <label class="form-field">
+        <span>Type</span>
+        <select formControlName="type">
+          <option *ngFor="let option of orderTypes" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+      <label class="form-field">
+        <span>Time in force</span>
+        <select formControlName="time_in_force">
+          <option *ngFor="let option of tifOptions" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+    </div>
+    <div class="order-ticket__row">
+      <label class="form-field">
+        <span>Quantity</span>
+        <input type="number" formControlName="quantity" min="0" step="0.0001" />
+      </label>
+      <label class="form-field" *ngIf="selectedType() !== 'market'">
+        <span>{{ selectedType() === 'stop' ? 'Stop price' : 'Limit price' }}</span>
+        <input type="number" formControlName="price" min="0" step="0.0001" />
+      </label>
+      <div class="form-field" *ngIf="selectedType() === 'market'">
+        <span>Price</span>
+        <div class="form-field__placeholder">Market</div>
+      </div>
+    </div>
+    <div class="order-ticket__row">
+      <label class="form-field">
+        <span>Node (optional)</span>
+        <input formControlName="node_id" placeholder="lv-00112233" />
+      </label>
+      <label class="form-field">
+        <span>Client order ID</span>
+        <input formControlName="client_order_id" placeholder="CLIENT-123" />
+      </label>
+    </div>
+    <div class="order-ticket__summary">
+      <div class="summary-card">
+        <span class="summary-card__label">Quote currency</span>
+        <span class="summary-card__value">{{ currentQuoteCurrency() || '—' }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Available balance</span>
+        <span class="summary-card__value">
+          <ng-container *ngIf="availableBalance() as balance; else balanceUnknown">
+            {{ balance | number: '1.2-2' }}
+            <span class="summary-card__suffix">{{ currentQuoteCurrency() }}</span>
+          </ng-container>
+        </span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Sellable quantity</span>
+        <span class="summary-card__value">{{ sellableQuantity() | number: '1.0-4' }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Estimated notional</span>
+        <span class="summary-card__value">
+          <ng-container *ngIf="estimatedNotional() as notional; else notionalUnknown">
+            {{ notional | number: '1.2-2' }}
+            <span class="summary-card__suffix">{{ currentQuoteCurrency() }}</span>
+          </ng-container>
+        </span>
+      </div>
+    </div>
+    <ng-template #balanceUnknown>—</ng-template>
+    <ng-template #notionalUnknown>—</ng-template>
+    <ul class="order-ticket__errors" *ngIf="formErrors().length > 0">
+      <li *ngFor="let error of formErrors()">{{ error }}</li>
+    </ul>
+    <button type="submit" class="order-ticket__submit" [disabled]="isLoading() || isSubmitting()">
+      <span *ngIf="isSubmitting(); else submitText">Submitting…</span>
+      <ng-template #submitText>Submit order</ng-template>
+    </button>
+  </form>
+</section>
