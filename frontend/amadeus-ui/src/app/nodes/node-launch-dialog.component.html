@@ -1,0 +1,239 @@
+<div class="launch-dialog" *ngIf="isOpen()">
+  <div class="launch-dialog__backdrop" (click)="close()" aria-hidden="true"></div>
+  <div class="launch-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="launchDialogTitle">
+    <header class="launch-dialog__header">
+      <div>
+        <p class="launch-dialog__eyebrow">Node launch wizard</p>
+        <h2 class="launch-dialog__title" id="launchDialogTitle">{{ currentStepDescriptor().title }}</h2>
+        <p class="launch-dialog__subtitle">{{ currentStepDescriptor().description }}</p>
+      </div>
+      <button type="button" class="launch-dialog__close" (click)="close()" aria-label="Close launch wizard">×</button>
+    </header>
+
+    <nav class="launch-dialog__steps" aria-label="Wizard steps">
+      <ol>
+        <li *ngFor="let step of steps; let i = index" [class.launch-dialog__step--active]="i === currentStep()">
+          <span class="launch-dialog__step-index">{{ i + 1 }}</span>
+          <span class="launch-dialog__step-label">{{ step.title }}</span>
+        </li>
+      </ol>
+    </nav>
+
+    <form class="launch-dialog__form" [formGroup]="form" (ngSubmit)="submit()">
+      <section *ngIf="currentStep() === 0" class="launch-dialog__section" aria-label="Node type selection">
+        <div class="option-grid">
+          <label *ngFor="let option of nodeTypeOptions" class="option-card" [class.option-card--active]="form.value.nodeType === option.value">
+            <input type="radio" formControlName="nodeType" [value]="option.value" />
+            <span class="option-card__title">{{ option.label }}</span>
+            <span class="option-card__description">{{ option.description }}</span>
+          </label>
+        </div>
+      </section>
+
+      <section *ngIf="currentStep() === 1" class="launch-dialog__section" formGroupName="strategy" aria-label="Strategy configuration">
+        <label class="field">
+          <span class="field__label">Strategy template</span>
+          <select class="field__control" formControlName="id" (change)="selectStrategy($event.target.value)">
+            <option *ngFor="let option of strategyTemplates" [value]="option.id">{{ option.name }}</option>
+          </select>
+          <span class="field__hint">
+            {{ strategyTemplates.find((item) => item.id === form.controls.strategy.controls.id.value)?.description || 'Select a template' }}
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Strategy instance name</span>
+          <input class="field__control" type="text" formControlName="name" placeholder="EMA Cross demo" />
+        </label>
+
+        <div class="field">
+          <div class="field__label">Runtime parameters</div>
+          <div class="parameter-list" formArrayName="parameters">
+            <div class="parameter-list__item" *ngFor="let param of strategyParameters().controls; let i = index" [formGroupName]="i">
+              <input class="field__control" type="text" formControlName="key" placeholder="Parameter key" />
+              <input class="field__control" type="text" formControlName="value" placeholder="Value" />
+              <button type="button" class="btn-icon" (click)="removeStrategyParameter(i)" aria-label="Remove parameter">✕</button>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary" (click)="addStrategyParameter()">Add parameter</button>
+        </div>
+      </section>
+
+      <section *ngIf="currentStep() === 2" class="launch-dialog__section" aria-label="Market data selection">
+        <div class="field">
+          <span class="field__label">Data sources & adapters</span>
+          <div class="data-source-list" formArrayName="dataSources">
+            <div class="data-source-list__item" *ngFor="let ds of dataSourcesArray().controls; let i = index" [formGroupName]="i">
+              <div class="data-source-list__row">
+                <label>
+                  <span class="field__label">Identifier</span>
+                  <input class="field__control" type="text" formControlName="id" placeholder="adapter id" />
+                </label>
+                <label>
+                  <span class="field__label">Label</span>
+                  <input class="field__control" type="text" formControlName="label" placeholder="Human readable label" />
+                </label>
+              </div>
+              <div class="data-source-list__row">
+                <label>
+                  <span class="field__label">Type</span>
+                  <select class="field__control" formControlName="type">
+                    <option value="historical">Historical</option>
+                    <option value="live">Live</option>
+                    <option value="synthetic">Synthetic</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="field__label">Mode</span>
+                  <select class="field__control" formControlName="mode">
+                    <option value="read">Read</option>
+                    <option value="write">Write</option>
+                    <option value="read-write">Read &amp; write</option>
+                  </select>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="enabled" />
+                  <span>Enabled</span>
+                </label>
+              </div>
+              <div class="data-source-list__actions">
+                <button type="button" class="btn-icon" (click)="removeDataSource(i)" aria-label="Remove data source">✕</button>
+              </div>
+            </div>
+          </div>
+          <div class="preset-list" *ngIf="dataSourcePresets.length">
+            <span class="preset-list__label">Presets</span>
+            <button
+              type="button"
+              class="btn-chip"
+              *ngFor="let preset of dataSourcePresets"
+              (click)="addDataSource(preset)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
+          <button type="button" class="btn-secondary" (click)="addDataSource()">Add data source</button>
+        </div>
+      </section>
+
+      <section *ngIf="currentStep() === 3" class="launch-dialog__section" aria-label="Credential references">
+        <div class="field">
+          <span class="field__label">Linked keys</span>
+          <div class="key-list" formArrayName="keyReferences">
+            <div class="key-list__item" *ngFor="let key of keyReferencesArray().controls; let i = index" [formGroupName]="i">
+              <div class="key-list__row">
+                <label>
+                  <span class="field__label">Alias</span>
+                  <input class="field__control" type="text" formControlName="alias" placeholder="Credential alias" />
+                </label>
+                <label>
+                  <span class="field__label">Key ID</span>
+                  <select class="field__control" formControlName="keyId">
+                    <option value="" disabled>Select key</option>
+                    <option *ngFor="let option of availableKeys" [value]="option.id">{{ option.alias }}</option>
+                  </select>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" formControlName="required" />
+                  <span>Required</span>
+                </label>
+              </div>
+              <div class="key-list__actions">
+                <button type="button" class="btn-icon" (click)="removeKeyReference(i)" aria-label="Remove key">✕</button>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary" (click)="addKeyReference()">Add key reference</button>
+        </div>
+      </section>
+
+      <section *ngIf="currentStep() === 4" class="launch-dialog__section" formGroupName="constraints" aria-label="Launch constraints">
+        <div class="constraints-grid">
+          <label class="field">
+            <span class="field__label">Max runtime (minutes)</span>
+            <input class="field__control" type="number" formControlName="maxRuntimeMinutes" min="1" placeholder="480" />
+          </label>
+          <label class="field">
+            <span class="field__label">Max drawdown (%)</span>
+            <input class="field__control" type="number" formControlName="maxDrawdownPercent" min="1" max="100" placeholder="20" />
+          </label>
+          <label class="field">
+            <span class="field__label">Concurrency limit</span>
+            <input class="field__control" type="number" formControlName="concurrencyLimit" min="1" placeholder="1" />
+          </label>
+          <label class="checkbox checkbox--inline">
+            <input type="checkbox" formControlName="autoStopOnError" />
+            <span>Auto-stop on critical error</span>
+          </label>
+        </div>
+      </section>
+
+      <section *ngIf="currentStep() === 5" class="launch-dialog__section launch-dialog__section--review" aria-label="Review configuration">
+        <dl class="review-grid">
+          <div>
+            <dt>Node type</dt>
+            <dd>{{ form.value.nodeType }}</dd>
+          </div>
+          <div>
+            <dt>Strategy</dt>
+            <dd>{{ form.value.strategy?.name }} ({{ form.value.strategy?.id }})</dd>
+          </div>
+          <div>
+            <dt>Parameters</dt>
+            <dd>
+              <ng-container *ngFor="let param of form.value.strategy?.parameters">
+                <span class="review-pill">{{ param.key }} = {{ param.value }}</span>
+              </ng-container>
+            </dd>
+          </div>
+          <div>
+            <dt>Data sources</dt>
+            <dd>
+              <ng-container *ngFor="let source of form.value.dataSources">
+                <span class="review-pill">
+                  {{ source.label || source.id }} · {{ source.type }} · {{ source.mode }}
+                  <ng-container *ngIf="!source.enabled">(disabled)</ng-container>
+                </span>
+              </ng-container>
+            </dd>
+          </div>
+          <div>
+            <dt>Keys</dt>
+            <dd>
+              <ng-container *ngFor="let key of form.value.keyReferences">
+                <span class="review-pill">{{ key.alias }} ({{ key.keyId }})</span>
+              </ng-container>
+            </dd>
+          </div>
+          <div>
+            <dt>Constraints</dt>
+            <dd>
+              <span class="review-pill" *ngIf="form.value.constraints?.maxRuntimeMinutes">
+                Max runtime: {{ form.value.constraints?.maxRuntimeMinutes }} min
+              </span>
+              <span class="review-pill" *ngIf="form.value.constraints?.maxDrawdownPercent">
+                Max drawdown: {{ form.value.constraints?.maxDrawdownPercent }}%
+              </span>
+              <span class="review-pill" *ngIf="form.value.constraints?.concurrencyLimit">
+                Concurrency limit: {{ form.value.constraints?.concurrencyLimit }}
+              </span>
+              <span class="review-pill">
+                Auto-stop: {{ form.value.constraints?.autoStopOnError ? 'enabled' : 'disabled' }}
+              </span>
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <p class="launch-dialog__error" *ngIf="stepError()">{{ stepError() }}</p>
+      <p class="launch-dialog__error" *ngIf="submissionError()">{{ submissionError() }}</p>
+
+      <footer class="launch-dialog__footer">
+        <button type="button" class="btn-tertiary" (click)="previousStep()" [disabled]="currentStep() === 0">Back</button>
+        <span class="launch-dialog__spacer"></span>
+        <button type="button" class="btn-secondary" (click)="nextStep()" *ngIf="currentStep() < steps.length - 1">Next</button>
+        <button type="submit" class="btn-primary" *ngIf="currentStep() === steps.length - 1">Launch node</button>
+      </footer>
+    </form>
+  </div>
+</div>

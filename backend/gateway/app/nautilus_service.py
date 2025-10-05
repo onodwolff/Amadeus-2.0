@@ -41,7 +41,13 @@ class NautilusService:
     def core_info(self) -> dict:
         return {"nautilus_version": NT_VERSION, "available": nt is not None}
 
-    def start_backtest(self, symbol: str = "BTCUSDT", venue: str = "BINANCE", bar: str = "1m") -> NodeHandle:
+    def start_backtest(
+        self,
+        symbol: str = "BTCUSDT",
+        venue: str = "BINANCE",
+        bar: str = "1m",
+        detail: Optional[str] = None,
+    ) -> NodeHandle:
         node_id = f"bt-{uuid.uuid4().hex[:8]}"
         handle = NodeHandle(id=node_id, mode="backtest", status="created")
         if nt is None:
@@ -50,11 +56,11 @@ class NautilusService:
             self._nodes[node_id] = handle
             return handle
         handle.status = "running"
-        handle.detail = f"Backtest node prepared (symbol={symbol}, venue={venue}, bar={bar})"
+        handle.detail = detail or f"Backtest node prepared (symbol={symbol}, venue={venue}, bar={bar})"
         self._nodes[node_id] = handle
         return handle
 
-    def start_live(self, venue: str = "BINANCE") -> NodeHandle:
+    def start_live(self, venue: str = "BINANCE", detail: Optional[str] = None) -> NodeHandle:
         node_id = f"lv-{uuid.uuid4().hex[:8]}"
         handle = NodeHandle(id=node_id, mode="live", status="created")
         if nt is None:
@@ -63,7 +69,7 @@ class NautilusService:
             self._nodes[node_id] = handle
             return handle
         handle.status = "running"
-        handle.detail = f"Live node prepared (venue={venue}). Configure adapters to proceed."
+        handle.detail = detail or f"Live node prepared (venue={venue}). Configure adapters to proceed."
         self._nodes[node_id] = handle
         return handle
 

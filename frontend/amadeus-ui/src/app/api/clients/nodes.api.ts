@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
-import { NodeResponse, NodesListResponse } from '../models';
+import { NodeLaunchRequest, NodeResponse, NodesListResponse } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class NodesApi {
@@ -12,12 +12,8 @@ export class NodesApi {
     return this.http.get<NodesListResponse>(buildApiUrl('/nodes'));
   }
 
-  startBacktest(): Observable<NodeResponse> {
-    return this.http.post<NodeResponse>(buildApiUrl('/nodes/backtest/start'), {});
-  }
-
-  startLive(): Observable<NodeResponse> {
-    return this.http.post<NodeResponse>(buildApiUrl('/nodes/live/start'), {});
+  launchNode(payload: NodeLaunchRequest): Observable<NodeResponse> {
+    return this.http.post<NodeResponse>(buildApiUrl('/nodes/launch'), payload);
   }
 
   stopNode(nodeId: string): Observable<NodeResponse> {
