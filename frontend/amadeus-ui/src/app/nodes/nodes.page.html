@@ -7,11 +7,27 @@
       </p>
     </div>
     <div class="nodes-page__actions">
-      <button type="button" class="btn btn--primary" (click)="startBacktest()">Start backtest</button>
-      <button type="button" class="btn btn--primary" (click)="startLive()">Start live</button>
-      <button type="button" class="btn" (click)="refresh()">Refresh</button>
+      <button
+        type="button"
+        class="btn btn--primary"
+        (click)="openWizard(launchDialog, 'backtest')"
+        [disabled]="isLaunching()"
+      >
+        Launch backtest
+      </button>
+      <button
+        type="button"
+        class="btn btn--primary"
+        (click)="openWizard(launchDialog, 'live')"
+        [disabled]="isLaunching()"
+      >
+        Launch live
+      </button>
+      <button type="button" class="btn" (click)="refresh()" [disabled]="isLoading()">Refresh</button>
     </div>
   </header>
+
+  <app-node-launch-dialog #launchDialog (launch)="onLaunchNode($event, launchDialog)"></app-node-launch-dialog>
 
   <div class="nodes-page__meta">
     <div class="meta-card">

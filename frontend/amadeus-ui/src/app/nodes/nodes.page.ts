@@ -2,22 +2,24 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, signal } from '@angular/core';
 import { NodesApi } from '../api/clients/nodes.api';
 import { SystemApi } from '../api/clients/system.api';
-import { CoreInfo, HealthStatus, NodeHandle } from '../api/models';
+import { CoreInfo, HealthStatus, NodeHandle, NodeLaunchRequest, NodeMode } from '../api/models';
 import { WsService } from '../ws.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { observeNodesStream } from '../ws';
 import { WsConnectionState } from '../ws.service';
+import { NodeLaunchDialogComponent } from './node-launch-dialog.component';
 
 @Component({
   standalone: true,
   selector: 'app-nodes-page',
-  imports: [CommonModule],
+  imports: [CommonModule, NodeLaunchDialogComponent],
   templateUrl: './nodes.page.html',
   styleUrls: ['./nodes.page.scss'],
 })
 export class NodesPage implements OnInit {
   readonly nodes = signal<NodeHandle[]>([]);
   readonly isLoading = signal(false);
+  readonly isLaunching = signal(false);
   readonly wsState = signal<WsConnectionState>('connecting');
   readonly errorText = signal<string | null>(null);
   readonly coreInfo = signal<CoreInfo | null>(null);
@@ -55,27 +57,30 @@ export class NodesPage implements OnInit {
 
   readonly hasNodes = computed(() => this.nodes().length > 0);
 
-  startBacktest(): void {
-    this.errorText.set(null);
-    this.nodesApi.startBacktest().subscribe({
-      error: (err) => {
-        console.error(err);
-        const detail = err?.error?.detail || 'Failed to start backtest node.';
-        this.errorText.set(typeof detail === 'string' ? detail : 'Failed to start backtest node.');
-      },
-      next: () => this.fetchNodes(),
-    });
+  openWizard(dialog: NodeLaunchDialogComponent, nodeType: NodeMode): void {
+    dialog.open(nodeType);
   }
 
-  startLive(): void {
+  onLaunchNode(payload: NodeLaunchRequest, dialog: NodeLaunchDialogComponent): void {
     this.errorText.set(null);
-    this.nodesApi.startLive().subscribe({
+    dialog.clearSubmissionError();
+    this.isLaunching.set(true);
+    this.nodesApi.launchNode(payload).subscribe({
+      next: () => {
+        dialog.markAsCompleted();
+        this.fetchNodes();
+      },
       error: (err) => {
         console.error(err);
-        const detail = err?.error?.detail || 'Failed to start live node.';
-        this.errorText.set(typeof detail === 'string' ? detail : 'Failed to start live node.');
+        const detail = err?.error?.detail || 'Failed to launch node.';
+        const message = typeof detail === 'string' ? detail : 'Failed to launch node.';
+        this.errorText.set(message);
+        dialog.setSubmissionError(message);
+        this.isLaunching.set(false);
       },
-      next: () => this.fetchNodes(),
+      complete: () => {
+        this.isLaunching.set(false);
+      },
     });
   }
 

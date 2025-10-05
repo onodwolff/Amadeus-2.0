@@ -1,11 +1,88 @@
 from __future__ import annotations
 
 import asyncio, json, random
+from typing import List
+
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from .settings import settings
 from .nautilus_service import svc, NodeHandle
+
+
+class NodeLaunchStrategyParameter(BaseModel):
+    key: str
+    value: str
+
+
+class NodeLaunchStrategy(BaseModel):
+    id: str
+    name: str
+    parameters: List[NodeLaunchStrategyParameter] = Field(default_factory=list)
+
+
+class NodeLaunchDataSource(BaseModel):
+    id: str
+    label: str
+    type: str
+    mode: str
+    enabled: bool = True
+
+
+class NodeLaunchKeyReference(BaseModel):
+    alias: str
+    keyId: str
+    required: bool = True
+
+
+class NodeLaunchConstraints(BaseModel):
+    maxRuntimeMinutes: int | None = None
+    maxDrawdownPercent: float | None = None
+    autoStopOnError: bool = True
+    concurrencyLimit: int | None = None
+
+
+class NodeLaunchPayload(BaseModel):
+    type: str
+    strategy: NodeLaunchStrategy
+    dataSources: List[NodeLaunchDataSource] = Field(default_factory=list)
+    keyReferences: List[NodeLaunchKeyReference] = Field(default_factory=list)
+    constraints: NodeLaunchConstraints = Field(default_factory=NodeLaunchConstraints)
+
+
+def build_launch_detail(payload: NodeLaunchPayload) -> str:
+    parts: List[str] = []
+    strategy_summary = f"Strategy {payload.strategy.name} ({payload.strategy.id})"
+    if payload.strategy.parameters:
+        params = ", ".join(f"{param.key}={param.value}" for param in payload.strategy.parameters)
+        strategy_summary += f" [{params}]"
+    parts.append(strategy_summary)
+
+    if payload.dataSources:
+        sources = ", ".join(f"{source.label or source.id}" for source in payload.dataSources)
+        parts.append(f"Data: {sources}")
+
+    if payload.keyReferences:
+        keys = ", ".join(key.alias for key in payload.keyReferences)
+        parts.append(f"Keys: {keys}")
+
+    constraint_bits: List[str] = []
+    constraints = payload.constraints
+    if constraints.maxRuntimeMinutes is not None:
+        constraint_bits.append(f"max {constraints.maxRuntimeMinutes} min")
+    if constraints.maxDrawdownPercent is not None:
+        constraint_bits.append(f"drawdown {constraints.maxDrawdownPercent}%")
+    if constraints.concurrencyLimit is not None:
+        constraint_bits.append(f"limit {constraints.concurrencyLimit}")
+    if constraints.autoStopOnError:
+        constraint_bits.append("auto-stop")
+    if constraint_bits:
+        parts.append("Constraints: " + ", ".join(constraint_bits))
+
+    node_type = payload.type.capitalize()
+    parts.insert(0, f"{node_type} node")
+    return " | ".join(parts)
 
 app = FastAPI(title="Amadeus Gateway")
 
@@ -38,6 +115,19 @@ def start_backtest():
 @app.post("/nodes/live/start")
 def start_live():
     node: NodeHandle = svc.start_live()
+    return {"node": svc.as_dict(node)}
+
+
+@app.post("/nodes/launch")
+def launch_node(payload: NodeLaunchPayload):
+    node_type = payload.type.lower()
+    detail = build_launch_detail(payload)
+    if node_type == "backtest":
+        node = svc.start_backtest(detail=detail)
+    elif node_type == "live":
+        node = svc.start_live(detail=detail)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported node type '{payload.type}'")
     return {"node": svc.as_dict(node)}
 
 @app.post("/nodes/{node_id}/stop")
