@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio, json
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
@@ -200,6 +200,57 @@ def get_portfolio_history(limit: int = 720):
 @app.get("/risk")
 def get_risk():
     return svc.risk_snapshot()
+
+
+RiskModuleStatus = Literal["up_to_date", "stale", "syncing", "error"]
+
+
+class PositionLimitConfig(BaseModel):
+    venue: str
+    node: str
+    limit: float = Field(..., gt=0)
+
+
+class PositionLimitsModule(BaseModel):
+    enabled: bool
+    status: RiskModuleStatus
+    limits: List[PositionLimitConfig] = Field(default_factory=list)
+
+
+class MaxLossModule(BaseModel):
+    enabled: bool
+    status: RiskModuleStatus
+    daily: float = Field(..., ge=0)
+    weekly: float = Field(..., ge=0)
+
+
+class TradeLockConfig(BaseModel):
+    venue: str
+    node: str
+    locked: bool
+    reason: Optional[str] = None
+
+
+class TradeLocksModule(BaseModel):
+    enabled: bool
+    status: RiskModuleStatus
+    locks: List[TradeLockConfig] = Field(default_factory=list)
+
+
+class RiskLimitsPayload(BaseModel):
+    position_limits: PositionLimitsModule
+    max_loss: MaxLossModule
+    trade_locks: TradeLocksModule
+
+
+@app.get("/risk/limits")
+def get_risk_limits():
+    return svc.risk_limits_snapshot()
+
+
+@app.post("/risk/limits")
+def update_risk_limits(payload: RiskLimitsPayload):
+    return svc.update_risk_limits(payload.dict())
 
 
 @app.get("/orders")

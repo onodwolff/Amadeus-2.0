@@ -1,0 +1,202 @@
+<div class="risk-page">
+  <header class="risk-page__header">
+    <h1>Risk controls</h1>
+    <p>Configure venue and node level limits, drawdown protections and trading locks.</p>
+  </header>
+
+  <section *ngIf="isLoading(); else loaded" class="risk-page__state">
+    <div class="risk-page__spinner" aria-hidden="true"></div>
+    <p>Loading risk limits…</p>
+  </section>
+
+  <ng-template #loaded>
+    <section *ngIf="loadError(); else content" class="risk-page__state risk-page__state--error">
+      <p>{{ loadError() }}</p>
+      <button type="button" (click)="reload()">Retry</button>
+    </section>
+
+    <ng-template #content>
+      <form class="risk-form" [formGroup]="form" (ngSubmit)="onSubmit()">
+        <section class="risk-module" [formGroup]="positionLimitsGroup">
+          <header class="risk-module__header">
+            <div class="risk-module__title">
+              <h2>Position limits</h2>
+              <span class="status-chip" [ngClass]="statusClass(positionLimitsGroup.controls.status.value)">
+                {{ statusLabel(positionLimitsGroup.controls.status.value) }}
+              </span>
+            </div>
+            <label class="module-toggle">
+              <input type="checkbox" formControlName="enabled" />
+              <span>Enabled</span>
+            </label>
+          </header>
+
+          <div class="risk-module__body">
+            <div class="module-control">
+              <label for="position-status">Status</label>
+              <select id="position-status" formControlName="status">
+                <option *ngFor="let option of moduleStatusOptions" [value]="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="risk-table" formArrayName="limits">
+              <div
+                class="risk-table__row"
+                *ngFor="let limitGroup of positionLimitEntries.controls; let i = index; trackBy: trackByIndex"
+                [formGroupName]="i"
+              >
+                <div class="risk-table__field" [class.risk-table__field--error]="hasError(limitGroup.get('venue'), 'required')">
+                  <label>Venue</label>
+                  <input type="text" formControlName="venue" placeholder="BINANCE" maxlength="32" />
+                  <p class="field-error" *ngIf="hasError(limitGroup.get('venue'), 'required')">Venue is required.</p>
+                </div>
+                <div class="risk-table__field" [class.risk-table__field--error]="hasError(limitGroup.get('node'), 'required')">
+                  <label>Node</label>
+                  <input type="text" formControlName="node" placeholder="lv-00112233" maxlength="64" />
+                  <p class="field-error" *ngIf="hasError(limitGroup.get('node'), 'required')">Node identifier is required.</p>
+                </div>
+                <div
+                  class="risk-table__field risk-table__field--number"
+                  [class.risk-table__field--error]="hasError(limitGroup.get('limit'), 'required') || hasError(limitGroup.get('limit'), 'min')"
+                >
+                  <label>Limit (USD notional)</label>
+                  <input type="number" formControlName="limit" min="0" step="1000" />
+                  <p class="field-error" *ngIf="hasError(limitGroup.get('limit'), 'required')">Limit value is required.</p>
+                  <p class="field-error" *ngIf="hasError(limitGroup.get('limit'), 'min')">Limit cannot be negative.</p>
+                </div>
+                <div class="risk-table__actions">
+                  <button type="button" (click)="removePositionLimit(i)" [disabled]="positionLimitEntries.length <= 1">
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="risk-table__footer">
+              <button type="button" class="link" (click)="addPositionLimit()">Add position limit</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="risk-module" [formGroup]="maxLossGroup">
+          <header class="risk-module__header">
+            <div class="risk-module__title">
+              <h2>Maximum loss</h2>
+              <span class="status-chip" [ngClass]="statusClass(maxLossGroup.controls.status.value)">
+                {{ statusLabel(maxLossGroup.controls.status.value) }}
+              </span>
+            </div>
+            <label class="module-toggle">
+              <input type="checkbox" formControlName="enabled" />
+              <span>Enabled</span>
+            </label>
+          </header>
+
+          <div class="risk-module__body">
+            <div class="module-control">
+              <label for="loss-status">Status</label>
+              <select id="loss-status" formControlName="status">
+                <option *ngFor="let option of moduleStatusOptions" [value]="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="loss-grid">
+              <div class="loss-grid__field" [class.loss-grid__field--error]="hasError(maxLossGroup.get('daily'), 'required') || hasError(maxLossGroup.get('daily'), 'min')">
+                <label>Daily loss limit (USD)</label>
+                <input type="number" formControlName="daily" min="0" step="1000" />
+                <p class="field-error" *ngIf="hasError(maxLossGroup.get('daily'), 'required')">Daily limit is required.</p>
+                <p class="field-error" *ngIf="hasError(maxLossGroup.get('daily'), 'min')">Daily loss cannot be negative.</p>
+              </div>
+              <div class="loss-grid__field" [class.loss-grid__field--error]="hasError(maxLossGroup.get('weekly'), 'required') || hasError(maxLossGroup.get('weekly'), 'min') || maxLossGroup.hasError('weeklyLessThanDaily')">
+                <label>Weekly loss limit (USD)</label>
+                <input type="number" formControlName="weekly" min="0" step="1000" />
+                <p class="field-error" *ngIf="hasError(maxLossGroup.get('weekly'), 'required')">Weekly limit is required.</p>
+                <p class="field-error" *ngIf="hasError(maxLossGroup.get('weekly'), 'min')">Weekly loss cannot be negative.</p>
+                <p class="field-error" *ngIf="maxLossGroup.hasError('weeklyLessThanDaily')">Weekly limit must be greater than or equal to the daily limit.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="risk-module" [formGroup]="tradeLocksGroup">
+          <header class="risk-module__header">
+            <div class="risk-module__title">
+              <h2>Trade locks</h2>
+              <span class="status-chip" [ngClass]="statusClass(tradeLocksGroup.controls.status.value)">
+                {{ statusLabel(tradeLocksGroup.controls.status.value) }}
+              </span>
+            </div>
+            <label class="module-toggle">
+              <input type="checkbox" formControlName="enabled" />
+              <span>Enabled</span>
+            </label>
+          </header>
+
+          <div class="risk-module__body">
+            <div class="module-control">
+              <label for="locks-status">Status</label>
+              <select id="locks-status" formControlName="status">
+                <option *ngFor="let option of moduleStatusOptions" [value]="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="risk-table" formArrayName="locks">
+              <div
+                class="risk-table__row"
+                *ngFor="let lockGroup of tradeLockEntries.controls; let i = index; trackBy: trackByIndex"
+                [formGroupName]="i"
+              >
+                <div class="risk-table__field" [class.risk-table__field--error]="hasError(lockGroup.get('venue'), 'required')">
+                  <label>Venue</label>
+                  <input type="text" formControlName="venue" placeholder="BINANCE" maxlength="32" />
+                  <p class="field-error" *ngIf="hasError(lockGroup.get('venue'), 'required')">Venue is required.</p>
+                </div>
+                <div class="risk-table__field" [class.risk-table__field--error]="hasError(lockGroup.get('node'), 'required')">
+                  <label>Node</label>
+                  <input type="text" formControlName="node" placeholder="lv-00112233" maxlength="64" />
+                  <p class="field-error" *ngIf="hasError(lockGroup.get('node'), 'required')">Node identifier is required.</p>
+                </div>
+                <div class="risk-table__field risk-table__field--checkbox">
+                  <label class="checkbox-label">
+                    <input type="checkbox" formControlName="locked" />
+                    <span>Locked</span>
+                  </label>
+                </div>
+                <div
+                  class="risk-table__field"
+                  [class.risk-table__field--error]="lockGroup.hasError('reasonRequired') || hasError(lockGroup.get('reason'), 'maxlength')"
+                >
+                  <label>Reason</label>
+                  <input type="text" formControlName="reason" placeholder="Optional comment" maxlength="160" />
+                  <p class="field-error" *ngIf="lockGroup.hasError('reasonRequired')">Reason is required when a trade lock is active.</p>
+                  <p class="field-error" *ngIf="hasError(lockGroup.get('reason'), 'maxlength')">Reason is limited to 160 characters.</p>
+                </div>
+                <div class="risk-table__actions">
+                  <button type="button" (click)="removeTradeLock(i)" [disabled]="tradeLockEntries.length <= 1">
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="risk-table__footer">
+              <button type="button" class="link" (click)="addTradeLock()">Add trade lock</button>
+            </div>
+          </div>
+        </section>
+
+        <footer class="risk-actions">
+          <button type="submit" [disabled]="isSaving() || isPristine() || form.invalid">Save changes</button>
+          <button type="button" class="secondary" (click)="reload()" [disabled]="isSaving()">Reload</button>
+          <span class="risk-actions__status" *ngIf="isSaving()">Saving changes…</span>
+        </footer>
+      </form>
+    </ng-template>
+  </ng-template>
+</div>
