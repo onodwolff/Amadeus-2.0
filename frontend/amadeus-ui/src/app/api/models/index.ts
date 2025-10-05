@@ -5,3 +5,4 @@ export * from './instrument.model';
 export * from './portfolio.model';
 export * from './risk.model';
 export * from './key.model';
+export * from './backtest.model';

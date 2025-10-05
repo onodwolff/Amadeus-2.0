@@ -1,0 +1,39 @@
+.backtest-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.backtest-detail header h1 {
+  margin: 0 0 6px;
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+.backtest-detail header p {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.85);
+}
+
+.backtest-detail__content p {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.backtest-detail__run-id {
+  font-family: 'Fira Code', 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.backtest-detail__run-id span {
+  color: rgba(148, 163, 184, 0.8);
+  margin-right: 8px;
+}
+
+.backtest-detail__loading {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.9);
+}

@@ -1,0 +1,187 @@
+<section class="backtest-page">
+  <header class="backtest-page__header">
+    <div>
+      <h1 class="backtest-page__title">Backtests</h1>
+      <p class="backtest-page__subtitle">
+        Configure a historical simulation, choose the dataset window and fine tune engine parameters before launching a run.
+      </p>
+    </div>
+    <button class="btn btn--primary" type="submit" form="backtestForm" [disabled]="form.invalid || isSubmitting()">
+      {{ isSubmitting() ? 'Creating…' : 'Launch backtest' }}
+    </button>
+  </header>
+
+  <form class="backtest-form" [formGroup]="form" (ngSubmit)="submit()" id="backtestForm">
+    <section class="form-section" aria-labelledby="run-meta">
+      <div class="section-header">
+        <h2 id="run-meta">Run metadata</h2>
+        <p>Give the backtest run a friendly name for the analytics list.</p>
+      </div>
+      <div class="field">
+        <label for="run-name">Run name</label>
+        <input
+          id="run-name"
+          type="text"
+          formControlName="name"
+          [class.field__control--invalid]="form.controls.name.invalid && form.controls.name.touched"
+        />
+        <p class="field__error" *ngIf="form.controls.name.invalid && form.controls.name.touched">
+          Please provide a run name (max 120 characters).
+        </p>
+      </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="strategy-block" formGroupName="strategy">
+      <div class="section-header">
+        <h2 id="strategy-block">Strategy</h2>
+        <p>Select a strategy template and adjust its runtime parameters.</p>
+      </div>
+      <div class="option-grid">
+        <label
+          class="option-card"
+          *ngFor="let template of strategyTemplates"
+          [class.option-card--active]="template.id === form.controls.strategy.controls.id.value"
+        >
+          <input
+            type="radio"
+            formControlName="id"
+            [value]="template.id"
+            (change)="onStrategyTemplateSelect(template.id)"
+          />
+          <span class="option-card__title">{{ template.name }}</span>
+          <span class="option-card__description">{{ template.description }}</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label for="strategy-name">Strategy name</label>
+        <input id="strategy-name" type="text" formControlName="name" />
+      </div>
+
+      <div class="parameter-list" formArrayName="parameters">
+        <div
+          class="parameter-list__item"
+          *ngFor="let parameter of strategyParameters.controls; let i = index; trackBy: trackByIndex"
+          [formGroupName]="i"
+        >
+          <div class="field">
+            <label [for]="'param-key-' + i">Key</label>
+            <input
+              [id]="'param-key-' + i"
+              type="text"
+              formControlName="key"
+              [class.field__control--invalid]="parameter.controls.key.invalid && parameter.controls.key.touched"
+            />
+          </div>
+          <div class="field">
+            <label [for]="'param-value-' + i">Value</label>
+            <input
+              [id]="'param-value-' + i"
+              type="text"
+              formControlName="value"
+              [class.field__control--invalid]="parameter.controls.value.invalid && parameter.controls.value.touched"
+            />
+          </div>
+          <button type="button" class="btn btn--ghost" (click)="removeStrategyParameter(i)">Remove</button>
+        </div>
+      </div>
+      <button type="button" class="btn btn--secondary" (click)="addStrategyParameter()">Add parameter</button>
+    </section>
+
+    <section class="form-section" aria-labelledby="dataset-block" formGroupName="dataset">
+      <div class="section-header">
+        <h2 id="dataset-block">Dataset</h2>
+        <p>Choose a curated dataset that will be replayed during the simulation.</p>
+      </div>
+      <div class="option-grid option-grid--dataset">
+        <label
+          class="option-card"
+          *ngFor="let option of datasetOptions"
+          [class.option-card--active]="option.id === form.controls.dataset.controls.id.value"
+        >
+          <input type="radio" formControlName="id" [value]="option.id" (change)="onDatasetSelect(option.id)" />
+          <span class="option-card__title">{{ option.name }}</span>
+          <span class="option-card__meta">Venue: {{ option.venue }} · Interval: {{ option.barInterval }}</span>
+          <span class="option-card__description">{{ option.description }}</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="date-range" formGroupName="dateRange">
+      <div class="section-header">
+        <h2 id="date-range">Time range</h2>
+        <p>Set the historical window to replay.</p>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label for="range-start">Start</label>
+          <input
+            id="range-start"
+            type="datetime-local"
+            formControlName="start"
+            [class.field__control--invalid]="form.controls.dateRange.controls.start.invalid && form.controls.dateRange.controls.start.touched"
+          />
+        </div>
+        <div class="field">
+          <label for="range-end">End</label>
+          <input
+            id="range-end"
+            type="datetime-local"
+            formControlName="end"
+            [class.field__control--invalid]="form.controls.dateRange.controls.end.invalid && form.controls.dateRange.controls.end.touched"
+          />
+        </div>
+      </div>
+      <p class="field__error" *ngIf="form.controls.dateRange.invalid && form.controls.dateRange.touched">
+        Ensure the start date precedes the end date and both values are valid timestamps.
+      </p>
+    </section>
+
+    <section class="form-section" aria-labelledby="engine-block" formGroupName="engine">
+      <div class="section-header">
+        <h2 id="engine-block">Engine parameters</h2>
+        <p>Fine tune the simulation engine used to execute orders.</p>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label for="initial-balance">Initial balance</label>
+          <input
+            id="initial-balance"
+            type="number"
+            min="0"
+            formControlName="initialBalance"
+            [class.field__control--invalid]="form.controls.engine.controls.initialBalance.invalid && form.controls.engine.controls.initialBalance.touched"
+          />
+        </div>
+        <div class="field">
+          <label for="base-currency">Base currency</label>
+          <input id="base-currency" type="text" formControlName="baseCurrency" />
+        </div>
+        <div class="field">
+          <label for="slippage-bps">Slippage (bps)</label>
+          <input id="slippage-bps" type="number" min="0" formControlName="slippageBps" />
+        </div>
+        <div class="field">
+          <label for="commission-bps">Commission (bps)</label>
+          <input id="commission-bps" type="number" min="0" formControlName="commissionBps" />
+        </div>
+        <div class="field">
+          <label for="warmup-days">Warmup days</label>
+          <input id="warmup-days" type="number" min="0" formControlName="warmupDays" />
+        </div>
+        <div class="field">
+          <label for="engine-version">Engine version</label>
+          <input id="engine-version" type="text" formControlName="engineVersion" />
+        </div>
+      </div>
+    </section>
+
+    <p class="form-error" *ngIf="submissionError() as error">{{ error }}</p>
+
+    <div class="form-actions">
+      <button class="btn btn--primary" type="submit" [disabled]="form.invalid || isSubmitting()">
+        {{ isSubmitting() ? 'Creating…' : 'Create backtest run' }}
+      </button>
+    </div>
+  </form>
+</section>

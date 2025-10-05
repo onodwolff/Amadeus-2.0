@@ -5,3 +5,4 @@ export * from './orders.api';
 export * from './portfolio.api';
 export * from './risk.api';
 export * from './keys.api';
+export * from './backtests.api';
