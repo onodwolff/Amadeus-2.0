@@ -172,6 +172,15 @@ class OrderRecord:
     average_price: Optional[float]
     status: str
     time_in_force: Optional[str]
+    expire_time: Optional[str] = None
+    post_only: Optional[bool] = None
+    reduce_only: Optional[bool] = None
+    limit_offset: Optional[float] = None
+    contingency_type: Optional[str] = None
+    order_list_id: Optional[str] = None
+    linked_order_ids: Optional[List[str]] = None
+    parent_order_id: Optional[str] = None
+    instructions: Dict[str, Any] = field(default_factory=dict)
     node_id: Optional[str]
     created_at: str
     updated_at: str
@@ -195,6 +204,7 @@ class ExecutionRecord:
 class NautilusService:
     def __init__(self) -> None:
         self._nodes: Dict[str, NodeState] = {}
+        self._engine = None  # Optional Nautilus engine handle for live integrations
         self._seed_portfolio_state()
         self._orders: Dict[str, OrderRecord] = {}
         self._executions: Dict[str, List[ExecutionRecord]] = {}
@@ -207,6 +217,11 @@ class NautilusService:
             "margin_call": [],
         }
         self._seed_risk_alerts()
+
+    def attach_engine(self, engine: Any) -> None:
+        """Attach a real NautilusTrader engine implementation."""
+
+        self._engine = engine
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
@@ -573,15 +588,40 @@ class NautilusService:
 
         base_time = datetime.utcnow() - timedelta(hours=6)
 
+        tif_options = ["GTC", "IOC", "FOK", "DAY", "GTD"]
+
         for index, status in enumerate(statuses):
             quantity = round(random.uniform(0.5, 9.5), 4)
             price = round(random.uniform(25.0, 48000.0), 2)
             side = random.choice(["buy", "sell"])
             order_type = random.choice(["limit", "market", "stop", "stop_limit"])
-            tif = random.choice(["GTC", "IOC", "FOK"])
+            tif = random.choice(tif_options)
             node_id = random.choice(nodes)
             created = base_time + timedelta(minutes=index * 11)
             updated = created + timedelta(minutes=random.randint(1, 240))
+
+            expire_time: Optional[str] = None
+            if tif == "GTD":
+                expire_time = _isoformat(created + timedelta(hours=random.randint(1, 48)))
+            elif tif == "DAY":
+                expire_time = _isoformat(created.replace(hour=23, minute=59))
+
+            limit_offset: Optional[float] = None
+            if order_type == "stop_limit":
+                limit_offset = round(random.uniform(-25.0, 25.0), 2)
+
+            contingency_type = random.choice([None, "OCO", "OTO"])
+            order_list_id = None
+            linked_order_ids: Optional[List[str]] = None
+            parent_order_id = None
+            if contingency_type == "OCO":
+                order_list_id = f"OCO-{random.randint(1000, 9999)}"
+                linked_order_ids = [f"ORD-{random.randint(1, index+1):06d}"] if index else None
+            elif contingency_type == "OTO":
+                parent_order_id = f"ORD-{random.randint(1, index+1):06d}" if index else None
+
+            post_only = order_type in {"limit", "stop_limit"} and random.random() < 0.5
+            reduce_only = random.random() < 0.3
 
             filled_quantity = 0.0
             average_price: Optional[float] = None
@@ -608,6 +648,15 @@ class NautilusService:
                 average_price=average_price if filled_quantity > 0 else None,
                 status=status,
                 time_in_force=tif,
+                expire_time=expire_time,
+                post_only=post_only,
+                reduce_only=reduce_only,
+                limit_offset=limit_offset,
+                contingency_type=contingency_type,
+                order_list_id=order_list_id,
+                linked_order_ids=linked_order_ids,
+                parent_order_id=parent_order_id,
+                instructions={},
                 node_id=node_id,
                 created_at=_isoformat(created),
                 updated_at=_isoformat(updated if status != "pending" else created),
@@ -682,6 +731,27 @@ class NautilusService:
 
     def _create_random_order(self) -> OrderRecord:
         now = datetime.utcnow()
+        order_type = random.choice(["limit", "market", "stop", "stop_limit"])
+        tif = random.choice(["GTC", "IOC", "FOK", "DAY", "GTD"])
+        expire_time: Optional[str] = None
+        if tif == "GTD":
+            expire_time = _isoformat(now + timedelta(hours=random.randint(1, 48)))
+        elif tif == "DAY":
+            expire_time = _isoformat(now.replace(hour=23, minute=59, second=0, microsecond=0))
+
+        limit_offset: Optional[float] = None
+        if order_type == "stop_limit":
+            limit_offset = round(random.uniform(-10.0, 10.0), 2)
+
+        contingency_type = random.choice([None, "OCO", "OTO"])
+        order_list_id = None
+        linked_order_ids: Optional[List[str]] = None
+        parent_order_id = None
+        if contingency_type == "OCO":
+            order_list_id = f"OCO-{random.randint(1000, 9999)}"
+        elif contingency_type == "OTO":
+            parent_order_id = f"ORD-{random.randint(1, max(1, self._order_counter)):06d}"
+
         order = OrderRecord(
             order_id=self._next_order_id(),
             client_order_id=f"CL-{1000 + self._order_counter}",
@@ -689,13 +759,22 @@ class NautilusService:
             symbol=random.choice(["BTCUSDT", "ETHUSDT", "SOLUSDT", "ADAUSDT", "AAPL.XNAS", "MSFT.XNAS"]),
             venue=random.choice(["BINANCE", "COINBASE", "NASDAQ", "FTX"]),
             side=random.choice(["buy", "sell"]),
-            type=random.choice(["limit", "market", "stop", "stop_limit"]),
+            type=order_type,
             quantity=round(random.uniform(0.2, 8.0), 4),
             filled_quantity=0.0,
             price=round(random.uniform(20.0, 50000.0), 2),
             average_price=None,
             status="pending",
-            time_in_force=random.choice(["GTC", "IOC", "FOK"]),
+            time_in_force=tif,
+            expire_time=expire_time,
+            post_only=order_type in {"limit", "stop_limit"} and random.random() < 0.5,
+            reduce_only=random.random() < 0.35,
+            limit_offset=limit_offset,
+            contingency_type=contingency_type,
+            order_list_id=order_list_id,
+            linked_order_ids=linked_order_ids,
+            parent_order_id=parent_order_id,
+            instructions={},
             node_id=random.choice(["lv-00112233", "bt-00ffaacc", "rv-0099abba"]),
             created_at=_isoformat(now),
             updated_at=_isoformat(now),
@@ -800,6 +879,117 @@ class NautilusService:
         self._advance_orders_state()
         return self.orders_snapshot()
 
+    def _translate_order_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        symbol = (payload.get("symbol") or "").upper()
+        venue = (payload.get("venue") or "").upper()
+        side = (payload.get("side") or "buy").upper()
+        order_type = (payload.get("type") or "market").lower()
+        quantity = float(payload.get("quantity") or 0.0)
+        price = payload.get("price")
+        limit_offset = payload.get("limit_offset")
+        time_in_force = (payload.get("time_in_force") or "GTC").upper()
+        expire_time = payload.get("expire_time") or None
+        post_only = payload.get("post_only")
+        reduce_only = payload.get("reduce_only")
+        contingency_type = payload.get("contingency_type") or None
+        order_list_id = payload.get("order_list_id") or None
+        parent_order_id = payload.get("parent_order_id") or None
+        linked_order_ids = payload.get("linked_order_ids") or None
+
+        limit_price: Optional[float] = None
+        trigger_price: Optional[float] = None
+        if order_type == "limit":
+            limit_price = float(price) if price is not None else None
+        elif order_type == "stop":
+            trigger_price = float(price) if price is not None else None
+        elif order_type == "stop_limit":
+            trigger_price = float(price) if price is not None else None
+            if price is not None and limit_offset is not None:
+                limit_price = round(float(price) + float(limit_offset), 8)
+            else:
+                limit_price = float(price) if price is not None else None
+
+        if isinstance(linked_order_ids, list):
+            linked_ids = [str(item) for item in linked_order_ids if str(item).strip()]
+        elif linked_order_ids:
+            linked_ids = [str(linked_order_ids).strip()]
+        else:
+            linked_ids = None
+
+        translated: Dict[str, Any] = {
+            "symbol": symbol,
+            "venue": venue,
+            "side": side,
+            "order_type": order_type,
+            "quantity": quantity,
+            "time_in_force": time_in_force,
+            "expire_time": expire_time,
+            "post_only": (None if post_only is None else bool(post_only)),
+            "reduce_only": (None if reduce_only is None else bool(reduce_only)),
+            "contingency_type": contingency_type,
+            "order_list_id": order_list_id,
+            "parent_order_id": parent_order_id,
+            "linked_order_ids": linked_ids,
+        }
+        if limit_price is not None:
+            translated["limit_price"] = limit_price
+        if trigger_price is not None:
+            translated["trigger_price"] = trigger_price
+        if limit_offset is not None:
+            translated["limit_offset"] = float(limit_offset)
+
+        if nt is not None:
+            try:
+                from nautilus_trader.model.enums import (
+                    OrderSide as NTOrderSide,
+                    OrderType as NTOrderType,
+                    TimeInForce as NTTimeInForce,
+                    ContingencyType as NTContingencyType,
+                )
+            except Exception:
+                pass
+            else:
+                enums: Dict[str, Any] = {}
+                try:
+                    enums["side"] = NTOrderSide[side]
+                except KeyError:
+                    pass
+                try:
+                    enums["order_type"] = NTOrderType[order_type.upper()]
+                except KeyError:
+                    pass
+                try:
+                    enums["time_in_force"] = NTTimeInForce[time_in_force]
+                except KeyError:
+                    pass
+                if contingency_type:
+                    try:
+                        enums["contingency_type"] = NTContingencyType[contingency_type]
+                    except KeyError:
+                        pass
+                if enums:
+                    translated["nautilus_enums"] = enums
+
+        return translated
+
+    def _submit_to_engine(self, instructions: Dict[str, Any]) -> None:
+        if not self._engine:
+            return
+
+        submit = getattr(self._engine, "submit_order", None)
+        if submit is None:
+            return
+
+        try:
+            submit(instructions)
+        except TypeError:
+            try:
+                submit(**instructions)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def create_order(self, payload: Dict[str, Any]) -> dict:
         symbol = payload.get("symbol", "").upper()
         venue = payload.get("venue", "").upper()
@@ -807,9 +997,63 @@ class NautilusService:
         order_type = (payload.get("type") or "market").lower()
         quantity = float(payload.get("quantity") or 0.0)
         price = payload.get("price")
-        time_in_force = payload.get("time_in_force") or None
+        time_in_force_raw = payload.get("time_in_force")
+        time_in_force = (
+            str(time_in_force_raw).upper()
+            if isinstance(time_in_force_raw, str) and time_in_force_raw
+            else None
+        )
+        expire_time = payload.get("expire_time") or None
+        post_only_raw = payload.get("post_only")
+        reduce_only_raw = payload.get("reduce_only")
+        limit_offset_raw = payload.get("limit_offset")
+        contingency_type = payload.get("contingency_type") or None
+        order_list_id = payload.get("order_list_id") or None
+        parent_order_id = payload.get("parent_order_id") or None
+        linked_raw = payload.get("linked_order_ids")
         client_order_id = payload.get("client_order_id") or None
         node_id = payload.get("node_id") or None
+
+        linked_order_ids: Optional[List[str]]
+        if isinstance(linked_raw, list):
+            linked_order_ids = [str(item) for item in linked_raw if str(item).strip()]
+        elif linked_raw:
+            linked_order_ids = [str(linked_raw).strip()]
+        else:
+            linked_order_ids = None
+
+        post_only = None if post_only_raw is None else bool(post_only_raw)
+        reduce_only = None if reduce_only_raw is None else bool(reduce_only_raw)
+        limit_offset = None
+        if limit_offset_raw is not None:
+            try:
+                limit_offset = float(limit_offset_raw)
+            except (TypeError, ValueError):
+                limit_offset = None
+
+        normalized_payload = dict(payload)
+        normalized_payload.update(
+            {
+                "symbol": symbol,
+                "venue": venue,
+                "side": side,
+                "type": order_type,
+                "quantity": quantity,
+                "price": price,
+                "time_in_force": time_in_force,
+                "expire_time": expire_time,
+                "post_only": post_only,
+                "reduce_only": reduce_only,
+                "limit_offset": limit_offset,
+                "contingency_type": contingency_type,
+                "order_list_id": order_list_id,
+                "parent_order_id": parent_order_id,
+                "linked_order_ids": linked_order_ids,
+            }
+        )
+
+        engine_payload = self._translate_order_payload(normalized_payload)
+        self._submit_to_engine(engine_payload)
 
         now = _utcnow_iso()
         order = OrderRecord(
@@ -826,6 +1070,15 @@ class NautilusService:
             average_price=None,
             status="pending",
             time_in_force=time_in_force,
+            expire_time=expire_time,
+            post_only=post_only,
+            reduce_only=reduce_only,
+            limit_offset=limit_offset,
+            contingency_type=contingency_type,
+            order_list_id=order_list_id,
+            linked_order_ids=linked_order_ids,
+            parent_order_id=parent_order_id,
+            instructions=deepcopy(engine_payload),
             node_id=node_id,
             created_at=now,
             updated_at=now,
@@ -863,6 +1116,15 @@ class NautilusService:
             average_price=None,
             status="pending",
             time_in_force=original.time_in_force,
+            expire_time=original.expire_time,
+            post_only=original.post_only,
+            reduce_only=original.reduce_only,
+            limit_offset=original.limit_offset,
+            contingency_type=original.contingency_type,
+            order_list_id=original.order_list_id,
+            linked_order_ids=deepcopy(original.linked_order_ids) if original.linked_order_ids else None,
+            parent_order_id=original.parent_order_id,
+            instructions=deepcopy(original.instructions),
             node_id=original.node_id,
             created_at=now,
             updated_at=now,

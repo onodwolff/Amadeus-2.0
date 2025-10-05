@@ -11,6 +11,7 @@ import {
   CreateOrderPayload,
   OrderResponse,
   OrderSummary,
+  OrderType,
   Position,
   RiskExposure,
   RiskLimit,
@@ -19,7 +20,7 @@ import { NotificationService } from '../../../shared/notifications/notification.
 
 interface OrderTypeOption {
   label: string;
-  value: 'market' | 'limit' | 'stop';
+  value: OrderType;
 }
 
 @Component({
@@ -48,18 +49,35 @@ export class OrderTicketComponent implements OnInit {
     time_in_force: ['GTC'],
     node_id: [''],
     client_order_id: [''],
+    expire_time: [''],
+    post_only: [false],
+    reduce_only: [false],
+    limit_offset: [null as number | null],
+    contingency_type: ['NONE'],
+    order_list_id: [''],
+    linked_order_ids: [''],
+    parent_order_id: [''],
   });
 
   readonly orderTypes: OrderTypeOption[] = [
     { label: 'Market', value: 'market' },
     { label: 'Limit', value: 'limit' },
     { label: 'Stop', value: 'stop' },
+    { label: 'Stop limit', value: 'stop_limit' },
   ];
 
   readonly tifOptions: { label: string; value: string }[] = [
     { label: 'Good till cancel (GTC)', value: 'GTC' },
     { label: 'Immediate or cancel (IOC)', value: 'IOC' },
     { label: 'Fill or kill (FOK)', value: 'FOK' },
+    { label: 'Day (DAY)', value: 'DAY' },
+    { label: 'Good till date (GTD)', value: 'GTD' },
+  ];
+
+  readonly contingencyOptions: { label: string; value: 'NONE' | 'OCO' | 'OTO' }[] = [
+    { label: 'None', value: 'NONE' },
+    { label: 'One-cancels-other (OCO)', value: 'OCO' },
+    { label: 'One-triggers-other (OTO)', value: 'OTO' },
   ];
 
   readonly balances = signal<Balance[]>([]);
@@ -70,7 +88,37 @@ export class OrderTicketComponent implements OnInit {
   readonly isSubmitting = signal(false);
   readonly formErrors = signal<string[]>([]);
 
-  readonly selectedType = computed(() => this.form.controls.type.value);
+  readonly selectedType = computed(() => this.form.controls.type.value as OrderType);
+  readonly selectedTimeInForce = computed(() => this.form.controls.time_in_force.value);
+  readonly selectedContingency = computed(() => this.form.controls.contingency_type.value);
+  readonly showLimitOffset = computed(() => this.selectedType() === 'stop_limit');
+  readonly showExpireField = computed(() => this.selectedTimeInForce() === 'GTD');
+  readonly limitPricePreview = computed(() => {
+    if (this.selectedType() !== 'stop_limit') {
+      return null;
+    }
+    const raw = this.form.getRawValue();
+    const price = raw.price != null ? Number(raw.price) : null;
+    const offset = raw.limit_offset != null ? Number(raw.limit_offset) : null;
+    if (!Number.isFinite(price) || price == null || price <= 0) {
+      return null;
+    }
+    if (offset == null || Number.isNaN(offset)) {
+      return null;
+    }
+    return price + offset;
+  });
+  readonly expireTimeSummary = computed(() => {
+    const value = this.form.controls.expire_time.value?.trim();
+    if (!value) {
+      return null;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
+  });
 
   ngOnInit(): void {
     this.bootstrapData();
@@ -79,6 +127,16 @@ export class OrderTicketComponent implements OnInit {
       .subscribe(() => {
         if (this.selectedType() === 'market') {
           this.form.controls.price.setValue(null);
+        }
+        if (!this.showLimitOffset()) {
+          this.form.controls.limit_offset.setValue(null);
+        }
+      });
+    this.form.controls.time_in_force.valueChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe((value) => {
+        if (value !== 'GTD') {
+          this.form.controls.expire_time.setValue('');
         }
       });
   }
@@ -163,13 +221,24 @@ export class OrderTicketComponent implements OnInit {
     const symbol = (raw.symbol ?? '').trim().toUpperCase();
     const venue = (raw.venue ?? '').trim().toUpperCase();
     const side = (raw.side ?? 'buy').toLowerCase();
-    const type = (raw.type ?? 'market').toLowerCase() as 'market' | 'limit' | 'stop';
+    const type = (raw.type ?? 'market').toLowerCase() as OrderType;
     const quantity = Number(raw.quantity);
     const priceValue = raw.price != null ? Number(raw.price) : null;
     const price = priceValue != null && !Number.isNaN(priceValue) ? priceValue : null;
     const tif = (raw.time_in_force ?? '').trim().toUpperCase();
     const nodeId = (raw.node_id ?? '').trim();
     const clientOrderId = (raw.client_order_id ?? '').trim();
+    const expireRaw = (raw.expire_time ?? '').trim();
+    const limitOffsetRaw = raw.limit_offset != null ? Number(raw.limit_offset) : null;
+    const limitOffset =
+      limitOffsetRaw != null && !Number.isNaN(limitOffsetRaw) ? limitOffsetRaw : null;
+    const contingency = (raw.contingency_type ?? '').toUpperCase();
+    const orderListId = (raw.order_list_id ?? '').trim();
+    const parentOrderId = (raw.parent_order_id ?? '').trim();
+    const linkedOrderIds = (raw.linked_order_ids ?? '')
+      .split(/[,\s]+/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
 
     if (!symbol || !venue || Number.isNaN(quantity)) {
       return null;
@@ -189,6 +258,29 @@ export class OrderTicketComponent implements OnInit {
     if (tif) {
       payload.time_in_force = tif;
     }
+    const expireDate = expireRaw ? new Date(expireRaw) : null;
+    if (expireRaw && expireDate && !Number.isNaN(expireDate.getTime())) {
+      payload.expire_time = expireDate.toISOString();
+    } else if (expireRaw) {
+      payload.expire_time = expireRaw;
+    }
+    payload.post_only = Boolean(raw.post_only);
+    payload.reduce_only = Boolean(raw.reduce_only);
+    if (limitOffset != null) {
+      payload.limit_offset = limitOffset;
+    }
+    if (contingency === 'OCO' || contingency === 'OTO') {
+      payload.contingency_type = contingency;
+    }
+    if (orderListId) {
+      payload.order_list_id = orderListId;
+    }
+    if (linkedOrderIds.length > 0) {
+      payload.linked_order_ids = linkedOrderIds;
+    }
+    if (parentOrderId) {
+      payload.parent_order_id = parentOrderId;
+    }
     if (nodeId) {
       payload.node_id = nodeId;
     }
@@ -203,8 +295,18 @@ export class OrderTicketComponent implements OnInit {
     const defaults = {
       quantity: 1,
       client_order_id: '',
+      post_only: false,
+      reduce_only: false,
+      limit_offset: null,
+      order_list_id: '',
+      linked_order_ids: '',
+      parent_order_id: '',
     };
-    this.form.patchValue({ ...defaults, price: orderType === 'market' ? null : this.form.controls.price.value });
+    this.form.patchValue({
+      ...defaults,
+      price: orderType === 'market' ? null : this.form.controls.price.value,
+      expire_time: '',
+    });
   }
 
   private validateOrder(): string[] {
@@ -214,9 +316,16 @@ export class OrderTicketComponent implements OnInit {
     const symbol = (value.symbol ?? '').trim();
     const venue = (value.venue ?? '').trim();
     const side = (value.side ?? 'buy').toLowerCase();
-    const type = (value.type ?? 'market').toLowerCase();
+    const type = (value.type ?? 'market').toLowerCase() as OrderType;
     const quantity = Number(value.quantity);
     const price = value.price != null ? Number(value.price) : null;
+    const limitOffset =
+      value.limit_offset != null && value.limit_offset !== ''
+        ? Number(value.limit_offset)
+        : null;
+    const tif = (value.time_in_force ?? '').trim().toUpperCase();
+    const expireTime = (value.expire_time ?? '').trim();
+    const contingency = (value.contingency_type ?? '').toUpperCase();
 
     if (!symbol) {
       errors.push('Symbol is required.');
@@ -227,8 +336,28 @@ export class OrderTicketComponent implements OnInit {
     if (!Number.isFinite(quantity) || quantity <= 0) {
       errors.push('Quantity must be greater than zero.');
     }
-    if ((type === 'limit' || type === 'stop') && (!price || price <= 0)) {
-      errors.push('Price is required for limit and stop orders.');
+    if (type === 'limit' && (!price || price <= 0)) {
+      errors.push('Price is required for limit orders.');
+    }
+    if (type === 'stop' && (!price || price <= 0)) {
+      errors.push('Stop price is required for stop orders.');
+    }
+    if (type === 'stop_limit') {
+      if (!price || price <= 0) {
+        errors.push('Trigger price is required for stop-limit orders.');
+      }
+      if (limitOffset == null || Number.isNaN(limitOffset)) {
+        errors.push('Limit offset must be specified for stop-limit orders.');
+      } else if (price != null && price + limitOffset <= 0) {
+        errors.push('Resulting limit price must be greater than zero.');
+      }
+    }
+    if (tif === 'GTD') {
+      if (!expireTime) {
+        errors.push('Expire time is required for GTD orders.');
+      } else if (Number.isNaN(new Date(expireTime).getTime())) {
+        errors.push('Expire time must be a valid date/time.');
+      }
     }
 
     if (errors.length) {
@@ -237,7 +366,14 @@ export class OrderTicketComponent implements OnInit {
 
     const normalizedSymbol = symbol.toUpperCase();
     const normalizedVenue = venue.toUpperCase();
-    const notional = this.estimateNotional(quantity, price, normalizedSymbol, normalizedVenue);
+    const notional = this.estimateNotional(
+      quantity,
+      price,
+      normalizedSymbol,
+      normalizedVenue,
+      limitOffset,
+      type,
+    );
 
     if (side === 'sell') {
       const positionQty = this.availablePositionQuantity(normalizedSymbol, normalizedVenue);
@@ -264,6 +400,13 @@ export class OrderTicketComponent implements OnInit {
       errors.push(`Notional breaches risk limit (${notionalLimit.toFixed(2)}).`);
     }
 
+    if (contingency === 'OCO' && !(value.order_list_id ?? '').trim()) {
+      errors.push('Order list ID is required when using an OCO contingency.');
+    }
+    if (contingency === 'OTO' && !(value.parent_order_id ?? '').trim()) {
+      errors.push('Parent order ID is required when using an OTO contingency.');
+    }
+
     return errors;
   }
 
@@ -272,17 +415,31 @@ export class OrderTicketComponent implements OnInit {
     price: number | null,
     symbol: string,
     venue: string,
+    limitOffset: number | null,
+    type: OrderType,
   ): number | null {
-    if (price != null && price > 0) {
-      return quantity * price;
+    let referencePrice: number | null = null;
+    if (type === 'limit' && price != null && price > 0) {
+      referencePrice = price;
+    } else if (type === 'stop' && price != null && price > 0) {
+      referencePrice = price;
+    } else if (type === 'stop_limit') {
+      if (price != null && price > 0 && limitOffset != null && !Number.isNaN(limitOffset)) {
+        referencePrice = price + limitOffset;
+      } else if (price != null && price > 0) {
+        referencePrice = price;
+      }
+    }
+    if (referencePrice != null && referencePrice > 0) {
+      return quantity * referencePrice;
     }
 
     const position = this.positions().find(
       (pos) => pos.symbol.toUpperCase() === symbol && pos.venue.toUpperCase() === venue,
     );
-    const referencePrice = position?.mark_price ?? position?.average_price;
-    if (referencePrice && referencePrice > 0) {
-      return quantity * referencePrice;
+    const positionReferencePrice = position?.mark_price ?? position?.average_price;
+    if (positionReferencePrice && positionReferencePrice > 0) {
+      return quantity * positionReferencePrice;
     }
 
     const exposure = this.riskExposures().find(
@@ -351,12 +508,15 @@ export class OrderTicketComponent implements OnInit {
       return null;
     }
     const price = raw.price != null ? Number(raw.price) : null;
+    const limitOffset =
+      raw.limit_offset != null && raw.limit_offset !== '' ? Number(raw.limit_offset) : null;
     const symbol = (raw.symbol ?? '').trim().toUpperCase();
     const venue = (raw.venue ?? '').trim().toUpperCase();
+    const type = (raw.type ?? 'market').toLowerCase() as OrderType;
     if (!symbol || !venue) {
       return null;
     }
-    return this.estimateNotional(quantity, price, symbol, venue);
+    return this.estimateNotional(quantity, price, symbol, venue, limitOffset, type);
   });
 
   readonly availableBalance = computed(() => {

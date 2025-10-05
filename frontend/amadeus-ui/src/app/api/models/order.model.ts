@@ -17,9 +17,18 @@ export interface OrderSummary {
   average_price?: number | null;
   status: OrderStatus;
   time_in_force?: TimeInForce | null;
+  expire_time?: string | null;
+  post_only?: boolean | null;
+  reduce_only?: boolean | null;
+  limit_offset?: number | null;
+  contingency_type?: 'OCO' | 'OTO' | string | null;
+  order_list_id?: string | null;
+  linked_order_ids?: string[] | null;
+  parent_order_id?: string | null;
   node_id?: string | null;
   created_at: string;
   updated_at?: string | null;
+  instructions?: Record<string, unknown> | null;
 }
 
 export interface ExecutionReport {
@@ -53,6 +62,14 @@ export interface CreateOrderPayload {
   quantity: number;
   price?: number;
   time_in_force?: TimeInForce | string;
+  expire_time?: string;
+  post_only?: boolean;
+  reduce_only?: boolean;
+  limit_offset?: number;
+  contingency_type?: 'OCO' | 'OTO' | string;
+  order_list_id?: string;
+  linked_order_ids?: string[];
+  parent_order_id?: string;
   node_id?: string;
   client_order_id?: string;
 }

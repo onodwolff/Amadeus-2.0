@@ -44,13 +44,31 @@
         <input type="number" formControlName="quantity" min="0" step="0.0001" />
       </label>
       <label class="form-field" *ngIf="selectedType() !== 'market'">
-        <span>{{ selectedType() === 'stop' ? 'Stop price' : 'Limit price' }}</span>
+        <span>
+          {{
+            selectedType() === 'stop'
+              ? 'Stop price'
+              : selectedType() === 'stop_limit'
+              ? 'Stop trigger'
+              : 'Limit price'
+          }}
+        </span>
         <input type="number" formControlName="price" min="0" step="0.0001" />
+        <small class="form-field__hint" *ngIf="selectedType() === 'stop_limit'"
+          >Trigger price that activates the limit leg.</small
+        >
       </label>
       <div class="form-field" *ngIf="selectedType() === 'market'">
         <span>Price</span>
         <div class="form-field__placeholder">Market</div>
       </div>
+      <label class="form-field" *ngIf="showLimitOffset()">
+        <span>Limit offset</span>
+        <input type="number" formControlName="limit_offset" step="0.0001" />
+        <small class="form-field__hint"
+          >Adjustment applied to the trigger price to derive the working limit.</small
+        >
+      </label>
     </div>
     <div class="order-ticket__row">
       <label class="form-field">
@@ -60,6 +78,53 @@
       <label class="form-field">
         <span>Client order ID</span>
         <input formControlName="client_order_id" placeholder="CLIENT-123" />
+      </label>
+    </div>
+    <div class="order-ticket__row order-ticket__row--advanced">
+      <label class="form-field form-field--checkbox">
+        <div class="form-field__checkbox">
+          <input type="checkbox" formControlName="post_only" />
+          <span>Post-only</span>
+        </div>
+        <small class="form-field__hint">Reject if the order would rest as a taker.</small>
+      </label>
+      <label class="form-field form-field--checkbox">
+        <div class="form-field__checkbox">
+          <input type="checkbox" formControlName="reduce_only" />
+          <span>Reduce-only</span>
+        </div>
+        <small class="form-field__hint">Ensure the trade only reduces exposure.</small>
+      </label>
+      <label class="form-field" *ngIf="showExpireField()">
+        <span>Expire time</span>
+        <input type="datetime-local" formControlName="expire_time" />
+        <small class="form-field__hint">Local timestamp required for GTD instructions.</small>
+      </label>
+    </div>
+    <div class="order-ticket__row order-ticket__row--contingency">
+      <label class="form-field">
+        <span>Contingency</span>
+        <select formControlName="contingency_type">
+          <option *ngFor="let option of contingencyOptions" [value]="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+        <small class="form-field__hint">Coordinate linked orders such as OCO/OTO.</small>
+      </label>
+      <label class="form-field" *ngIf="selectedContingency() === 'OCO'">
+        <span>Order list ID</span>
+        <input formControlName="order_list_id" placeholder="LIST-001" />
+        <small class="form-field__hint">Shared identifier for the OCO group.</small>
+      </label>
+      <label class="form-field" *ngIf="selectedContingency() === 'OTO'">
+        <span>Parent order ID</span>
+        <input formControlName="parent_order_id" placeholder="ORD-000123" />
+        <small class="form-field__hint">Primary order that triggers dependent legs.</small>
+      </label>
+      <label class="form-field" *ngIf="selectedContingency() !== 'NONE'">
+        <span>Linked order IDs</span>
+        <input formControlName="linked_order_ids" placeholder="ORD-000234, ORD-000235" />
+        <small class="form-field__hint">Comma or space separated child order identifiers.</small>
       </label>
     </div>
     <div class="order-ticket__summary">
@@ -89,9 +154,64 @@
           </ng-container>
         </span>
       </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Time in force</span>
+        <span class="summary-card__value">{{ selectedTimeInForce() || '—' }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Expiry</span>
+        <span class="summary-card__value">{{ expireTimeSummary() || '—' }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Post-only</span>
+        <span class="summary-card__value">{{ form.controls.post_only.value ? 'Yes' : 'No' }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Reduce-only</span>
+        <span class="summary-card__value">{{ form.controls.reduce_only.value ? 'Yes' : 'No' }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Limit offset</span>
+        <span class="summary-card__value">
+          <ng-container
+            *ngIf="showLimitOffset() && form.controls.limit_offset.value !== null; else offsetUnknown"
+          >
+            {{ form.controls.limit_offset.value | number: '1.2-6' }}
+          </ng-container>
+        </span>
+      </div>
+      <div class="summary-card" *ngIf="selectedType() === 'stop_limit'">
+        <span class="summary-card__label">Derived limit</span>
+        <span class="summary-card__value">
+          <ng-container *ngIf="limitPricePreview() as limitPrice; else limitPriceUnknown">
+            {{ limitPrice | number: '1.2-6' }}
+          </ng-container>
+        </span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-card__label">Contingency</span>
+        <span class="summary-card__value">
+          <ng-container *ngIf="selectedContingency() !== 'NONE'; else contingencyNone">
+            {{ selectedContingency() }}
+            <span
+              class="summary-card__suffix"
+              *ngIf="selectedContingency() === 'OCO' && form.controls.order_list_id.value"
+              >ID: {{ form.controls.order_list_id.value }}</span
+            >
+            <span
+              class="summary-card__suffix"
+              *ngIf="selectedContingency() === 'OTO' && form.controls.parent_order_id.value"
+              >Parent: {{ form.controls.parent_order_id.value }}</span
+            >
+          </ng-container>
+        </span>
+      </div>
     </div>
     <ng-template #balanceUnknown>—</ng-template>
     <ng-template #notionalUnknown>—</ng-template>
+    <ng-template #offsetUnknown>—</ng-template>
+    <ng-template #limitPriceUnknown>—</ng-template>
+    <ng-template #contingencyNone>None</ng-template>
     <ul class="order-ticket__errors" *ngIf="formErrors().length > 0">
       <li *ngFor="let error of formErrors()">{{ error }}</li>
     </ul>
