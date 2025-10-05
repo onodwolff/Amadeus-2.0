@@ -1,0 +1,41 @@
+.venue-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 240px;
+}
+
+.venue-selector__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.venue-selector__controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.venue-selector__select {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d0d7e2;
+  background: #fff;
+  min-width: 160px;
+}
+
+.venue-selector__refresh {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  background: #2f80ed;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease-in-out;
+}
+
+.venue-selector__refresh:hover {
+  background: #1c64d1;
+}

@@ -1,0 +1,20 @@
+<div class="instrument-filters">
+  <label class="instrument-filters__field">
+    <span class="instrument-filters__label">Search</span>
+    <input
+      type="search"
+      class="instrument-filters__input"
+      placeholder="Symbol, ID or currency"
+      [value]="searchTerm()"
+      (input)="onSearch($event)"
+    />
+  </label>
+  <label class="instrument-filters__field">
+    <span class="instrument-filters__label">Type</span>
+    <select class="instrument-filters__select" [value]="typeFilter()" (change)="onTypeChange($event)">
+      <option *ngFor="let type of instrumentTypes()" [value]="type">
+        {{ type === 'all' ? 'All types' : (type | titlecase) }}
+      </option>
+    </select>
+  </label>
+</div>

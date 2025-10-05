@@ -1,0 +1,29 @@
+<section class="watchlist">
+  <header class="watchlist__header">
+    <h2 class="watchlist__title">Watchlist</h2>
+    <span class="watchlist__badge" *ngIf="entries().length">{{ entries().length }}</span>
+  </header>
+  <p class="watchlist__empty" *ngIf="!entries().length">
+    Save instruments from the search panel to build your watchlist. Synced with your favourites when available.
+  </p>
+  <ul class="watchlist__list" *ngIf="entries().length">
+    <li
+      class="watchlist__item"
+      *ngFor="let entry of entries()"
+      [class.watchlist__item--selected]="selectedInstrumentId() === entry.id"
+      (click)="select(entry)"
+    >
+      <div class="watchlist__content">
+        <span class="watchlist__symbol">{{ entry.instrument?.symbol ?? entry.id }}</span>
+        <span class="watchlist__meta">
+          <ng-container *ngIf="entry.instrument; else fallback">
+            {{ entry.instrument.type | titlecase }} · {{ entry.instrument.venue }}
+          </ng-container>
+          <ng-template #fallback>Instrument metadata unavailable</ng-template>
+        </span>
+      </div>
+      <button type="button" class="watchlist__remove" (click)="remove(entry, $event)">Remove</button>
+    </li>
+  </ul>
+  <footer class="watchlist__footer" *ngIf="isSyncing()">Synchronising…</footer>
+</section>

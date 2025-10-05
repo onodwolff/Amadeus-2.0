@@ -1,0 +1,131 @@
+<section class="market-page">
+  <header class="market-page__header">
+    <div>
+      <h1 class="market-page__title">Market overview</h1>
+      <p class="market-page__subtitle">
+        Explore instruments across connected venues, manage your watchlist and review instrument metadata.
+      </p>
+    </div>
+    <div class="market-page__actions">
+      <app-venue-selector></app-venue-selector>
+    </div>
+  </header>
+
+  <div class="market-page__filters">
+    <app-instrument-filters></app-instrument-filters>
+    <div class="market-page__status" *ngIf="isLoading() || loadError() || syncError()">
+      <span class="status status--loading" *ngIf="isLoading()">Loading instruments…</span>
+      <span class="status status--error" *ngIf="loadError()">{{ loadError() }}</span>
+      <span class="status status--error" *ngIf="syncError()">{{ syncError() }}</span>
+      <span class="status status--loading" *ngIf="!isLoading() && isSyncing()">Synchronising watchlist…</span>
+    </div>
+  </div>
+
+  <div class="market-page__content" *ngIf="hasInstruments(); else emptyState">
+    <section class="market-panel market-panel--search">
+      <header class="market-panel__header">
+        <h2 class="market-panel__title">Search instruments</h2>
+      </header>
+      <ng-container *ngIf="hasFilteredResults(); else noResults">
+        <ul class="instrument-list">
+          <li
+            class="instrument-list__item"
+            *ngFor="let instrument of filteredInstruments()"
+            [class.instrument-list__item--selected]="selectedInstrument()?.instrument_id === instrument.instrument_id"
+            (click)="onSelectInstrument(instrument)"
+          >
+            <div class="instrument-list__content">
+              <span class="instrument-list__symbol">{{ instrument.symbol }}</span>
+              <span class="instrument-list__meta">
+                {{ instrument.type | titlecase }} · {{ instrument.venue }}
+              </span>
+              <small class="instrument-list__id">{{ instrument.instrument_id }}</small>
+            </div>
+            <button
+              type="button"
+              class="instrument-list__watchlist"
+              [attr.aria-pressed]="isInstrumentInWatchlist(instrument)"
+              (click)="onToggleWatchlist(instrument, $event)"
+            >
+              {{ isInstrumentInWatchlist(instrument) ? 'Remove' : 'Save' }}
+            </button>
+          </li>
+        </ul>
+      </ng-container>
+      <ng-template #noResults>
+        <p class="instrument-list__empty" *ngIf="!isLoading()">No instruments match the current filters.</p>
+      </ng-template>
+    </section>
+
+    <section class="market-panel market-panel--summary" *ngIf="selectedInstrument() as instrument; else noSelection">
+      <header class="market-panel__header">
+        <h2 class="market-panel__title">Instrument summary</h2>
+      </header>
+      <div class="instrument-summary">
+        <div class="instrument-summary__row">
+          <span class="instrument-summary__label">Symbol</span>
+          <span class="instrument-summary__value">{{ instrument.symbol }}</span>
+        </div>
+        <div class="instrument-summary__row">
+          <span class="instrument-summary__label">Instrument ID</span>
+          <span class="instrument-summary__value">{{ instrument.instrument_id }}</span>
+        </div>
+        <div class="instrument-summary__row">
+          <span class="instrument-summary__label">Venue</span>
+          <span class="instrument-summary__value">{{ instrument.venue }}</span>
+        </div>
+        <div class="instrument-summary__row">
+          <span class="instrument-summary__label">Type</span>
+          <span class="instrument-summary__value">{{ instrument.type | titlecase }}</span>
+        </div>
+        <div class="instrument-summary__row" *ngIf="instrument.base_currency">
+          <span class="instrument-summary__label">Base currency</span>
+          <span class="instrument-summary__value">{{ instrument.base_currency }}</span>
+        </div>
+        <div class="instrument-summary__row" *ngIf="instrument.quote_currency">
+          <span class="instrument-summary__label">Quote currency</span>
+          <span class="instrument-summary__value">{{ instrument.quote_currency }}</span>
+        </div>
+        <div class="instrument-summary__row" *ngIf="instrument.tick_size as tick">
+          <span class="instrument-summary__label">Tick size</span>
+          <span class="instrument-summary__value">{{ tick }}</span>
+        </div>
+        <div class="instrument-summary__row" *ngIf="instrument.lot_size as lot">
+          <span class="instrument-summary__label">Lot size</span>
+          <span class="instrument-summary__value">{{ lot }}</span>
+        </div>
+        <div class="instrument-summary__row" *ngIf="instrument.contract_size as contract">
+          <span class="instrument-summary__label">Contract size</span>
+          <span class="instrument-summary__value">{{ contract }}</span>
+        </div>
+        <div class="instrument-summary__row" *ngIf="instrument.min_notional as notional">
+          <span class="instrument-summary__label">Min notional</span>
+          <span class="instrument-summary__value">{{ notional }}</span>
+        </div>
+        <div class="instrument-summary__row" *ngIf="instrument.expiry as expiry">
+          <span class="instrument-summary__label">Expiry</span>
+          <span class="instrument-summary__value">{{ expiry | date: 'medium' }}</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="market-panel market-panel--watchlist">
+      <app-watchlist-panel></app-watchlist-panel>
+    </aside>
+  </div>
+</section>
+
+<ng-template #emptyState>
+  <div class="market-empty">
+    <h2 class="market-empty__title">No instruments loaded</h2>
+    <p class="market-empty__description">
+      Adjust the filters or choose a different venue to load available instruments.
+    </p>
+  </div>
+</ng-template>
+
+<ng-template #noSelection>
+  <div class="market-panel market-panel--placeholder">
+    <p>Select an instrument to see its metadata.</p>
+  </div>
+</ng-template>
