@@ -1,0 +1,163 @@
+<section class="node-detail" *ngIf="node as current">
+  <header class="node-detail__header">
+    <div class="node-detail__title">
+      <h2>Node {{ current.id }}</h2>
+      <p class="node-detail__subtitle">{{ current.detail || 'Runtime information available below.' }}</p>
+      <div class="node-detail__status-line">
+        <span class="node-detail__status" [class.node-detail__status--running]="current.status === 'running'">
+          {{ current.status }}
+        </span>
+        <span class="node-detail__status" *ngIf="current.mode">• {{ current.mode }} mode</span>
+        <span class="node-detail__status" *ngIf="current.updated_at">• updated {{ current.updated_at | date: 'short' }}</span>
+      </div>
+    </div>
+    <div class="node-detail__actions">
+      <button type="button" class="btn btn--ghost" (click)="close.emit()">Close</button>
+      <button
+        type="button"
+        class="btn"
+        (click)="restart.emit()"
+        [disabled]="isRestarting || isStopping"
+      >
+        {{ isRestarting ? 'Restarting…' : 'Restart' }}
+      </button>
+      <button
+        type="button"
+        class="btn"
+        (click)="stop.emit()"
+        [disabled]="isStopping || current.status === 'stopped'"
+      >
+        {{ isStopping ? 'Stopping…' : 'Stop' }}
+      </button>
+      <button
+        type="button"
+        class="btn btn--primary"
+        (click)="downloadLogs.emit()"
+        [disabled]="isDownloadingLogs"
+      >
+        {{ isDownloadingLogs ? 'Preparing…' : 'Download logs' }}
+      </button>
+    </div>
+  </header>
+
+  <div class="node-detail__content">
+    <section class="node-detail__section">
+      <header class="node-detail__section-header">
+        <h3>Configuration</h3>
+      </header>
+      <ng-container *ngIf="!isLoadingDetail; else loadingDetail">
+        <p class="node-detail__error" *ngIf="detailError">{{ detailError }}</p>
+        <ng-container *ngIf="configuration as config; else emptyConfig">
+          <div class="node-detail__config">
+            <div class="node-detail__config-group" *ngIf="config.strategy as strategy">
+              <h4>Strategy</h4>
+              <p class="node-detail__config-meta">
+                <span>{{ strategy.name || 'Unnamed strategy' }}</span>
+                <span *ngIf="strategy.id">({{ strategy.id }})</span>
+              </p>
+              <dl class="node-detail__definition" *ngIf="strategy.parameters?.length">
+                <ng-container *ngFor="let param of strategy.parameters">
+                  <dt>{{ param.key }}</dt>
+                  <dd>{{ param.value }}</dd>
+                </ng-container>
+              </dl>
+            </div>
+
+            <div class="node-detail__config-group" *ngIf="config.dataSources?.length">
+              <h4>Data sources</h4>
+              <ul>
+                <li *ngFor="let source of config.dataSources">
+                  <span class="node-detail__pill">{{ source.type }}</span>
+                  <span>{{ source.label || source.id }}</span>
+                  <span class="node-detail__hint" *ngIf="source.mode">({{ source.mode }})</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="node-detail__config-group" *ngIf="config.keyReferences?.length">
+              <h4>Key references</h4>
+              <ul>
+                <li *ngFor="let key of config.keyReferences">
+                  <span>{{ key.alias }}</span>
+                  <span class="node-detail__hint">{{ key.keyId }}</span>
+                  <span class="node-detail__pill" *ngIf="key.required">required</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="node-detail__config-group" *ngIf="config.constraints">
+              <h4>Constraints</h4>
+              <dl class="node-detail__definition">
+                <ng-container *ngFor="let entry of config.constraints | keyvalue">
+                  <dt>{{ entry.key }}</dt>
+                  <dd>{{ entry.value }}</dd>
+                </ng-container>
+              </dl>
+            </div>
+          </div>
+        </ng-container>
+      </ng-container>
+    </section>
+
+    <section class="node-detail__section">
+      <header class="node-detail__section-header">
+        <h3>Lifecycle</h3>
+      </header>
+      <ng-container *ngIf="!isLoadingDetail; else loadingDetail">
+        <ul class="node-detail__timeline" *ngIf="hasLifecycle; else emptyLifecycle">
+          <li *ngFor="let event of lifecycle; trackBy: trackLifecycle">
+            <span class="node-detail__timeline-dot"></span>
+            <div>
+              <p class="node-detail__timeline-message">{{ event.message }}</p>
+              <p class="node-detail__timeline-meta">
+                {{ event.status }} • {{ event.timestamp | date: 'medium' }}
+              </p>
+            </div>
+          </li>
+        </ul>
+      </ng-container>
+    </section>
+  </div>
+
+  <section class="node-detail__logs">
+    <header class="node-detail__logs-header">
+      <div>
+        <h3>Realtime logs</h3>
+        <p class="node-detail__hint">Stream status: {{ logStreamState }}</p>
+      </div>
+    </header>
+    <ng-container *ngIf="!isLoadingLogs; else loadingLogs">
+      <p class="node-detail__error" *ngIf="logsError">{{ logsError }}</p>
+      <ul class="node-detail__log-list" *ngIf="hasLogs; else emptyLogs">
+        <li *ngFor="let log of logs; trackBy: trackLog" [class.node-detail__log-item--warn]="log.level === 'warning'">
+          <div class="node-detail__log-meta">
+            <span class="node-detail__pill">{{ log.level }}</span>
+            <span>{{ log.timestamp | date: 'mediumTime' }}</span>
+            <span class="node-detail__hint">{{ log.source }}</span>
+          </div>
+          <p class="node-detail__log-message">{{ log.message }}</p>
+        </li>
+      </ul>
+    </ng-container>
+  </section>
+</section>
+
+<ng-template #loadingDetail>
+  <div class="node-detail__loading">Loading detail…</div>
+</ng-template>
+
+<ng-template #loadingLogs>
+  <div class="node-detail__loading">Streaming logs…</div>
+</ng-template>
+
+<ng-template #emptyConfig>
+  <p class="node-detail__empty">Configuration not available.</p>
+</ng-template>
+
+<ng-template #emptyLifecycle>
+  <p class="node-detail__empty">No lifecycle events recorded yet.</p>
+</ng-template>
+
+<ng-template #emptyLogs>
+  <p class="node-detail__empty">Waiting for log events…</p>
+</ng-template>

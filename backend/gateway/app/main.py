@@ -4,11 +4,12 @@ import asyncio, json, random
 from typing import List
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .settings import settings
-from .nautilus_service import svc, NodeHandle
+from .nautilus_service import NodeHandle, svc
 
 
 class NodeLaunchStrategyParameter(BaseModel):
@@ -122,10 +123,11 @@ def start_live():
 def launch_node(payload: NodeLaunchPayload):
     node_type = payload.type.lower()
     detail = build_launch_detail(payload)
+    config = payload.dict()
     if node_type == "backtest":
-        node = svc.start_backtest(detail=detail)
+        node = svc.start_backtest(detail=detail, config=config)
     elif node_type == "live":
-        node = svc.start_live(detail=detail)
+        node = svc.start_live(detail=detail, config=config)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported node type '{payload.type}'")
     return {"node": svc.as_dict(node)}
@@ -137,6 +139,40 @@ def stop_node(node_id: str):
         return {"node": svc.as_dict(node)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/nodes/{node_id}/restart")
+def restart_node(node_id: str):
+    try:
+        node = svc.restart_node(node_id)
+        return {"node": svc.as_dict(node)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/nodes/{node_id}")
+def get_node(node_id: str):
+    try:
+        return svc.node_detail(node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/nodes/{node_id}/logs")
+def get_node_logs(node_id: str):
+    try:
+        return svc.node_logs(node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/nodes/{node_id}/logs/export")
+def export_node_logs(node_id: str):
+    try:
+        payload = svc.export_logs(node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return PlainTextResponse(payload, media_type="text/plain")
 
 @app.websocket("/ws/nodes")
 async def ws_nodes(ws: WebSocket):
@@ -156,5 +192,20 @@ async def ws_nodes(ws: WebSocket):
                 n["metrics"] = {"pnl": round(pnl[nid], 2), "latency_ms": round(lat[nid], 1)}
             await ws.send_text(json.dumps({"nodes": nodes}))
             await asyncio.sleep(1.0)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/nodes/{node_id}/logs")
+async def ws_node_logs(node_id: str, ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            snapshot = svc.stream_snapshot(node_id)
+            await ws.send_text(json.dumps(snapshot))
+            await asyncio.sleep(1.2)
+    except ValueError:
+        await ws.send_text(json.dumps({"logs": [], "lifecycle": []}))
+        await ws.close(code=1008)
     except WebSocketDisconnect:
         return

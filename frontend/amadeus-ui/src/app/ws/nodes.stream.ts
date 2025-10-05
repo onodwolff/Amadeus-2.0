@@ -1,5 +1,5 @@
 import { map, Observable } from 'rxjs';
-import { NodeHandle, NodeMetrics, NodesStreamMessage } from '../api/models';
+import { NodeEventsStreamMessage, NodeHandle, NodeMetrics, NodesStreamMessage } from '../api/models';
 import { WsService, WsConnectionState } from '../ws.service';
 
 export interface NodesStreamObservables {
@@ -14,6 +14,11 @@ export interface NodeMetricsSummary {
 
 export interface NodesMetricsObservables {
   readonly metrics$: Observable<NodeMetricsSummary[]>;
+  readonly state$: Observable<WsConnectionState>;
+}
+
+export interface NodeEventsStreamObservables {
+  readonly events$: Observable<NodeEventsStreamMessage>;
   readonly state$: Observable<WsConnectionState>;
 }
 
@@ -49,5 +54,22 @@ export function observeNodesMetrics(ws: WsService): NodesMetricsObservables {
   return {
     metrics$,
     state$,
+  };
+}
+
+export function observeNodeEventsStream(
+  nodeId: string,
+  ws: WsService,
+): NodeEventsStreamObservables {
+  const channel = ws.channel<NodeEventsStreamMessage>({
+    name: `node-events-${nodeId}`,
+    path: `/ws/nodes/${encodeURIComponent(nodeId)}/logs`,
+    retryAttempts: Infinity,
+    retryDelay: 1000,
+  });
+
+  return {
+    events$: channel.messages$,
+    state$: channel.state$,
   };
 }
