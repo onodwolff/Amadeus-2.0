@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ApiService } from './api.service';
+import { buildWebSocketUrl } from './api-base';
 
 @Component({
   selector: 'app-root',
@@ -26,7 +27,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.api.coreInfo().subscribe(c => this.core = c);
 
     // WS
-    this.ws = new WebSocket('ws://localhost:8000/ws/nodes');
+    this.ws = new WebSocket(buildWebSocketUrl('/ws/nodes'));
     this.ws.onopen = () => { this.wsState = 'connected'; };
     this.ws.onclose = () => { this.wsState = 'closed'; };
     this.ws.onerror = (e) => { this.wsState = 'error'; console.error('WS error', e); };
