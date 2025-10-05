@@ -12,6 +12,8 @@ export interface NodeHandle {
   status: NodeStatus;
   detail?: string;
   metrics?: NodeMetrics;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface NodesListResponse {
@@ -22,8 +24,50 @@ export interface NodeResponse {
   node: NodeHandle;
 }
 
+export interface NodeLifecycleEvent {
+  timestamp: string;
+  status: string;
+  message: string;
+}
+
+export interface NodeLogEntry {
+  id: string;
+  timestamp: string;
+  level: string;
+  message: string;
+  source: string;
+}
+
+export interface NodeConfiguration {
+  type?: NodeMode;
+  strategy?: {
+    id?: string;
+    name?: string;
+    parameters?: NodeLaunchStrategyParameter[];
+  };
+  dataSources?: NodeLaunchDataSource[];
+  keyReferences?: NodeLaunchKeyReference[];
+  constraints?: Partial<NodeLaunchConstraints>;
+  [key: string]: unknown;
+}
+
+export interface NodeDetailResponse {
+  node: NodeHandle;
+  config: NodeConfiguration;
+  lifecycle: NodeLifecycleEvent[];
+}
+
+export interface NodeLogsResponse {
+  logs: NodeLogEntry[];
+}
+
 export interface NodesStreamMessage {
   nodes: NodeHandle[];
+}
+
+export interface NodeEventsStreamMessage {
+  logs: NodeLogEntry[];
+  lifecycle: NodeLifecycleEvent[];
 }
 
 export interface NodeLaunchStrategyParameter {

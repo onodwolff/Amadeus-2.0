@@ -55,36 +55,76 @@
   </ng-container>
 
   <ng-template #nodesContent>
-    <div class="nodes-table" *ngIf="hasNodes(); else emptyState">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Mode</th>
-            <th>Status</th>
-            <th>Detail</th>
-            <th>PnL</th>
-            <th>Latency</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let node of nodes()">
-            <td data-label="ID"><code>{{ node.id }}</code></td>
-            <td data-label="Mode"><span class="tag">{{ node.mode }}</span></td>
-            <td data-label="Status">
-              <span class="status" [class.status--running]="node.status === 'running'" [class.status--stopped]="node.status !== 'running'">{{ node.status }}</span>
-            </td>
-            <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
-            <td data-label="PnL">{{ node.metrics?.pnl ?? '—' }}</td>
-            <td data-label="Latency">{{ node.metrics?.latency_ms ? node.metrics?.latency_ms + ' ms' : '—' }}</td>
-            <td data-label="Actions" class="actions">
-              <button type="button" class="btn btn--ghost" (click)="stop(node)" [disabled]="node.status !== 'running'">Stop</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <ng-container *ngIf="hasNodes(); else emptyState">
+      <div class="nodes-layout" [class.nodes-layout--detail-open]="selectedNode()">
+        <div class="nodes-table">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Mode</th>
+                <th>Status</th>
+                <th>Detail</th>
+                <th>PnL</th>
+                <th>Latency</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                *ngFor="let node of nodes()"
+                (click)="openNodeDetail(node)"
+                [class.is-selected]="selectedNodeId() === node.id"
+              >
+                <td data-label="ID"><code>{{ node.id }}</code></td>
+                <td data-label="Mode"><span class="tag">{{ node.mode }}</span></td>
+                <td data-label="Status">
+                  <span
+                    class="status"
+                    [class.status--running]="node.status === 'running'"
+                    [class.status--stopped]="node.status !== 'running'"
+                    >{{ node.status }}</span
+                  >
+                </td>
+                <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
+                <td data-label="PnL">{{ node.metrics?.pnl ?? '—' }}</td>
+                <td data-label="Latency">{{ node.metrics?.latency_ms ? node.metrics?.latency_ms + ' ms' : '—' }}</td>
+                <td data-label="Actions" class="actions">
+                  <button
+                    type="button"
+                    class="btn btn--ghost"
+                    (click)="onStopClick($event, node)"
+                    [disabled]="node.status !== 'running' || isStopping()"
+                  >
+                    Stop
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <app-node-detail
+          *ngIf="selectedNode() as selected"
+          [node]="selected"
+          [detail]="nodeDetail()"
+          [lifecycle]="nodeLifecycle()"
+          [logs]="nodeLogs()"
+          [isLoadingDetail]="isDetailLoading()"
+          [isLoadingLogs]="isLogsLoading()"
+          [detailError]="detailError()"
+          [logsError]="logsError()"
+          [logStreamState]="logStreamState()"
+          [isRestarting]="isRestarting()"
+          [isStopping]="isStopping()"
+          [isDownloadingLogs]="isDownloadingLogs()"
+          (close)="closeDetail()"
+          (restart)="restart(selected)"
+          (stop)="stop(selected)"
+          (downloadLogs)="downloadLogs(selected)"
+        ></app-node-detail>
+      </div>
+    </ng-container>
   </ng-template>
 
   <ng-template #emptyState>
