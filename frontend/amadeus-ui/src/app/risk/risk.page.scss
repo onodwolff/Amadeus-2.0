@@ -1,0 +1,372 @@
+.risk-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 2rem;
+  color: #0f172a;
+}
+
+.risk-page__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.risk-page__header h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+.risk-page__header p {
+  margin: 0;
+  color: #475569;
+}
+
+.risk-page__state {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border: 1px solid #cbd5f5;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  color: #1e293b;
+}
+
+.risk-page__state--error {
+  border-color: #f87171;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.risk-page__state button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #2563eb;
+  color: #fff;
+  cursor: pointer;
+}
+
+.risk-page__state button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.risk-page__spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  border: 2px solid rgba(37, 99, 235, 0.3);
+  border-top-color: #2563eb;
+  animation: risk-spin 1s linear infinite;
+}
+
+@keyframes risk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.risk-form {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.risk-module {
+  border: 1px solid #dbeafe;
+  border-radius: 1rem;
+  background: #fff;
+  padding: 1.5rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.risk-module__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.risk-module__title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.risk-module__title h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.risk-module__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.module-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 16rem;
+}
+
+.module-control label {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.module-control select {
+  padding: 0.5rem;
+  border: 1px solid #cbd5f5;
+  border-radius: 0.5rem;
+  font: inherit;
+}
+
+.module-control select:disabled {
+  background: #e2e8f0;
+}
+
+.module-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.module-toggle input[type='checkbox'] {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-chip--success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.status-chip--info {
+  background: rgba(59, 130, 246, 0.15);
+  color: #1d4ed8;
+}
+
+.status-chip--warning {
+  background: rgba(250, 204, 21, 0.2);
+  color: #b45309;
+}
+
+.status-chip--error {
+  background: rgba(248, 113, 113, 0.2);
+  color: #b91c1c;
+}
+
+.risk-table {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.risk-table__row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.risk-table__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.risk-table__field label {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.risk-table__field input[type='text'],
+.risk-table__field input[type='number'] {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5f5;
+  font: inherit;
+}
+
+.risk-table__field input:disabled {
+  background: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.risk-table__field--number input {
+  text-align: right;
+}
+
+.risk-table__field--checkbox {
+  padding-top: 1.5rem;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.checkbox-label input[type='checkbox'] {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.field-error {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #b91c1c;
+}
+
+.risk-table__field--error input,
+.risk-table__field--error select {
+  border-color: #f87171;
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.35);
+}
+
+.risk-table__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 0.5rem;
+}
+
+.risk-table__actions button {
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5f5;
+  background: #fff;
+  cursor: pointer;
+}
+
+.risk-table__actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.risk-table__footer {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.risk-table__footer .link {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.risk-table__footer .link:hover {
+  text-decoration: underline;
+}
+
+.loss-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.loss-grid__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.loss-grid__field input[type='number'] {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5f5;
+  font: inherit;
+}
+
+.loss-grid__field--error input[type='number'] {
+  border-color: #f87171;
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.35);
+}
+
+.risk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+.risk-actions button {
+  padding: 0.65rem 1.5rem;
+  border-radius: 0.75rem;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.risk-actions button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.risk-actions button {
+  background: #2563eb;
+  color: #fff;
+}
+
+.risk-actions .secondary {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.risk-actions__status {
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+@media (max-width: 960px) {
+  .risk-table__row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .risk-table__actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .risk-page {
+    padding: 1.5rem;
+  }
+
+  .risk-module__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .risk-table__row {
+    grid-template-columns: 1fr;
+  }
+
+  .risk-table__field--checkbox {
+    padding-top: 0;
+  }
+}

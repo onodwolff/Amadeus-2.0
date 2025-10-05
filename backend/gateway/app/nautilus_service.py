@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -173,6 +174,7 @@ class NautilusService:
         self._executions: Dict[str, List[ExecutionRecord]] = {}
         self._order_counter = 0
         self._seed_orders_state()
+        self._risk_limits: Dict[str, Any] = self._default_risk_limits()
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
@@ -885,7 +887,46 @@ class NautilusService:
                 "stress_var": round(total_notional * 0.18, 2),
                 "exposure_limits": exposure_limits,
                 "exposures": exposure_list,
-            }
+            },
+            "limits": deepcopy(self._risk_limits),
+        }
+
+    def risk_limits_snapshot(self) -> dict:
+        return {"limits": deepcopy(self._risk_limits)}
+
+    def update_risk_limits(self, payload: Dict[str, Any]) -> dict:
+        self._risk_limits = deepcopy(payload)
+        return self.risk_limits_snapshot()
+
+    def _default_risk_limits(self) -> Dict[str, Any]:
+        return {
+            "position_limits": {
+                "enabled": True,
+                "status": "up_to_date",
+                "limits": [
+                    {"venue": "BINANCE", "node": "lv-00112233", "limit": 750000.0},
+                    {"venue": "COINBASE", "node": "bt-00ffaacc", "limit": 500000.0},
+                ],
+            },
+            "max_loss": {
+                "enabled": True,
+                "status": "stale",
+                "daily": 25000.0,
+                "weekly": 100000.0,
+            },
+            "trade_locks": {
+                "enabled": True,
+                "status": "up_to_date",
+                "locks": [
+                    {"venue": "BINANCE", "node": "lv-00112233", "locked": False, "reason": None},
+                    {
+                        "venue": "COINBASE",
+                        "node": "bt-00ffaacc",
+                        "locked": True,
+                        "reason": "Pending compliance review",
+                    },
+                ],
+            },
         }
 
     def start_backtest(
