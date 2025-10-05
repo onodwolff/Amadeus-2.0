@@ -82,12 +82,299 @@ class NodeState:
     metrics: List[NodeMetricsSample]
 
 
+@dataclass
+class PortfolioBalance:
+    account_id: str
+    account_name: str
+    node_id: str
+    venue: str
+    currency: str
+    total: float
+    available: float
+    locked: float
+
+
+@dataclass
+class PortfolioPosition:
+    position_id: str
+    account_id: str
+    account_name: str
+    node_id: str
+    venue: str
+    symbol: str
+    quantity: float
+    average_price: float
+    mark_price: float
+    unrealized_pnl: float
+    realized_pnl: float
+    margin_used: float
+    updated_at: str
+
+
+@dataclass
+class CashMovement:
+    movement_id: str
+    account_id: str
+    account_name: str
+    node_id: str
+    venue: str
+    currency: str
+    amount: float
+    type: str
+    description: str
+    timestamp: str
+
+
 class NautilusService:
     def __init__(self) -> None:
         self._nodes: Dict[str, NodeState] = {}
+        self._seed_portfolio_state()
+
+    def _seed_portfolio_state(self) -> None:
+        now = _utcnow_iso()
+        self._portfolio_balances: List[PortfolioBalance] = [
+            PortfolioBalance(
+                account_id="ACC-USD-PRIMARY",
+                account_name="Primary USD",
+                node_id="lv-00112233",
+                venue="BINANCE",
+                currency="USD",
+                total=250_000.0,
+                available=212_500.0,
+                locked=37_500.0,
+            ),
+            PortfolioBalance(
+                account_id="ACC-USD-ALGO",
+                account_name="Algo USD",
+                node_id="bt-00ffaacc",
+                venue="COINBASE",
+                currency="USD",
+                total=145_000.0,
+                available=118_000.0,
+                locked=27_000.0,
+            ),
+            PortfolioBalance(
+                account_id="ACC-BTC-PRIMARY",
+                account_name="Primary BTC",
+                node_id="lv-00112233",
+                venue="BINANCE",
+                currency="BTC",
+                total=35.0,
+                available=28.4,
+                locked=6.6,
+            ),
+        ]
+
+        self._portfolio_positions: List[PortfolioPosition] = [
+            PortfolioPosition(
+                position_id="POS-BTCUSDT",
+                account_id="ACC-USD-PRIMARY",
+                account_name="Primary USD",
+                node_id="lv-00112233",
+                venue="BINANCE",
+                symbol="BTCUSDT",
+                quantity=1.25,
+                average_price=38_250.0,
+                mark_price=38_980.0,
+                unrealized_pnl=910.0,
+                realized_pnl=4_120.0,
+                margin_used=4_872.5,
+                updated_at=now,
+            ),
+            PortfolioPosition(
+                position_id="POS-ETHUSDT",
+                account_id="ACC-USD-ALGO",
+                account_name="Algo USD",
+                node_id="bt-00ffaacc",
+                venue="COINBASE",
+                symbol="ETHUSDT",
+                quantity=42.0,
+                average_price=2_180.0,
+                mark_price=2_205.0,
+                unrealized_pnl=1_050.0,
+                realized_pnl=-420.0,
+                margin_used=7_398.0,
+                updated_at=now,
+            ),
+            PortfolioPosition(
+                position_id="POS-BTCUSDC",
+                account_id="ACC-BTC-PRIMARY",
+                account_name="Primary BTC",
+                node_id="lv-00112233",
+                venue="BINANCE",
+                symbol="BTCUSDC",
+                quantity=-0.8,
+                average_price=39_050.0,
+                mark_price=38_980.0,
+                unrealized_pnl=56.0,
+                realized_pnl=2_750.0,
+                margin_used=3_126.4,
+                updated_at=now,
+            ),
+        ]
+
+        self._cash_movements: List[CashMovement] = [
+            CashMovement(
+                movement_id=uuid.uuid4().hex,
+                account_id="ACC-USD-PRIMARY",
+                account_name="Primary USD",
+                node_id="lv-00112233",
+                venue="BINANCE",
+                currency="USD",
+                amount=25_000.0,
+                type="deposit",
+                description="Initial funding",
+                timestamp=now,
+            ),
+            CashMovement(
+                movement_id=uuid.uuid4().hex,
+                account_id="ACC-USD-ALGO",
+                account_name="Algo USD",
+                node_id="bt-00ffaacc",
+                venue="COINBASE",
+                currency="USD",
+                amount=-7_500.0,
+                type="withdrawal",
+                description="Capital reallocation",
+                timestamp=now,
+            ),
+            CashMovement(
+                movement_id=uuid.uuid4().hex,
+                account_id="ACC-BTC-PRIMARY",
+                account_name="Primary BTC",
+                node_id="lv-00112233",
+                venue="BINANCE",
+                currency="BTC",
+                amount=0.45,
+                type="trade_pnl",
+                description="Settlement from BTCUSDT",
+                timestamp=now,
+            ),
+        ]
+
+        self._portfolio_equity = 0.0
+        self._portfolio_margin = 0.0
+        self._portfolio_timestamp = now
+        self._recompute_portfolio_totals()
 
     def core_info(self) -> dict:
         return {"nautilus_version": NT_VERSION, "available": nt is not None}
+
+    def _recompute_portfolio_totals(self) -> None:
+        self._portfolio_equity = round(
+            sum(balance.total for balance in self._portfolio_balances), 2
+        )
+        self._portfolio_margin = round(
+            sum(position.margin_used for position in self._portfolio_positions), 2
+        )
+        self._portfolio_timestamp = _utcnow_iso()
+
+    def _generate_cash_movement(self) -> CashMovement:
+        balance = random.choice(self._portfolio_balances)
+        movement_type = random.choices(
+            population=["deposit", "withdrawal", "transfer", "trade_pnl", "adjustment"],
+            weights=[0.22, 0.18, 0.15, 0.28, 0.17],
+            k=1,
+        )[0]
+        magnitude = random.uniform(400.0, 4_000.0)
+        amount = round(magnitude if movement_type in {"deposit", "trade_pnl", "adjustment"} else -magnitude, 2)
+        descriptions = {
+            "deposit": "External funding received",
+            "withdrawal": "Capital withdrawn to treasury",
+            "transfer": "Desk-to-desk transfer",
+            "trade_pnl": "Realised trading P&L",
+            "adjustment": "Manual balance adjustment",
+        }
+        return CashMovement(
+            movement_id=uuid.uuid4().hex,
+            account_id=balance.account_id,
+            account_name=balance.account_name,
+            node_id=balance.node_id,
+            venue=balance.venue,
+            currency=balance.currency,
+            amount=amount,
+            type=movement_type,
+            description=descriptions.get(movement_type, ""),
+            timestamp=_utcnow_iso(),
+        )
+
+    def _apply_movement_to_balances(self, movement: CashMovement) -> None:
+        for balance in self._portfolio_balances:
+            if balance.account_id == movement.account_id and balance.currency == movement.currency:
+                balance.available = round(max(0.0, balance.available + movement.amount), 2)
+                balance.total = round(max(0.0, balance.total + movement.amount), 2)
+                break
+
+    def _simulate_portfolio_tick(self) -> None:
+        # Drift positions and balances slightly to emulate market activity
+        for position in self._portfolio_positions:
+            drift = random.gauss(0, 0.35)
+            mark = max(0.5, position.mark_price * (1 + drift / 100))
+            position.mark_price = round(mark, 2)
+            position.unrealized_pnl = round(
+                (position.mark_price - position.average_price) * position.quantity, 2
+            )
+            if random.random() < 0.12:
+                realized_delta = random.gauss(0, max(50.0, abs(position.unrealized_pnl) * 0.15))
+                position.realized_pnl = round(position.realized_pnl + realized_delta, 2)
+            notional = abs(position.quantity * position.mark_price)
+            position.margin_used = round(notional * 0.08, 2)
+            position.updated_at = _utcnow_iso()
+
+        for balance in self._portfolio_balances:
+            available_drift = random.gauss(0, max(120.0, balance.available * 0.002))
+            balance.available = round(max(0.0, balance.available + available_drift), 2)
+            locked_drift = random.gauss(0, max(60.0, balance.locked * 0.002))
+            balance.locked = round(max(0.0, balance.locked + locked_drift), 2)
+            balance.total = round(balance.available + balance.locked, 2)
+
+        if random.random() < 0.35:
+            movement = self._generate_cash_movement()
+            self._apply_movement_to_balances(movement)
+            self._cash_movements.append(movement)
+            self._cash_movements = self._cash_movements[-60:]
+
+        self._recompute_portfolio_totals()
+
+    def portfolio_snapshot(self) -> dict:
+        return {
+            "portfolio": {
+                "balances": [asdict(balance) for balance in self._portfolio_balances],
+                "positions": [asdict(position) for position in self._portfolio_positions],
+                "cash_movements": [asdict(movement) for movement in self._cash_movements[-60:]],
+                "equity_value": self._portfolio_equity,
+                "margin_value": self._portfolio_margin,
+                "timestamp": self._portfolio_timestamp,
+            }
+        }
+
+    def portfolio_balances_stream_payload(self) -> dict:
+        self._simulate_portfolio_tick()
+        return {
+            "balances": [asdict(balance) for balance in self._portfolio_balances],
+            "equity_value": self._portfolio_equity,
+            "margin_value": self._portfolio_margin,
+            "timestamp": self._portfolio_timestamp,
+        }
+
+    def portfolio_positions_stream_payload(self) -> dict:
+        self._simulate_portfolio_tick()
+        return {
+            "positions": [asdict(position) for position in self._portfolio_positions],
+            "equity_value": self._portfolio_equity,
+            "margin_value": self._portfolio_margin,
+            "timestamp": self._portfolio_timestamp,
+        }
+
+    def portfolio_movements_stream_payload(self) -> dict:
+        if random.random() < 0.5:
+            self._simulate_portfolio_tick()
+        return {
+            "cash_movements": [asdict(movement) for movement in self._cash_movements[-60:]],
+            "equity_value": self._portfolio_equity,
+            "margin_value": self._portfolio_margin,
+            "timestamp": self._portfolio_timestamp,
+        }
 
     def start_backtest(
         self,
