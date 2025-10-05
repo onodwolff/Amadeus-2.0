@@ -1,9 +1,12 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { NodesApi } from '../api/clients/nodes.api';
 import { SystemApi } from '../api/clients/system.api';
-import { CoreInfo, HealthStatus, NodeHandle, NodesStreamMessage } from '../api/models';
+import { CoreInfo, HealthStatus, NodeHandle } from '../api/models';
 import { WsService } from '../ws.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { observeNodesStream } from '../ws';
+import { WsConnectionState } from '../ws.service';
 
 @Component({
   standalone: true,
@@ -12,16 +15,13 @@ import { WsService } from '../ws.service';
   templateUrl: './nodes.page.html',
   styleUrls: ['./nodes.page.scss'],
 })
-export class NodesPage implements OnInit, OnDestroy {
+export class NodesPage implements OnInit {
   readonly nodes = signal<NodeHandle[]>([]);
   readonly isLoading = signal(false);
-  readonly wsState = signal<'connecting' | 'connected' | 'disconnected'>('connecting');
+  readonly wsState = signal<WsConnectionState>('connecting');
   readonly errorText = signal<string | null>(null);
   readonly coreInfo = signal<CoreInfo | null>(null);
   readonly healthInfo = signal<HealthStatus | null>(null);
-
-  private unsubscribeWs?: () => void;
-  private refreshTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly nodesApi: NodesApi,
@@ -38,36 +38,19 @@ export class NodesPage implements OnInit, OnDestroy {
       .subscribe({ next: (c) => this.coreInfo.set(c), error: (err) => console.error(err) });
     this.fetchNodes();
 
-    this.unsubscribeWs = this.ws.subscribe<NodesStreamMessage>(
-      '/ws/nodes',
-      (payload) => {
-        if (payload?.nodes) {
-          this.nodes.set(payload.nodes);
-        }
-      },
-      {
-        retryAttempts: Infinity,
-        retryDelay: 1000,
-        onOpen: () => this.wsState.set('connected'),
-        onClose: () => this.wsState.set('disconnected'),
-        onError: (err) => {
-          console.error(err);
-          this.wsState.set('connecting');
-        },
-      },
-    );
+    const { nodes$, state$ } = observeNodesStream(this.ws);
 
-    // fallback polling every 5 seconds
-    this.refreshTimer = setInterval(() => this.fetchNodes(), 5000);
-  }
+    state$.pipe(takeUntilDestroyed()).subscribe((state) => this.wsState.set(state));
 
-  ngOnDestroy(): void {
-    if (this.unsubscribeWs) {
-      this.unsubscribeWs();
-    }
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-    }
+    nodes$.pipe(takeUntilDestroyed()).subscribe({
+      next: (payload) => {
+        this.nodes.set(payload);
+      },
+      error: (err) => {
+        console.error(err);
+        this.wsState.set('disconnected');
+      },
+    });
   }
 
   readonly hasNodes = computed(() => this.nodes().length > 0);
