@@ -25,5 +25,6 @@
       <button type="button" class="watchlist__remove" (click)="remove(entry, $event)">Remove</button>
     </li>
   </ul>
-  <footer class="watchlist__footer" *ngIf="isSyncing()">Synchronising…</footer>
+  <footer class="watchlist__footer watchlist__footer--error" *ngIf="syncError()">{{ syncError() }}</footer>
+  <footer class="watchlist__footer" *ngIf="isSyncing() && !syncError()">Synchronising…</footer>
 </section>

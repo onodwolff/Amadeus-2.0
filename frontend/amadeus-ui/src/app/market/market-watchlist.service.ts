@@ -1,7 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { MarketApi } from '../api/clients/market.api';
 import { WatchlistRequest } from '../api/models';
-import { catchError, of, switchMap, take, tap } from 'rxjs';
+import { finalize, take } from 'rxjs';
 
 const STORAGE_KEY = 'amadeus.market.watchlist';
 
@@ -23,20 +23,20 @@ export class MarketWatchlistService {
     this.isSyncing.set(true);
     this.marketApi
       .getWatchlist()
-      .pipe(
-        take(1),
-        catchError((error) => {
+      .pipe(take(1), finalize(() => this.isSyncing.set(false)))
+      .subscribe({
+        next: (response) => {
+          const favorites = this.normalizeIds(response.favorites ?? []);
+          this.watchlistIds.set(favorites);
+          this.persistLocal(favorites);
+          this.syncError.set(null);
+        },
+        error: (error) => {
           console.error(error);
           this.syncError.set('Unable to load favourites from the server. Using your local watchlist.');
-          return of({ favorites: [] });
-        }),
-        tap(() => this.isSyncing.set(false)),
-      )
-      .subscribe((response) => {
-        const merged = this.mergeWatchlists(response.favorites ?? []);
-        this.watchlistIds.set(merged);
-        this.persistLocal(merged);
-        this.syncError.set(null);
+          const local = this.loadLocal();
+          this.watchlistIds.set(local);
+        },
       });
   }
 
@@ -53,14 +53,6 @@ export class MarketWatchlistService {
     this.pushToRemote(updated);
   }
 
-  private mergeWatchlists(remote: string[]): string[] {
-    const current = new Set(this.watchlistIds());
-    for (const id of remote) {
-      current.add(id);
-    }
-    return Array.from(current);
-  }
-
   private loadLocal(): string[] {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -69,7 +61,7 @@ export class MarketWatchlistService {
       }
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed)) {
-        return parsed.filter((item): item is string => typeof item === 'string');
+        return this.normalizeIds(parsed);
       }
       return [];
     } catch (error) {
@@ -91,29 +83,35 @@ export class MarketWatchlistService {
     const payload: WatchlistRequest = { favorites: ids };
     this.marketApi
       .updateWatchlist(payload)
-      .pipe(
-        take(1),
-        tap(() => this.isSyncing.set(false)),
-        catchError((error) => {
+      .pipe(take(1), finalize(() => this.isSyncing.set(false)))
+      .subscribe({
+        next: (response) => {
+          const favorites = this.normalizeIds(response?.favorites ?? ids);
+          this.watchlistIds.set(favorites);
+          this.persistLocal(favorites);
+          this.syncError.set(null);
+        },
+        error: (error) => {
           console.error(error);
           this.syncError.set('Failed to synchronise favourites with the server.');
-          this.isSyncing.set(false);
-          return of(null);
-        }),
-        switchMap((response) => {
-          if (!response) {
-            return of(null);
-          }
-          return of(response.favorites ?? []);
-        }),
-      )
-      .subscribe((favorites) => {
-        if (!favorites) {
-          return;
-        }
-        this.watchlistIds.set(favorites);
-        this.persistLocal(favorites);
-        this.syncError.set(null);
+        },
       });
+  }
+
+  private normalizeIds(ids: unknown[]): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const raw of ids) {
+      if (typeof raw !== 'string') {
+        continue;
+      }
+      const value = raw.trim();
+      if (!value || seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      result.push(value);
+    }
+    return result;
   }
 }

@@ -67,6 +67,7 @@ export class MarketPage implements OnInit {
   readonly watchlistIds = this.watchlist.watchlistIds;
   readonly isSyncing = this.watchlist.isSyncing;
   readonly syncError = this.watchlist.syncError;
+  readonly usingLocalFallback = this.store.usingLocalFallback;
 
   readonly hasInstruments = computed(() => this.allInstruments().length > 0);
   readonly hasFilteredResults = computed(() => this.filteredInstruments().length > 0);

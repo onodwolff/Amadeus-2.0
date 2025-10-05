@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio, json
 from typing import List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -62,6 +62,10 @@ class OrderCreatePayload(BaseModel):
     time_in_force: Optional[str] = None
     client_order_id: Optional[str] = None
     node_id: Optional[str] = None
+
+
+class WatchlistUpdatePayload(BaseModel):
+    favorites: List[str] = Field(default_factory=list)
 
 
 def build_launch_detail(payload: NodeLaunchPayload) -> str:
@@ -305,6 +309,44 @@ def duplicate_order(order_id: str):
         return svc.duplicate_order(order_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/market/instruments")
+def list_instruments(venue: Optional[str] = None):
+    return svc.list_instruments(venue=venue)
+
+
+@app.get("/market/watchlist")
+def get_watchlist():
+    return svc.watchlist_snapshot()
+
+
+@app.put("/market/watchlist")
+def update_watchlist(payload: WatchlistUpdatePayload):
+    try:
+        return svc.update_watchlist(payload.favorites)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/market/instruments/{instrument_id}/bars")
+def get_historical_bars(
+    instrument_id: str,
+    granularity: str = Query(..., min_length=1),
+    limit: int = Query(500, ge=1, le=5000),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    try:
+        return svc.historical_bars(
+            instrument_id=instrument_id,
+            granularity=granularity,
+            limit=limit,
+            start=start,
+            end=end,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.websocket("/ws/nodes")

@@ -29,6 +29,7 @@ export class WatchlistPanelComponent {
   readonly selectedInstrumentId = this.store.selectedInstrumentId;
 
   readonly isSyncing = this.watchlist.isSyncing;
+  readonly syncError = this.watchlist.syncError;
 
   select(entry: WatchlistEntry): void {
     if (entry.instrument) {

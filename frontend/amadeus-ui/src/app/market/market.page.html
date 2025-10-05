@@ -13,9 +13,10 @@
 
   <div class="market-page__filters">
     <app-instrument-filters></app-instrument-filters>
-    <div class="market-page__status" *ngIf="isLoading() || loadError() || syncError()">
+    <div class="market-page__status" *ngIf="isLoading() || loadError() || syncError() || usingLocalFallback()">
       <span class="status status--loading" *ngIf="isLoading()">Loading instruments…</span>
       <span class="status status--error" *ngIf="loadError()">{{ loadError() }}</span>
+      <span class="status status--warning" *ngIf="usingLocalFallback() && !isLoading()">Showing cached instrument catalogue.</span>
       <span class="status status--error" *ngIf="syncError()">{{ syncError() }}</span>
       <span class="status status--loading" *ngIf="!isLoading() && isSyncing()">Synchronising watchlist…</span>
     </div>

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import itertools
+import json
+import logging
 import random
 import sys
 import uuid
@@ -41,6 +43,9 @@ try:
 except Exception:
     nt = None
     NT_VERSION = "unavailable"
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -195,6 +200,16 @@ class ExecutionRecord:
 class NautilusService:
     def __init__(self) -> None:
         self._nodes: Dict[str, NodeState] = {}
+        root_path = Path(__file__).resolve().parents[3]
+        self._storage_dir = root_path / ".amadeus"
+        try:
+            self._storage_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.debug("Unable to ensure storage directory %s", self._storage_dir, exc_info=True)
+        self._watchlist_path = self._storage_dir / "watchlist.json"
+        self._watchlist: List[str] = self._load_watchlist()
+        self._instrument_catalog: List[Dict[str, Any]] = []
+        self._instrument_price_seed: Dict[str, float] = {}
         self._seed_portfolio_state()
         self._orders: Dict[str, OrderRecord] = {}
         self._executions: Dict[str, List[ExecutionRecord]] = {}
@@ -207,6 +222,334 @@ class NautilusService:
             "margin_call": [],
         }
         self._seed_risk_alerts()
+        self._ensure_instrument_catalog()
+
+    # --- Market data & discovery --------------------------------------
+
+    def _load_watchlist(self) -> List[str]:
+        if not self._watchlist_path.exists():
+            return []
+        try:
+            payload = json.loads(self._watchlist_path.read_text())
+        except Exception:
+            logger.warning("Failed to read watchlist file", exc_info=True)
+            return []
+
+        if isinstance(payload, dict):
+            candidates = payload.get("favorites", [])
+        else:
+            candidates = payload
+
+        result: List[str] = []
+        if not isinstance(candidates, list):
+            return result
+
+        for entry in candidates:
+            if not isinstance(entry, str):
+                continue
+            value = entry.strip()
+            if value and value not in result:
+                result.append(value)
+        return result
+
+    def _persist_watchlist(self) -> None:
+        try:
+            payload = json.dumps({"favorites": self._watchlist}, indent=2)
+            self._watchlist_path.write_text(payload)
+        except Exception:
+            logger.warning("Failed to persist watchlist", exc_info=True)
+
+    def _ensure_instrument_catalog(self) -> None:
+        if self._instrument_catalog:
+            return
+        catalog = self._fetch_nautilus_instruments()
+        if not catalog:
+            catalog = self._fallback_instruments()
+        self._instrument_catalog = catalog
+
+    def _fetch_nautilus_instruments(self) -> List[Dict[str, Any]]:
+        if nt is None:
+            return []
+        try:
+            provider_attr = getattr(nt, "InstrumentProvider", None)
+        except Exception:
+            provider_attr = None
+        if provider_attr is None:
+            return []
+        # Integration with a running NautilusTrader deployment can be added here.
+        return []
+
+    def _fallback_instruments(self) -> List[Dict[str, Any]]:
+        fallback = [
+            {
+                "instrument_id": "BINANCE.BTCUSDT",
+                "symbol": "BTC/USDT",
+                "venue": "BINANCE",
+                "type": "spot",
+                "base_currency": "BTC",
+                "quote_currency": "USDT",
+                "tick_size": 0.1,
+                "lot_size": 0.0001,
+                "min_notional": 10.0,
+                "contract_size": None,
+                "expiry": None,
+                "_price_seed": 38250.0,
+            },
+            {
+                "instrument_id": "BINANCE.ETHUSDT",
+                "symbol": "ETH/USDT",
+                "venue": "BINANCE",
+                "type": "spot",
+                "base_currency": "ETH",
+                "quote_currency": "USDT",
+                "tick_size": 0.01,
+                "lot_size": 0.001,
+                "min_notional": 10.0,
+                "contract_size": None,
+                "expiry": None,
+                "_price_seed": 2200.0,
+            },
+            {
+                "instrument_id": "COINBASE.BTC-USD",
+                "symbol": "BTC/USD",
+                "venue": "COINBASE",
+                "type": "spot",
+                "base_currency": "BTC",
+                "quote_currency": "USD",
+                "tick_size": 0.5,
+                "lot_size": 0.0001,
+                "min_notional": 10.0,
+                "contract_size": None,
+                "expiry": None,
+                "_price_seed": 38320.0,
+            },
+            {
+                "instrument_id": "FTX.BTC-PERP",
+                "symbol": "BTC-PERP",
+                "venue": "FTX",
+                "type": "perpetual",
+                "base_currency": "BTC",
+                "quote_currency": "USD",
+                "tick_size": 0.5,
+                "lot_size": 0.001,
+                "min_notional": 1.0,
+                "contract_size": 1.0,
+                "expiry": None,
+                "_price_seed": 38280.0,
+            },
+            {
+                "instrument_id": "CME.MESZ4",
+                "symbol": "MESZ4",
+                "venue": "CME",
+                "type": "future",
+                "base_currency": "USD",
+                "quote_currency": "USD",
+                "tick_size": 0.25,
+                "lot_size": 1.0,
+                "min_notional": 5.0,
+                "contract_size": 5.0,
+                "expiry": "2024-12-13T23:00:00Z",
+                "_price_seed": 4800.0,
+            },
+            {
+                "instrument_id": "NYSE.AAPL",
+                "symbol": "AAPL",
+                "venue": "NYSE",
+                "type": "equity",
+                "base_currency": "AAPL",
+                "quote_currency": "USD",
+                "tick_size": 0.01,
+                "lot_size": 1.0,
+                "min_notional": 1.0,
+                "contract_size": 1.0,
+                "expiry": None,
+                "_price_seed": 192.0,
+            },
+        ]
+
+        instruments: List[Dict[str, Any]] = []
+        self._instrument_price_seed = {}
+        for item in fallback:
+            price_seed = item.pop("_price_seed")
+            instrument = {key: value for key, value in item.items() if value is not None}
+            instruments.append(instrument)
+            self._instrument_price_seed[item["instrument_id"]] = price_seed
+        return instruments
+
+    def list_instruments(self, venue: Optional[str] = None) -> dict:
+        self._ensure_instrument_catalog()
+        instruments = self._instrument_catalog
+        if venue:
+            normalized = venue.strip().upper()
+            instruments = [
+                instrument
+                for instrument in instruments
+                if instrument.get("venue", "").upper() == normalized
+            ]
+        return {"instruments": deepcopy(instruments)}
+
+    def watchlist_snapshot(self) -> dict:
+        return {"favorites": list(self._watchlist)}
+
+    def update_watchlist(self, favorites: List[str]) -> dict:
+        if not isinstance(favorites, list):
+            raise ValueError("favorites must be a list of instrument identifiers")
+
+        cleaned: List[str] = []
+        seen = set()
+        for entry in favorites:
+            if not isinstance(entry, str):
+                raise ValueError("Instrument identifiers must be strings")
+            value = entry.strip()
+            if not value or value in seen:
+                continue
+            cleaned.append(value)
+            seen.add(value)
+
+        self._ensure_instrument_catalog()
+        known = {instrument["instrument_id"] for instrument in self._instrument_catalog}
+        unknown = [item for item in cleaned if item not in known]
+        if unknown:
+            logger.debug("Watchlist contains instruments outside the local catalog: %s", unknown)
+
+        self._watchlist = cleaned
+        self._persist_watchlist()
+        return self.watchlist_snapshot()
+
+    def _parse_datetime(self, value: str) -> datetime:
+        try:
+            if value.endswith("Z"):
+                value = value[:-1] + "+00:00"
+            dt = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid timestamp '{value}'") from exc
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    def _granularity_to_timedelta(self, granularity: str) -> timedelta:
+        mapping = {
+            "1m": timedelta(minutes=1),
+            "3m": timedelta(minutes=3),
+            "5m": timedelta(minutes=5),
+            "15m": timedelta(minutes=15),
+            "30m": timedelta(minutes=30),
+            "1h": timedelta(hours=1),
+            "4h": timedelta(hours=4),
+            "1d": timedelta(days=1),
+            "1w": timedelta(weeks=1),
+        }
+        interval = mapping.get(granularity.lower())
+        if interval is None:
+            raise ValueError(f"Unsupported granularity '{granularity}'")
+        return interval
+
+    def _request_historical_bars_nautilus(
+        self,
+        instrument_id: str,
+        granularity: str,
+        limit: int,
+        start: Optional[datetime],
+        end: Optional[datetime],
+    ) -> List[Dict[str, Any]]:
+        if nt is None:
+            return []
+        # Hook for integrating with a NautilusTrader data cache.
+        return []
+
+    def _generate_mock_bars(
+        self,
+        instrument_id: str,
+        granularity: str,
+        limit: int,
+        start: Optional[datetime],
+        end: Optional[datetime],
+    ) -> List[Dict[str, Any]]:
+        interval = self._granularity_to_timedelta(granularity)
+        limit = max(1, limit)
+
+        end_dt = end or datetime.utcnow()
+        start_dt = start or (end_dt - interval * (limit - 1))
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
+
+        total_seconds = (end_dt - start_dt).total_seconds()
+        if total_seconds <= 0:
+            total_steps = 1
+        else:
+            step_seconds = interval.total_seconds()
+            total_steps = int(total_seconds // step_seconds) + 1
+
+        if total_steps > limit:
+            total_steps = limit
+            start_dt = end_dt - interval * (limit - 1)
+
+        seed = self._instrument_price_seed.get(instrument_id, 100.0)
+        bars: List[Dict[str, Any]] = []
+        cursor = start_dt
+        last_close = seed
+        for _ in range(total_steps):
+            open_price = last_close
+            drift = random.gauss(0, 0.003)
+            close_price = max(0.01, open_price * (1 + drift))
+            high_price = max(open_price, close_price) * (1 + abs(random.gauss(0, 0.0015)))
+            low_price = min(open_price, close_price) * (1 - abs(random.gauss(0, 0.0015)))
+            volume = max(0.0, abs(random.gauss(seed * 0.0004, seed * 0.0008)))
+
+            bars.append(
+                {
+                    "timestamp": _isoformat(cursor),
+                    "open": round(open_price, 4),
+                    "high": round(high_price, 4),
+                    "low": round(max(0.01, low_price), 4),
+                    "close": round(close_price, 4),
+                    "volume": round(volume, 4),
+                }
+            )
+
+            cursor += interval
+            last_close = close_price
+
+        return bars
+
+    def historical_bars(
+        self,
+        instrument_id: str,
+        granularity: str,
+        limit: int = 500,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> dict:
+        if not instrument_id:
+            raise ValueError("instrument_id is required")
+        if not granularity:
+            raise ValueError("granularity is required")
+
+        start_dt = self._parse_datetime(start) if start else None
+        end_dt = self._parse_datetime(end) if end else None
+
+        bars = self._request_historical_bars_nautilus(
+            instrument_id=instrument_id,
+            granularity=granularity,
+            limit=limit,
+            start=start_dt,
+            end=end_dt,
+        )
+
+        if not bars:
+            bars = self._generate_mock_bars(
+                instrument_id=instrument_id,
+                granularity=granularity,
+                limit=limit,
+                start=start_dt,
+                end=end_dt,
+            )
+
+        return {
+            "instrument_id": instrument_id,
+            "granularity": granularity,
+            "bars": bars,
+        }
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
