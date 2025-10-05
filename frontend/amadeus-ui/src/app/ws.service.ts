@@ -13,12 +13,12 @@ interface SubscribeOptions {
 
 @Injectable({ providedIn: 'root' })
 export class WsService {
-  subscribe(path: string, next: (msg: any) => void, options: SubscribeOptions = {}) {
+  subscribe<T>(path: string, next: (msg: T) => void, options: SubscribeOptions = {}): () => void {
     const url = path.startsWith('ws') ? path : buildWebSocketUrl(path);
     const maxAttempts = options.retryAttempts ?? 0;
     const baseDelay = options.retryDelay ?? 1000;
 
-    let socket: WebSocketSubject<any> | undefined;
+    let socket: WebSocketSubject<T> | undefined;
     let subscription: Subscription | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
@@ -63,7 +63,7 @@ export class WsService {
 
     const connect = () => {
       clearReconnectTimer();
-      socket = webSocket({
+      socket = webSocket<T>({
         url,
         openObserver: {
           next: () => {

@@ -1,20 +1,9 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
-import { ApiService } from '../api.service';
+import { NodesApi } from '../api/clients/nodes.api';
+import { SystemApi } from '../api/clients/system.api';
+import { CoreInfo, HealthStatus, NodeHandle, NodesStreamMessage } from '../api/models';
 import { WsService } from '../ws.service';
-
-export interface NodeMetrics {
-  pnl?: number;
-  latency_ms?: number;
-}
-
-export interface NodeHandle {
-  id: string;
-  mode: 'backtest' | 'live' | string;
-  status: string;
-  detail?: string;
-  metrics?: NodeMetrics;
-}
 
 @Component({
   standalone: true,
@@ -28,20 +17,28 @@ export class NodesPage implements OnInit, OnDestroy {
   readonly isLoading = signal(false);
   readonly wsState = signal<'connecting' | 'connected' | 'disconnected'>('connecting');
   readonly errorText = signal<string | null>(null);
-  readonly coreInfo = signal<any>(null);
-  readonly healthInfo = signal<any>(null);
+  readonly coreInfo = signal<CoreInfo | null>(null);
+  readonly healthInfo = signal<HealthStatus | null>(null);
 
   private unsubscribeWs?: () => void;
-  private refreshTimer?: any;
+  private refreshTimer?: ReturnType<typeof setInterval>;
 
-  constructor(private readonly api: ApiService, private readonly ws: WsService) {}
+  constructor(
+    private readonly nodesApi: NodesApi,
+    private readonly systemApi: SystemApi,
+    private readonly ws: WsService,
+  ) {}
 
   ngOnInit(): void {
-    this.api.health().subscribe({ next: (h) => this.healthInfo.set(h), error: (err) => console.error(err) });
-    this.api.coreInfo().subscribe({ next: (c) => this.coreInfo.set(c), error: (err) => console.error(err) });
+    this.systemApi
+      .health()
+      .subscribe({ next: (h) => this.healthInfo.set(h), error: (err) => console.error(err) });
+    this.systemApi
+      .coreInfo()
+      .subscribe({ next: (c) => this.coreInfo.set(c), error: (err) => console.error(err) });
     this.fetchNodes();
 
-    this.unsubscribeWs = this.ws.subscribe(
+    this.unsubscribeWs = this.ws.subscribe<NodesStreamMessage>(
       '/ws/nodes',
       (payload) => {
         if (payload?.nodes) {
@@ -77,7 +74,7 @@ export class NodesPage implements OnInit, OnDestroy {
 
   startBacktest(): void {
     this.errorText.set(null);
-    this.api.startBacktest().subscribe({
+    this.nodesApi.startBacktest().subscribe({
       error: (err) => {
         console.error(err);
         const detail = err?.error?.detail || 'Failed to start backtest node.';
@@ -89,7 +86,7 @@ export class NodesPage implements OnInit, OnDestroy {
 
   startLive(): void {
     this.errorText.set(null);
-    this.api.startLive().subscribe({
+    this.nodesApi.startLive().subscribe({
       error: (err) => {
         console.error(err);
         const detail = err?.error?.detail || 'Failed to start live node.';
@@ -101,7 +98,7 @@ export class NodesPage implements OnInit, OnDestroy {
 
   stop(node: NodeHandle): void {
     this.errorText.set(null);
-    this.api.stopNode(node.id).subscribe({
+    this.nodesApi.stopNode(node.id).subscribe({
       error: (err) => {
         console.error(err);
         this.errorText.set('Failed to stop node.');
@@ -116,9 +113,9 @@ export class NodesPage implements OnInit, OnDestroy {
 
   private fetchNodes(): void {
     this.isLoading.set(true);
-    this.api.nodes().subscribe({
-      next: (response: any) => {
-        const list = Array.isArray(response) ? response : response?.nodes;
+    this.nodesApi.listNodes().subscribe({
+      next: (response) => {
+        const list = Array.isArray(response?.nodes) ? response.nodes : [];
         if (Array.isArray(list)) {
           this.nodes.set(list);
         }

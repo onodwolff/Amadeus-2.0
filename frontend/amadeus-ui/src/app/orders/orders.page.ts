@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { PagePlaceholderComponent } from '../shared/page-placeholder.component';
+import { OrderSummary } from '../api/models';
 
 @Component({
   standalone: true,
@@ -13,4 +14,6 @@ import { PagePlaceholderComponent } from '../shared/page-placeholder.component';
     ></app-page-placeholder>
   `,
 })
-export class OrdersPage {}
+export class OrdersPage {
+  readonly pendingOrders: OrderSummary[] = [];
+}

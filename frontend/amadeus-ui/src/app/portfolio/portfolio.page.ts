@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { PagePlaceholderComponent } from '../shared/page-placeholder.component';
+import { PortfolioSummary } from '../api/models';
 
 @Component({
   standalone: true,
@@ -13,4 +14,6 @@ import { PagePlaceholderComponent } from '../shared/page-placeholder.component';
     ></app-page-placeholder>
   `,
 })
-export class PortfolioPage {}
+export class PortfolioPage {
+  readonly portfolio: PortfolioSummary | null = null;
+}
