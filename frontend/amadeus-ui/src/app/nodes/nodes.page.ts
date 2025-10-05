@@ -77,9 +77,9 @@ export class NodesPage implements OnInit, OnDestroy {
     this.api.startBacktest().subscribe({
       error: (err) => {
         console.error(err);
-        this.errorText.set('Failed to start backtest node.');
+        const detail = err?.error?.detail || 'Failed to start backtest node.';
+        this.errorText.set(typeof detail === 'string' ? detail : 'Failed to start backtest node.');
       },
-      complete: () => this.fetchNodes(),
       next: () => this.fetchNodes(),
     });
   }
