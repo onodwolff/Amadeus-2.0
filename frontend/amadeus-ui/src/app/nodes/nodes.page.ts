@@ -49,11 +49,13 @@ export class NodesPage implements OnInit, OnDestroy {
         }
       },
       {
+        retryAttempts: Infinity,
+        retryDelay: 1000,
         onOpen: () => this.wsState.set('connected'),
         onClose: () => this.wsState.set('disconnected'),
         onError: (err) => {
           console.error(err);
-          this.wsState.set('disconnected');
+          this.wsState.set('connecting');
         },
       },
     );
