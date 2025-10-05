@@ -174,6 +174,12 @@ def export_node_logs(node_id: str):
         raise HTTPException(status_code=404, detail=str(e))
     return PlainTextResponse(payload, media_type="text/plain")
 
+
+@app.get("/portfolio")
+def get_portfolio():
+    return svc.portfolio_snapshot()
+
+
 @app.websocket("/ws/nodes")
 async def ws_nodes(ws: WebSocket):
     await ws.accept()
@@ -214,5 +220,41 @@ async def ws_node_metrics(node_id: str, ws: WebSocket):
     except ValueError:
         await ws.send_text(json.dumps({"series": {}, "latest": None}))
         await ws.close(code=1008)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/portfolio/balances")
+async def ws_portfolio_balances(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.portfolio_balances_stream_payload()
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.0)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/portfolio/positions")
+async def ws_portfolio_positions(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.portfolio_positions_stream_payload()
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.1)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/portfolio/movements")
+async def ws_portfolio_movements(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            payload = svc.portfolio_movements_stream_payload()
+            await ws.send_text(json.dumps(payload))
+            await asyncio.sleep(1.6)
     except WebSocketDisconnect:
         return

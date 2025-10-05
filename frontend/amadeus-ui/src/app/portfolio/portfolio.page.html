@@ -1,0 +1,214 @@
+<section class="portfolio" *ngIf="!isLoading(); else loadingState">
+  <header class="portfolio__header">
+    <div class="portfolio__title">
+      <h1>Portfolio</h1>
+      <p class="portfolio__updated" *ngIf="lastUpdated() as updated">
+        Last updated {{ updated | date: 'medium' }}
+      </p>
+    </div>
+    <div class="portfolio__summary">
+      <article class="summary-card">
+        <header>
+          <h2>Equity</h2>
+          <span class="summary-card__label">Filtered</span>
+        </header>
+        <p class="summary-card__value">{{ filteredEquity() | number: '1.2-2' }}</p>
+        <p class="summary-card__hint" *ngIf="summary()?.equity_value as equity">
+          Total: {{ equity | number: '1.2-2' }}
+        </p>
+      </article>
+      <article class="summary-card">
+        <header>
+          <h2>Margin</h2>
+          <span class="summary-card__label">Filtered</span>
+        </header>
+        <p class="summary-card__value">{{ filteredMargin() | number: '1.2-2' }}</p>
+        <p class="summary-card__hint" *ngIf="summary()?.margin_value as margin">
+          Total: {{ margin | number: '1.2-2' }}
+        </p>
+      </article>
+    </div>
+  </header>
+
+  <section class="portfolio__filters" aria-label="Filters">
+    <label>
+      Venue
+      <select [ngModel]="selectedVenue() ?? ''" (ngModelChange)="onVenueChange($event)">
+        <option value="">All venues</option>
+        <option *ngFor="let venue of availableVenues()" [value]="venue">{{ venue }}</option>
+      </select>
+    </label>
+    <label>
+      Account
+      <select [ngModel]="selectedAccount() ?? ''" (ngModelChange)="onAccountChange($event)">
+        <option value="">All accounts</option>
+        <option *ngFor="let account of availableAccounts()" [value]="account">
+          {{ account }}
+        </option>
+      </select>
+    </label>
+    <label>
+      Node
+      <select [ngModel]="selectedNode() ?? ''" (ngModelChange)="onNodeChange($event)">
+        <option value="">All nodes</option>
+        <option *ngFor="let node of availableNodes()" [value]="node">{{ node }}</option>
+      </select>
+    </label>
+  </section>
+
+  <p class="portfolio__error" *ngIf="errorText()">{{ errorText() }}</p>
+
+  <section class="panel">
+    <header class="panel__header">
+      <h2>Balances</h2>
+      <span class="panel__stream" [attr.data-state]="balancesStreamState()">
+        Stream: {{ balancesStreamState() }}
+      </span>
+    </header>
+    <div *ngIf="hasBalances(); else emptyBalances">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Venue</th>
+              <th>Node</th>
+              <th>Currency</th>
+              <th class="numeric">Total</th>
+              <th class="numeric">Available</th>
+              <th class="numeric">Locked</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let balance of filteredBalances()">
+              <td>
+                <span class="primary">{{ balance.account_name || balance.account_id || '—' }}</span>
+                <span class="secondary" *ngIf="balance.account_id && balance.account_name">
+                  {{ balance.account_id }}
+                </span>
+              </td>
+              <td>{{ balance.venue || '—' }}</td>
+              <td>{{ balance.node_id || '—' }}</td>
+              <td>{{ balance.currency }}</td>
+              <td class="numeric">{{ balance.total | number: '1.2-2' }}</td>
+              <td class="numeric">{{ balance.available | number: '1.2-2' }}</td>
+              <td class="numeric">{{ (balance.locked ?? 0) | number: '1.2-2' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <header class="panel__header">
+      <h2>Positions</h2>
+      <span class="panel__stream" [attr.data-state]="positionsStreamState()">
+        Stream: {{ positionsStreamState() }}
+      </span>
+    </header>
+    <div *ngIf="hasPositions(); else emptyPositions">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Venue</th>
+              <th>Account</th>
+              <th>Node</th>
+              <th class="numeric">Quantity</th>
+              <th class="numeric">Avg price</th>
+              <th class="numeric">Mark price</th>
+              <th class="numeric">Unrealized P&amp;L</th>
+              <th class="numeric">Realized P&amp;L</th>
+              <th class="numeric">Margin</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let position of filteredPositions()">
+              <td>{{ position.symbol }}</td>
+              <td>{{ position.venue }}</td>
+              <td>
+                <span class="primary">{{ position.account_name || position.account_id || '—' }}</span>
+                <span class="secondary" *ngIf="position.account_id && position.account_name">
+                  {{ position.account_id }}
+                </span>
+              </td>
+              <td>{{ position.node_id || '—' }}</td>
+              <td class="numeric">{{ position.quantity | number: '1.4-4' }}</td>
+              <td class="numeric">{{ (position.average_price ?? 0) | number: '1.2-2' }}</td>
+              <td class="numeric">{{ (position.mark_price ?? 0) | number: '1.2-2' }}</td>
+              <td class="numeric pnl" [attr.data-positive]="(position.unrealized_pnl ?? 0) >= 0">
+                {{ (position.unrealized_pnl ?? 0) | number: '1.2-2' }}
+              </td>
+              <td class="numeric pnl" [attr.data-positive]="(position.realized_pnl ?? 0) >= 0">
+                {{ (position.realized_pnl ?? 0) | number: '1.2-2' }}
+              </td>
+              <td class="numeric">{{ (position.margin_used ?? 0) | number: '1.2-2' }}</td>
+              <td>{{ position.updated_at ? (position.updated_at | date: 'short') : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <header class="panel__header">
+      <h2>Cash movements</h2>
+      <span class="panel__stream" [attr.data-state]="movementsStreamState()">
+        Stream: {{ movementsStreamState() }}
+      </span>
+    </header>
+    <div *ngIf="hasMovements(); else emptyMovements">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Type</th>
+              <th class="numeric">Amount</th>
+              <th>Currency</th>
+              <th>Account</th>
+              <th>Venue</th>
+              <th>Node</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let movement of filteredMovements()">
+              <td>{{ movement.timestamp | date: 'short' }}</td>
+              <td class="movement__type" [attr.data-kind]="movement.type">{{ movement.type }}</td>
+              <td class="numeric">{{ movement.amount | number: '1.2-2' }}</td>
+              <td>{{ movement.currency }}</td>
+              <td>
+                <span class="primary">{{ movement.account_name || movement.account_id }}</span>
+                <span class="secondary" *ngIf="movement.account_name">{{ movement.account_id }}</span>
+              </td>
+              <td>{{ movement.venue || '—' }}</td>
+              <td>{{ movement.node_id || '—' }}</td>
+              <td>{{ movement.description || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</section>
+
+<ng-template #loadingState>
+  <div class="portfolio__loading">Loading portfolio…</div>
+</ng-template>
+
+<ng-template #emptyBalances>
+  <p class="panel__empty">No balances for the selected filters.</p>
+</ng-template>
+
+<ng-template #emptyPositions>
+  <p class="panel__empty">No positions for the selected filters.</p>
+</ng-template>
+
+<ng-template #emptyMovements>
+  <p class="panel__empty">No movements for the selected filters.</p>
+</ng-template>
