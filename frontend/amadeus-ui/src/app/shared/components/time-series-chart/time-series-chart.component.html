@@ -1,0 +1,9 @@
+<div class="time-series-chart">
+  <div #container class="time-series-chart__canvas" aria-hidden="true"></div>
+  <ul class="time-series-chart__legend" *ngIf="series.length > 0">
+    <li *ngFor="let entry of series; trackBy: trackById">
+      <span class="time-series-chart__swatch" [style.backgroundColor]="entry.color"></span>
+      <span class="time-series-chart__label">{{ entry.name }}</span>
+    </li>
+  </ul>
+</div>

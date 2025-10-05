@@ -10,9 +10,10 @@ export const routes: Routes = [
     path: 'backtest',
     children: [
       { path: '', loadComponent: () => import('./backtest/backtest.page').then(m => m.BacktestPage) },
+      { path: 'runs/:runId', redirectTo: '/backtest/:runId', pathMatch: 'full' },
       {
-        path: 'runs/:runId',
-        loadComponent: () => import('./backtest/backtest-detail.page').then(m => m.BacktestDetailPage),
+        path: ':id',
+        loadComponent: () => import('./backtest/run-detail.page').then(m => m.RunDetailPage),
       },
     ],
   },
