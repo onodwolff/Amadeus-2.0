@@ -1,0 +1,113 @@
+.trade-tape {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+}
+
+.trade-tape__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.trade-tape__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.trade-tape__control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.trade-tape__control select {
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1f2937;
+  background: #fff;
+}
+
+.trade-tape__status {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.trade-tape__state {
+  text-transform: capitalize;
+}
+
+.trade-tape__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.trade-tape__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.trade-tape__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-tape__row--header {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.trade-tape__row--buy {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.trade-tape__row--sell {
+  background: rgba(248, 113, 113, 0.12);
+  color: #b91c1c;
+}
+
+.trade-tape__cell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.trade-tape__cell--time {
+  color: #475569;
+}
+
+.trade-tape__cell--price,
+.trade-tape__cell--volume {
+  justify-content: flex-end;
+  font-weight: 600;
+}
+
+.trade-tape__empty {
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: #64748b;
+  background: #f8fafc;
+  border-radius: 0.5rem;
+}
