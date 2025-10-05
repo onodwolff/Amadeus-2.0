@@ -18,6 +18,8 @@
     </div>
   </header>
 
+  <app-order-ticket class="orders-page__ticket" (orderCreated)="onOrderCreated($event)"></app-order-ticket>
+
   <section class="orders-page__filters">
     <label class="filter-field">
       <span>Status</span>
@@ -136,8 +138,8 @@
                 <div class="cell-sub">{{ order.filled_quantity | number: '1.0-4' }}</div>
               </td>
               <td data-label="Price">
-                <div class="cell-main">{{ order.price != null ? (order.price | number: '1.2-2') : '—' }}</div>
-                <div class="cell-sub" *ngIf="order.average_price != null">avg {{ order.average_price | number: '1.2-2' }}</div>
+                <div class="cell-main">{{ order.price !== null ? (order.price | number: '1.2-2') : '—' }}</div>
+                <div class="cell-sub" *ngIf="order.average_price !== null">avg {{ order.average_price | number: '1.2-2' }}</div>
               </td>
               <td data-label="Node">
                 <div class="cell-main">{{ order.node_id || '—' }}</div>

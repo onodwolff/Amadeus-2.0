@@ -1,0 +1,29 @@
+<div class="notification-center" *ngIf="hasNotifications()">
+  <div
+    *ngFor="let notification of notifications(); trackBy: trackById"
+    class="notification"
+    [class.notification--success]="notification.type === 'success'"
+    [class.notification--error]="notification.type === 'error'"
+    [class.notification--warning]="notification.type === 'warning'"
+    [class.notification--info]="notification.type === 'info'"
+    role="status"
+    [attr.aria-live]="ariaLiveFor(notification.type)"
+  >
+    <span class="notification__icon" aria-hidden="true">{{ iconFor(notification.type) }}</span>
+    <div class="notification__body">
+      <p class="notification__title" *ngIf="notification.title">{{ notification.title }}</p>
+      <p class="notification__message">{{ notification.message }}</p>
+      <p class="notification__timestamp">
+        {{ notification.createdAt | date: 'shortTime' }}
+      </p>
+    </div>
+    <button
+      type="button"
+      class="notification__close"
+      (click)="dismiss(notification.id)"
+      aria-label="Dismiss notification"
+    >
+      ×
+    </button>
+  </div>
+</div>

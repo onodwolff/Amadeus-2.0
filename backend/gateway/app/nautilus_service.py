@@ -7,7 +7,7 @@ import itertools
 import random
 import sys
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def _utcnow_iso() -> str:
@@ -766,6 +766,40 @@ class NautilusService:
         self._advance_orders_state()
         return self.orders_snapshot()
 
+    def create_order(self, payload: Dict[str, Any]) -> dict:
+        symbol = payload.get("symbol", "").upper()
+        venue = payload.get("venue", "").upper()
+        side = (payload.get("side") or "buy").lower()
+        order_type = (payload.get("type") or "market").lower()
+        quantity = float(payload.get("quantity") or 0.0)
+        price = payload.get("price")
+        time_in_force = payload.get("time_in_force") or None
+        client_order_id = payload.get("client_order_id") or None
+        node_id = payload.get("node_id") or None
+
+        now = _utcnow_iso()
+        order = OrderRecord(
+            order_id=self._next_order_id(),
+            client_order_id=client_order_id,
+            venue_order_id=None,
+            symbol=symbol,
+            venue=venue,
+            side=side,
+            type=order_type,
+            quantity=round(quantity, 4),
+            filled_quantity=0.0,
+            price=(round(float(price), 4) if price is not None else None),
+            average_price=None,
+            status="pending",
+            time_in_force=time_in_force,
+            node_id=node_id,
+            created_at=now,
+            updated_at=now,
+        )
+        self._register_order(order)
+        self._trim_orders()
+        return {"order": asdict(order)}
+
     def cancel_order(self, order_id: str) -> dict:
         order = self._orders.get(order_id)
         if order is None:
@@ -802,6 +836,57 @@ class NautilusService:
         self._register_order(duplicate)
         self._trim_orders()
         return {"order": asdict(duplicate)}
+
+    def risk_snapshot(self) -> dict:
+        timestamp = _utcnow_iso()
+
+        exposures: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for position in self._portfolio_positions:
+            key = (position.symbol, position.venue)
+            mark = position.mark_price or position.average_price or 0.0
+            net = round(position.quantity * mark, 2)
+            entry = exposures.setdefault(
+                key,
+                {
+                    "symbol": position.symbol,
+                    "venue": position.venue,
+                    "net_exposure": 0.0,
+                    "notional_value": 0.0,
+                    "currency": "USD",
+                },
+            )
+            entry["net_exposure"] = round(entry["net_exposure"] + net, 2)
+            entry["notional_value"] = round(entry["notional_value"] + abs(net), 2)
+
+        exposure_list = list(exposures.values())
+        total_notional = sum(item["notional_value"] for item in exposure_list)
+
+        exposure_limits = [
+            {
+                "name": "Max order quantity",
+                "value": 0.0,
+                "limit": 250.0,
+                "unit": "units",
+                "breached": False,
+            },
+            {
+                "name": "Max order notional",
+                "value": round(total_notional, 2),
+                "limit": 250_000.0,
+                "unit": "USD",
+                "breached": total_notional > 250_000.0,
+            },
+        ]
+
+        return {
+            "risk": {
+                "timestamp": timestamp,
+                "total_var": round(total_notional * 0.12, 2),
+                "stress_var": round(total_notional * 0.18, 2),
+                "exposure_limits": exposure_limits,
+                "exposures": exposure_list,
+            }
+        }
 
     def start_backtest(
         self,

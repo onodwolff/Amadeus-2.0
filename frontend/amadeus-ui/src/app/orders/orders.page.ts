@@ -6,11 +6,12 @@ import { OrdersApi } from '../api/clients/orders.api';
 import { ExecutionReport, OrderSummary, OrdersStreamMessage } from '../api/models';
 import { observeOrdersStream } from '../ws';
 import { WsConnectionState, WsService } from '../ws.service';
+import { OrderTicketComponent } from './components/order-ticket/order-ticket.component';
 
 @Component({
   standalone: true,
   selector: 'app-orders-page',
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, OrderTicketComponent],
   templateUrl: './orders.page.html',
   styleUrls: ['./orders.page.scss'],
 })
@@ -194,6 +195,10 @@ export class OrdersPage implements OnInit {
 
   onNodeFilterChange(value: string): void {
     this.nodeFilter.set(value || 'all');
+  }
+
+  onOrderCreated(order: OrderSummary): void {
+    this.upsertOrder(order);
   }
 
   isOrderCancellable(order: OrderSummary): boolean {
