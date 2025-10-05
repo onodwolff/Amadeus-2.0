@@ -1,0 +1,32 @@
+<!-- src/app/app.component.html -->
+<div style="font-family: Arial; margin: 16px;">
+  <h1>{{ title }}</h1>
+
+  <section>
+    <h3>Status</h3>
+    <pre>health: {{ health | json }}</pre>
+    <pre>core:   {{ core | json }}</pre>
+  </section>
+
+  <section style="margin: 12px 0;">
+    <button (click)="startBacktest()">Start Backtest</button>
+    <button (click)="startLive()" style="margin-left: 8px;">Start Live</button>
+    <button (click)="refresh()" style="margin-left: 8px;">Refresh</button>
+  </section>
+
+  <section>
+    <h3>Nodes</h3>
+    <pre>{{ nodes | json }}</pre>
+
+    <div *ngIf="nodes?.nodes?.length">
+      <ul>
+        <li *ngFor="let n of nodes.nodes">
+          <strong>{{ n.id }}</strong>
+          — {{ n.mode }} / {{ n.status }}
+          <em *ngIf="n.detail"> — {{ n.detail }}</em>
+          <button (click)="stop(n.id)" style="margin-left: 8px;">Stop</button>
+        </li>
+      </ul>
+    </div>
+  </section>
+</div>
