@@ -13,11 +13,26 @@
 
   <div class="market-page__filters">
     <app-instrument-filters></app-instrument-filters>
-    <div class="market-page__status" *ngIf="isLoading() || loadError() || syncError()">
+    <div
+      class="market-page__status"
+      *ngIf="
+        isLoading() ||
+        loadError() ||
+        syncError() ||
+        usingInstrumentFallback() ||
+        usingLocalWatchlist()
+      "
+    >
       <span class="status status--loading" *ngIf="isLoading()">Loading instruments…</span>
       <span class="status status--error" *ngIf="loadError()">{{ loadError() }}</span>
       <span class="status status--error" *ngIf="syncError()">{{ syncError() }}</span>
       <span class="status status--loading" *ngIf="!isLoading() && isSyncing()">Synchronising watchlist…</span>
+      <span class="status status--warning" *ngIf="usingInstrumentFallback()">
+        Using cached instrument metadata.
+      </span>
+      <span class="status status--warning" *ngIf="!isSyncing() && usingLocalWatchlist()">
+        Watchlist changes stored locally.
+      </span>
     </div>
   </div>
 

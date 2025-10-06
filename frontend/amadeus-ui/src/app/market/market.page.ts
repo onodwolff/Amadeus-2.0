@@ -38,6 +38,7 @@ export class MarketPage implements OnInit {
   readonly selectedInstrument = this.store.selectedInstrument;
   readonly isLoading = this.store.isLoading;
   readonly loadError = this.store.error;
+  readonly usingInstrumentFallback = this.store.isUsingFallback;
 
   readonly timeframeOptions = [
     { value: '1m', label: '1m' },
@@ -67,6 +68,7 @@ export class MarketPage implements OnInit {
   readonly watchlistIds = this.watchlist.watchlistIds;
   readonly isSyncing = this.watchlist.isSyncing;
   readonly syncError = this.watchlist.syncError;
+  readonly usingLocalWatchlist = this.watchlist.isUsingLocal;
 
   readonly hasInstruments = computed(() => this.allInstruments().length > 0);
   readonly hasFilteredResults = computed(() => this.filteredInstruments().length > 0);
