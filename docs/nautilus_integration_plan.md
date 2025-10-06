@@ -3,6 +3,7 @@
 ## Текущее состояние
 - Gateway использует `MockNautilusService`, который эмулирует портфель, заявки и риск-алерты поверх внутреннего `EngineEventBus`, не подключая реальный движок NautilusTrader.【F:backend/gateway/app/nautilus_service.py†L200-L318】
 - В репозитории присутствует полный исходный код NautilusTrader с поддержкой высокопроизводительного event-driven ядра, модульных адаптеров и продвинутых торговых возможностей, которые стоит задействовать вместо заглушек.【F:vendor/nautilus_trader/README.md†L42-L155】
+- Добавлена первичная интеграция Binance Live-адаптера: при запуске узла gateway автоматически регистрирует фабрики данных и исполнения NautilusTrader для источников с типом `live`, используя ключи из `keyReferences` или переменных окружения.【F:backend/gateway/app/nautilus_engine_service.py†L425-L538】
 
 ## Этап 1. Поднятие базового узла NautilusTrader через gateway
 1. **Загрузка конфигураций узлов**  
