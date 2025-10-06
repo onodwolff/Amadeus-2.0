@@ -15,8 +15,9 @@ export interface ApiKey {
   venue: string;
   label?: string;
   scopes: KeyScope[];
+  api_key_masked?: string;
   created_at: string;
-  last_used_at?: string;
+  last_used_at?: string | null;
   expires_at?: string;
   fingerprint?: string;
   passphrase_hint?: string;
