@@ -175,6 +175,8 @@ class WatchlistUpdatePayload(BaseModel):
 class UserCreatePayload(BaseModel):
     name: str = Field(..., min_length=1)
     email: str = Field(..., min_length=3)
+    username: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=8)
     role: str = Field(default="viewer", min_length=1)
     active: bool = True
 
@@ -182,8 +184,10 @@ class UserCreatePayload(BaseModel):
 class UserUpdatePayload(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1)
     email: Optional[str] = Field(default=None, min_length=3)
+    username: Optional[str] = Field(default=None, min_length=3)
     role: Optional[str] = Field(default=None, min_length=1)
     active: Optional[bool] = None
+    password: Optional[str] = Field(default=None, min_length=8)
 
 
 def build_launch_detail(payload: NodeLaunchPayload) -> str:
@@ -440,6 +444,11 @@ def update_watchlist(payload: WatchlistUpdatePayload):
 @app.get("/users")
 def list_users():
     return svc.list_users()
+
+
+@app.get("/integrations/exchanges")
+def list_exchanges():
+    return svc.list_available_exchanges()
 
 
 @app.post("/users", status_code=201)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import pkgutil
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -28,6 +30,12 @@ def _utcnow_iso() -> str:
 
 def _isoformat(dt: datetime) -> str:
     return dt.replace(microsecond=0).isoformat() + "Z"
+
+
+def _hash_password(password: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(password.encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _import_nautilus():
@@ -147,6 +155,8 @@ class UserProfile:
     user_id: str
     name: str
     email: str
+    username: str
+    password_hash: str
     role: str
     active: bool = True
     created_at: str = field(default_factory=_utcnow_iso)
@@ -637,10 +647,15 @@ class MockNautilusService:
         ]
         for entry in defaults:
             timestamp = _utcnow_iso()
+            email = self._normalize_email(entry["email"])
+            username = entry.get("username") or email.split("@")[0]
+            password = entry.get("password") or "change-me-123"
             user = UserProfile(
                 user_id=uuid.uuid4().hex,
                 name=entry["name"],
-                email=self._normalize_email(entry["email"]),
+                email=email,
+                username=username,
+                password_hash=_hash_password(password),
                 role=entry["role"],
                 active=entry.get("active", True),
                 created_at=timestamp,
@@ -658,6 +673,7 @@ class MockNautilusService:
     def _user_to_dict(user: UserProfile) -> Dict[str, Any]:
         payload = asdict(user)
         payload["id"] = payload["user_id"]
+        payload.pop("password_hash", None)
         return payload
 
     def list_users(self) -> dict:
@@ -676,6 +692,14 @@ class MockNautilusService:
             if existing.email == normalized:
                 raise UserConflictError(f"User with email '{normalized}' already exists")
 
+    def _ensure_unique_username(self, username: str, *, exclude_user_id: Optional[str] = None) -> None:
+        normalized = username.strip().lower()
+        for existing in self._users.values():
+            if exclude_user_id and existing.user_id == exclude_user_id:
+                continue
+            if existing.username.lower() == normalized:
+                raise UserConflictError(f"User with login '{username}' already exists")
+
     def create_user(self, payload: Dict[str, Any]) -> dict:
         name_raw = payload.get("name")
         if not isinstance(name_raw, str) or not name_raw.strip():
@@ -690,6 +714,12 @@ class MockNautilusService:
             raise UserValidationError("Email must contain '@'")
         self._ensure_unique_email(email)
 
+        username_raw = payload.get("username")
+        if not isinstance(username_raw, str) or not username_raw.strip():
+            raise UserValidationError("Login is required")
+        username = username_raw.strip()
+        self._ensure_unique_username(username)
+
         role_raw = payload.get("role", "viewer")
         if not isinstance(role_raw, str) or not role_raw.strip():
             raise UserValidationError("Role is required")
@@ -699,11 +729,18 @@ class MockNautilusService:
         if not isinstance(active, bool):
             raise UserValidationError("Active flag must be a boolean")
 
+        password_raw = payload.get("password")
+        if not isinstance(password_raw, str) or len(password_raw) < 8:
+            raise UserValidationError("Password must be at least 8 characters long")
+        password_hash = _hash_password(password_raw)
+
         now = _utcnow_iso()
         user = UserProfile(
             user_id=uuid.uuid4().hex,
             name=name,
             email=email,
+            username=username,
+            password_hash=password_hash,
             role=role,
             active=active,
             created_at=now,
@@ -737,6 +774,16 @@ class MockNautilusService:
                 user.email = email
                 changed = True
 
+        if "username" in payload:
+            username_raw = payload.get("username")
+            if not isinstance(username_raw, str) or not username_raw.strip():
+                raise UserValidationError("Login cannot be empty")
+            username = username_raw.strip()
+            self._ensure_unique_username(username, exclude_user_id=user_id)
+            if username != user.username:
+                user.username = username
+                changed = True
+
         if "role" in payload:
             role_raw = payload.get("role")
             if not isinstance(role_raw, str) or not role_raw.strip():
@@ -754,10 +801,45 @@ class MockNautilusService:
                 user.active = active_raw
                 changed = True
 
+        if "password" in payload:
+            password_raw = payload.get("password")
+            if not isinstance(password_raw, str) or len(password_raw) < 8:
+                raise UserValidationError("Password must be at least 8 characters long")
+            password_hash = _hash_password(password_raw)
+            if password_hash != user.password_hash:
+                user.password_hash = password_hash
+                changed = True
+
         if changed:
             user.updated_at = _utcnow_iso()
 
         return {"user": self._user_to_dict(user)}
+
+    # ------------------------------------------------------------------
+    # Integrations catalog
+    # ------------------------------------------------------------------
+
+    def list_available_exchanges(self) -> dict:
+        try:
+            import nautilus_trader.adapters as adapters_pkg  # type: ignore
+        except Exception:
+            return {"exchanges": []}
+
+        package_path = getattr(adapters_pkg, "__path__", None)
+        if not package_path:
+            return {"exchanges": []}
+
+        exchanges: List[Dict[str, str]] = []
+        for module_info in pkgutil.iter_modules(package_path):
+            name = module_info.name
+            if name.startswith("_") or name in {"env", "sandbox"}:
+                continue
+            code = name.upper()
+            label = name.replace("_", " ").title()
+            exchanges.append({"code": code, "name": label})
+
+        exchanges.sort(key=lambda entry: entry["name"])
+        return {"exchanges": exchanges}
 
     def _generate_historical_series(
         self,

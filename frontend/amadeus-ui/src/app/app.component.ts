@@ -27,7 +27,7 @@ export class AppComponent {
     { label: 'Orders', route: '/orders', icon: 'M5 5h14v4H5V5zm0 6h14v8H5v-8z' },
     { label: 'Backtest', route: '/backtest', icon: 'M5 5h14v14H5V5zm7 4v6m-3-3h6', stroke: true },
     { label: 'Risk', route: '/risk', icon: 'M12 3 20 7v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V7l8-4z' },
-    { label: 'Keys', route: '/keys', icon: 'M15 7a3 3 0 1 0-5.83-.88L5 9.29V13h2v2h2v2h3.71l1.82-1.82A3 3 0 0 0 15 7z' },
+    { label: 'Settings', route: '/settings', icon: 'M15 7a3 3 0 1 0-5.83-.88L5 9.29V13h2v2h2v2h3.71l1.82-1.82A3 3 0 0 0 15 7z' },
   ];
 
   protected toggleSidebar(): void {

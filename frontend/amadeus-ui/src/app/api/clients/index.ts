@@ -6,3 +6,5 @@ export * from './portfolio.api';
 export * from './risk.api';
 export * from './keys.api';
 export * from './backtests.api';
+export * from './users.api';
+export * from './integrations.api';
