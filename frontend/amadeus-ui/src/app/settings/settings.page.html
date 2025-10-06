@@ -306,7 +306,7 @@
               </span>
             </label>
 
-            <label class="field">
+            <label class="field field--full">
               <span class="field__label">Venue</span>
               <select
                 class="field__control field__control--select"
@@ -323,7 +323,7 @@
               <span class="field__hint" *ngIf="isExchangesLoading()">Loading exchanges…</span>
             </label>
 
-            <label class="field" *ngIf="isCreateCustomVenue()">
+            <label class="field field--full" *ngIf="isCreateCustomVenue()">
               <span class="field__label">Custom venue</span>
               <input
                 class="field__control"
@@ -334,7 +334,7 @@
               />
             </label>
 
-            <label class="field">
+            <label class="field field--full">
               <span class="field__label">API key</span>
               <input class="field__control" formControlName="apiKey" type="text" autocomplete="off" required />
               <span class="field__hint" *ngIf="createForm.controls.apiKey.invalid && createForm.controls.apiKey.touched">
@@ -342,12 +342,12 @@
               </span>
             </label>
 
-            <label class="field">
+            <label class="field field--full">
               <span class="field__label">API secret</span>
               <textarea
                 class="field__control"
                 formControlName="apiSecret"
-                rows="3"
+                rows="2"
                 autocomplete="off"
                 required
               ></textarea>
@@ -356,7 +356,7 @@
               </span>
             </label>
 
-            <fieldset class="field field--fieldset">
+            <fieldset class="field field--fieldset field--full">
               <legend class="field__label">Scopes</legend>
               <div class="scope-options">
                 <label class="checkbox">
@@ -445,7 +445,7 @@
               <input class="field__control" formControlName="label" type="text" />
             </label>
 
-            <label class="field">
+            <label class="field field--full">
               <span class="field__label">Venue</span>
               <select
                 class="field__control field__control--select"
@@ -461,12 +461,12 @@
               </select>
             </label>
 
-            <label class="field" *ngIf="isEditCustomVenue()">
+            <label class="field field--full" *ngIf="isEditCustomVenue()">
               <span class="field__label">Custom venue</span>
               <input class="field__control" formControlName="venue" type="text" required />
             </label>
 
-            <fieldset class="field field--fieldset">
+            <fieldset class="field field--fieldset field--full">
               <legend class="field__label">Scopes</legend>
               <div class="scope-options">
                 <label class="checkbox">
@@ -499,14 +499,14 @@
             </label>
 
             <ng-container *ngIf="editForm.controls.rotateSecret.value">
-              <label class="field">
+              <label class="field field--full">
                 <span class="field__label">New API key</span>
                 <input class="field__control" formControlName="apiKey" type="text" autocomplete="off" />
               </label>
 
-              <label class="field">
+              <label class="field field--full">
                 <span class="field__label">New API secret</span>
-                <textarea class="field__control" formControlName="apiSecret" rows="3" autocomplete="off"></textarea>
+                <textarea class="field__control" formControlName="apiSecret" rows="2" autocomplete="off"></textarea>
               </label>
             </ng-container>
 
