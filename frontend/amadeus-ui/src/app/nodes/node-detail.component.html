@@ -12,11 +12,11 @@
       </div>
     </div>
     <div class="node-detail__actions">
-      <button type="button" class="btn btn--ghost" (click)="close.emit()">Close</button>
+      <button type="button" class="btn btn--ghost" (click)="closed.emit()">Close</button>
       <button
         type="button"
         class="btn"
-        (click)="restart.emit()"
+        (click)="restartRequested.emit()"
         [disabled]="isRestarting || isStopping"
       >
         {{ isRestarting ? 'Restarting…' : 'Restart' }}
@@ -24,7 +24,7 @@
       <button
         type="button"
         class="btn"
-        (click)="stop.emit()"
+        (click)="stopRequested.emit()"
         [disabled]="isStopping || current.status === 'stopped'"
       >
         {{ isStopping ? 'Stopping…' : 'Stop' }}
@@ -32,7 +32,7 @@
       <button
         type="button"
         class="btn btn--primary"
-        (click)="downloadLogs.emit()"
+        (click)="logsDownloadRequested.emit()"
         [disabled]="isDownloadingLogs"
       >
         {{ isDownloadingLogs ? 'Preparing…' : 'Download logs' }}

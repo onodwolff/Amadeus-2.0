@@ -89,6 +89,7 @@ class EngineMode(str, Enum):
     """Supported runtime modes for Nautilus nodes."""
 
     BACKTEST = "backtest"
+    SANDBOX = "sandbox"
     LIVE = "live"
 
 

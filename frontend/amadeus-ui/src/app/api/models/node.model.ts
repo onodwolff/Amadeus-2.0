@@ -1,4 +1,4 @@
-export type NodeMode = 'backtest' | 'live' | string;
+export type NodeMode = 'backtest' | 'sandbox' | 'live' | string;
 export type NodeStatus = 'created' | 'running' | 'stopped' | 'error' | string;
 
 export type NodeMetricKey = 'pnl' | 'latency_ms' | 'cpu_percent' | 'memory_mb';

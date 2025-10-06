@@ -16,6 +16,7 @@ import threading
 import uuid
 from typing import Any, Coroutine, Dict, List, Optional, Tuple, Literal
 
+from .config import settings
 from .nautilus_engine_service import (
     EngineConfigError,
     EngineEventBus,
@@ -23,6 +24,8 @@ from .nautilus_engine_service import (
     NautilusEngineService,
     build_engine_service,
 )
+from .persistence import NullStorage, build_storage
+from .storage import CacheFacade, build_cache
 
 
 def _utcnow_iso() -> str:
@@ -254,11 +257,21 @@ class ExecutionRecord:
 class MockNautilusService:
     """Mock orchestration layer used when a live Nautilus engine isn't available."""
 
-    def __init__(self, engine: Optional[NautilusEngineService] = None) -> None:
+    def __init__(
+        self,
+        engine: Optional[NautilusEngineService] = None,
+        storage: Optional[NullStorage] = None,
+        cache: Optional[CacheFacade] = None,
+        cache_ttl: int = 60,
+    ) -> None:
         engine_service = engine or build_engine_service()
         self._engine_service: NautilusEngineService = engine_service
         self._bus: EngineEventBus = self._engine_service.bus
         self._mode = "mock"
+
+        self._storage: NullStorage = storage or NullStorage()
+        self._cache: Optional[CacheFacade] = cache or CacheFacade()
+        self._cache_ttl = max(0, cache_ttl)
 
         self._nodes: Dict[str, NodeState] = {}
         (
@@ -294,6 +307,9 @@ class MockNautilusService:
         if not self._bus.external:
             self._schedule_background_jobs()
 
+        if self._instrument_catalog:
+            self._storage.record_instruments(self._instrument_catalog)
+
     # ------------------------------------------------------------------
     # Engine / telemetry helpers
     # ------------------------------------------------------------------
@@ -304,6 +320,34 @@ class MockNautilusService:
 
     def _publish(self, topic: str, payload: Dict[str, Any]) -> None:
         self._engine_service.publish(topic, payload)
+
+    def _persist_node_handle(self, handle: NodeHandle) -> None:
+        try:
+            mode = EngineMode(handle.mode)
+        except ValueError:
+            mode = EngineMode.BACKTEST
+        self._storage.record_node(
+            {
+                "node_id": handle.id,
+                "mode": mode,
+                "status": handle.status,
+                "detail": handle.detail,
+                "metrics": handle.metrics,
+                "created_at": handle.created_at,
+                "updated_at": handle.updated_at,
+            }
+        )
+
+    def _persist_order(self, order: OrderRecord) -> None:
+        self._storage.record_order(asdict(order))
+
+    def _persist_execution(self, execution: ExecutionRecord) -> None:
+        self._storage.record_execution(asdict(execution))
+
+    def _persist_risk_alert(self, alert: RiskAlert) -> None:
+        payload = asdict(alert)
+        payload.setdefault("alert_id", alert.alert_id)
+        self._storage.record_risk_alert(payload)
 
     def _publish_portfolio(self) -> None:
         snapshot = self.portfolio_snapshot()
@@ -329,6 +373,7 @@ class MockNautilusService:
             "engine.risk.alerts",
             {"event": action, "alert": self._risk_alert_to_dict(alert)},
         )
+        self._persist_risk_alert(alert)
 
     def _schedule_background_jobs(self) -> None:
         loop = self._bus.loop
@@ -917,19 +962,37 @@ class MockNautilusService:
             raise ValueError("Requested bar count must be positive")
 
         end_aligned = end_dt.replace(microsecond=0)
-        cache_key = (instrument_id, granularity)
-        bars = self._historical_bar_cache.get(cache_key)
+        cache_key = f"bars:{instrument_id}:{granularity}:{count}:{end_aligned.isoformat()}"
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached:
+                try:
+                    cached_payload = json.loads(cached.decode("utf-8"))
+                except (ValueError, json.JSONDecodeError):
+                    cached_payload = None
+                else:
+                    return cached_payload
+
+        memory_key = (instrument_id, granularity)
+        bars = self._historical_bar_cache.get(memory_key)
         if not bars or len(bars) < count:
             bars = self._generate_historical_series(instrument_id, granularity, count, end_aligned)
-            self._historical_bar_cache[cache_key] = bars
+            self._historical_bar_cache[memory_key] = bars
         else:
             bars = bars[-count:]
 
-        return {
+        payload = {
             "instrument_id": instrument_id,
             "granularity": granularity,
             "bars": [deepcopy(bar) for bar in bars],
         }
+        if self._cache:
+            try:
+                ttl = self._cache_ttl or None
+                self._cache.set(cache_key, json.dumps(payload).encode("utf-8"), ttl=ttl)
+            except Exception:
+                pass
+        return payload
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
@@ -1277,7 +1340,7 @@ class MockNautilusService:
         self._executions.clear()
         self._order_counter = 0
 
-        nodes = ["lv-00112233", "bt-00ffaacc", "rv-0099abba"]
+        nodes = ["lv-00112233", "bt-00ffaacc", "sb-0099abba"]
         venues = ["BINANCE", "COINBASE", "NASDAQ", "FTX"]
         symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ADAUSDT", "AAPL.XNAS", "MSFT.XNAS"]
         statuses = [
@@ -1388,6 +1451,7 @@ class MockNautilusService:
             "engine.orders",
             {"event": "created", "order": asdict(order)},
         )
+        self._persist_order(order)
 
     def _bootstrap_executions(self, order: OrderRecord) -> None:
         executed = max(0.0, min(order.filled_quantity, order.quantity))
@@ -1497,7 +1561,7 @@ class MockNautilusService:
             linked_order_ids=linked_order_ids,
             parent_order_id=parent_order_id,
             instructions={},
-            node_id=random.choice(["lv-00112233", "bt-00ffaacc", "rv-0099abba"]),
+            node_id=random.choice(["lv-00112233", "bt-00ffaacc", "sb-0099abba"]),
             created_at=_isoformat(now),
             updated_at=_isoformat(now),
         )
@@ -1552,6 +1616,8 @@ class MockNautilusService:
             "engine.orders",
             {"event": "execution", "execution": asdict(record)},
         )
+        self._persist_order(order)
+        self._persist_execution(record)
 
     def _apply_cancel(self, order: OrderRecord) -> None:
         order.status = "cancelled"
@@ -1560,6 +1626,7 @@ class MockNautilusService:
             "engine.orders",
             {"event": "order_updated", "order": asdict(order)},
         )
+        self._persist_order(order)
 
     def _apply_reject(self, order: OrderRecord) -> None:
         order.status = "rejected"
@@ -1569,6 +1636,7 @@ class MockNautilusService:
             "engine.orders",
             {"event": "order_updated", "order": asdict(order)},
         )
+        self._persist_order(order)
 
     def _advance_orders_state(self) -> None:
         if not self._orders:
@@ -2488,6 +2556,116 @@ class MockNautilusService:
 
         return handle
 
+    def start_sandbox(
+        self,
+        venue: str = "BINANCE",
+        detail: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        config_metadata: Optional[Dict[str, Any]] = None,
+    ) -> NodeHandle:
+        config_data: Dict[str, Any] = config or {
+            "type": "sandbox",
+            "strategy": {
+                "id": "sandbox_default",
+                "name": "Sandbox execution",
+                "parameters": [
+                    {"key": "venue", "value": venue},
+                    {"key": "environment", "value": "paper"},
+                ],
+            },
+            "dataSources": [
+                {
+                    "id": f"{venue.lower()}-sandbox-data",
+                    "label": f"{venue} sandbox data",
+                    "type": "simulated",
+                    "mode": "read",
+                }
+            ],
+            "keyReferences": [],
+            "constraints": {"autoStopOnError": True},
+        }
+        engine_mode = EngineMode.SANDBOX
+        handle = self._create_node(
+            mode="sandbox",
+            detail=detail or f"Sandbox node prepared (venue={venue}). Configure adapters to proceed.",
+            config=config_data,
+            config_metadata=config_metadata,
+        )
+        node_id = handle.id
+
+        config_data.setdefault("id", node_id)
+
+        meta_payload: Dict[str, Any] = {}
+        if handle.detail:
+            meta_payload["detail"] = handle.detail
+        if config_metadata:
+            meta_payload.update(
+                {key: value for key, value in config_metadata.items() if value is not None}
+            )
+        else:
+            meta_payload.update({"source": "generated", "format": "json"})
+
+        try:
+            path = self._engine_service.store_node_config(
+                node_id=node_id,
+                mode=engine_mode,
+                config=config_data,
+                source=meta_payload.get("source"),
+                fmt=meta_payload.get("format"),
+                metadata=meta_payload,
+            )
+        except EngineConfigError as exc:
+            self._append_log(
+                node_id,
+                "warning",
+                f"Failed to persist configuration: {exc}",
+                source="gateway",
+            )
+        else:
+            self._append_log(
+                node_id,
+                "debug",
+                f"Configuration persisted to {path.name}",
+                source="gateway",
+            )
+
+        if not self._engine_service.ensure_package():
+            return self._mark_node_error(
+                node_id,
+                "Nautilus core not available. Install package into backend venv.",
+                source="system",
+            )
+
+        try:
+            engine_handle = self._engine_service.launch_trading_node(
+                mode=engine_mode,
+                config=config_data,
+                node_id=node_id,
+            )
+        except Exception as exc:
+            return self._mark_node_error(
+                node_id,
+                f"Failed to start Nautilus {engine_mode.value} node: {exc}",
+                source="engine",
+            )
+
+        state = self._require_node(node_id)
+        state.engine_handle = engine_handle
+
+        running_message = f"Nautilus {engine_mode.value} engine running"
+        handle = self._mark_node_running(node_id, running_message)
+
+        strategy_name = config_data.get("strategy", {}).get("name")
+        if strategy_name:
+            self._append_log(
+                node_id,
+                "debug",
+                f"Configuration loaded: {strategy_name}",
+                source="engine",
+            )
+
+        return handle
+
     def stop_node(self, node_id: str) -> NodeHandle:
         state = self._require_node(node_id)
         handle = state.handle
@@ -2497,6 +2675,7 @@ class MockNautilusService:
         handle.updated_at = _utcnow_iso()
         self._record_lifecycle(node_id, "stopped", "Node stopped by operator")
         self._append_log(node_id, "info", "Node received stop signal", source="orchestrator")
+        self._persist_node_handle(handle)
         return handle
 
     def restart_node(self, node_id: str) -> NodeHandle:
@@ -2509,6 +2688,7 @@ class MockNautilusService:
         handle.updated_at = _utcnow_iso()
         self._record_lifecycle(node_id, "running", "Node restarted")
         self._append_log(node_id, "info", "Restart sequence completed", source="controller")
+        self._persist_node_handle(handle)
         return handle
 
     def node_detail(self, node_id: str) -> dict:
@@ -2556,7 +2736,8 @@ class MockNautilusService:
         config: Dict[str, Any],
         config_metadata: Optional[Dict[str, Any]] = None,
     ) -> NodeHandle:
-        prefix = "bt" if mode == "backtest" else "lv"
+        prefix_map = {"backtest": "bt", "live": "lv", "sandbox": "sb"}
+        prefix = prefix_map.get(mode, "nd")
         node_id = f"{prefix}-{uuid.uuid4().hex[:8]}"
         handle = NodeHandle(id=node_id, mode=mode, status="created", detail=detail)
         state = NodeState(handle=handle, config=config, lifecycle=[], logs=[], metrics=[])
@@ -2567,6 +2748,7 @@ class MockNautilusService:
             "engine.nodes",
             {"event": "created", "node": self.as_dict(handle)},
         )
+        self._persist_node_handle(handle)
         return handle
 
     def _mark_node_error(
@@ -2588,6 +2770,7 @@ class MockNautilusService:
             "engine.nodes",
             {"event": "error", "node": self.as_dict(handle)},
         )
+        self._persist_node_handle(handle)
         return handle
 
     def _mark_node_running(self, node_id: str, message: str) -> NodeHandle:
@@ -2601,6 +2784,7 @@ class MockNautilusService:
             "engine.nodes",
             {"event": "running", "node": self.as_dict(handle)},
         )
+        self._persist_node_handle(handle)
         return handle
 
     def _record_lifecycle(self, node_id: str, status: str, message: str) -> None:
@@ -2610,6 +2794,14 @@ class MockNautilusService:
         self._publish(
             f"engine.nodes.{node_id}.lifecycle",
             {"node_id": node_id, "event": asdict(event)},
+        )
+        self._storage.record_node_lifecycle(
+            {
+                "node_id": node_id,
+                "status": status,
+                "message": message,
+                "timestamp": event.timestamp,
+            }
         )
 
     def _append_log(self, node_id: str, level: str, message: str, source: str) -> None:
@@ -2627,7 +2819,16 @@ class MockNautilusService:
             f"engine.nodes.{node_id}.logs",
             {"node_id": node_id, "log": asdict(entry)},
         )
-
+        self._storage.record_node_log(
+            {
+                "node_id": node_id,
+                "level": level,
+                "message": message,
+                "source": source,
+                "timestamp": entry.timestamp,
+            }
+        )
+        
     def _ensure_metrics_seeded(self, node_id: str) -> None:
         state = self._require_node(node_id)
         if state.metrics:
@@ -2676,6 +2877,16 @@ class MockNautilusService:
         if len(state.metrics) > 720:
             state.metrics = state.metrics[-720:]
         self._update_handle_metrics(node_id)
+        self._storage.record_node_metric(
+            {
+                "node_id": node_id,
+                "timestamp": sample.timestamp,
+                "pnl": sample.pnl,
+                "latency_ms": sample.latency_ms,
+                "cpu_percent": sample.cpu_percent,
+                "memory_mb": sample.memory_mb,
+            }
+        )
         return sample
 
     def _update_handle_metrics(self, node_id: str) -> None:
@@ -2705,6 +2916,7 @@ class MockNautilusService:
                 "timestamp": latest.timestamp,
             },
         )
+        self._persist_node_handle(state.handle)
 
     def metrics_series(self, node_id: str, limit: int = 360) -> dict:
         self._advance_metrics(node_id)
@@ -2773,9 +2985,26 @@ class NautilusService:
     engine responses and must be passed through unchanged.
     """
 
-    def __init__(self, engine: Optional[NautilusEngineService] = None) -> None:
+    def __init__(
+        self,
+        engine: Optional[NautilusEngineService] = None,
+        storage: Optional[NullStorage] = None,
+    ) -> None:
         self._engine = engine or build_engine_service()
-        self._mock = MockNautilusService(engine=self._engine)
+        if storage is None:
+            if settings.use_mock_services:
+                storage = NullStorage()
+            else:
+                storage = build_storage(settings.database_url)
+        self._storage = storage
+        cache_backend = build_cache(settings.redis_url)
+        self._cache = CacheFacade(cache_backend)
+        self._mock = MockNautilusService(
+            engine=self._engine,
+            storage=self._storage,
+            cache=self._cache,
+            cache_ttl=settings.data.cache_ttl_seconds,
+        )
         self._engine_orders: Dict[str, Dict[str, Any]] = {}
 
     def __getattr__(self, item: str):  # pragma: no cover - delegation helper
@@ -2935,6 +3164,7 @@ class NautilusService:
             "engine.orders",
             {"event": "created", "order": summary},
         )
+        self._storage.record_order(summary)
         return {"order": summary}
 
     def cancel_order(self, order_id: str) -> dict:
@@ -2992,6 +3222,8 @@ class NautilusService:
             "engine.orders",
             {"event": "cancel_requested", "order": summary},
         )
+
+        self._storage.record_order(summary)
 
         return {"order": summary}
 

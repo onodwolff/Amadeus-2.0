@@ -318,6 +318,12 @@ def start_live():
     return {"node": svc.as_dict(node)}
 
 
+@app.post("/nodes/sandbox/start")
+def start_sandbox():
+    node: NodeHandle = svc.start_sandbox()
+    return {"node": svc.as_dict(node)}
+
+
 @app.post("/nodes/launch")
 def launch_node(payload: NodeLaunchPayload):
     node_type = payload.type.lower()
