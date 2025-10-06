@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from copy import deepcopy
 import itertools
 import random
 import sys
@@ -2761,6 +2762,7 @@ class NautilusService:
     def __init__(self, engine: Optional[NautilusEngineService] = None) -> None:
         self._engine = engine or build_engine_service()
         self._mock = MockNautilusService(engine=self._engine)
+        self._engine_orders: Dict[str, Dict[str, Any]] = {}
 
     def __getattr__(self, item: str):  # pragma: no cover - delegation helper
         return getattr(self._mock, item)
@@ -2768,6 +2770,98 @@ class NautilusService:
     @property
     def engine(self) -> NautilusEngineService:
         return self._engine
+
+    def _engine_active(self) -> bool:
+        try:
+            has_package = self._engine.ensure_package()
+        except Exception:
+            has_package = False
+        if not has_package:
+            return False
+        running = getattr(self._engine, "_nodes_running", {})
+        return bool(running)
+
+    def _build_engine_order_summary(
+        self,
+        payload: Dict[str, Any],
+        instructions: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        now = _utcnow_iso()
+        symbol = (payload.get("symbol") or "").upper()
+        venue = (payload.get("venue") or "").upper()
+        side = (payload.get("side") or "buy").lower()
+        order_type = (payload.get("type") or "market").lower()
+        quantity = float(payload.get("quantity") or 0.0)
+        price = payload.get("price")
+        time_in_force_raw = payload.get("time_in_force")
+        time_in_force = (
+            str(time_in_force_raw).upper()
+            if isinstance(time_in_force_raw, str) and time_in_force_raw
+            else None
+        )
+        expire_time = payload.get("expire_time") or None
+        post_only = payload.get("post_only")
+        reduce_only = payload.get("reduce_only")
+        limit_offset_raw = payload.get("limit_offset")
+        contingency_type = payload.get("contingency_type") or None
+        order_list_id = payload.get("order_list_id") or None
+        parent_order_id = payload.get("parent_order_id") or None
+        linked_raw = payload.get("linked_order_ids")
+        node_id = payload.get("node_id") or instructions.get("node_id")
+
+        linked_order_ids: Optional[List[str]]
+        if isinstance(linked_raw, list):
+            linked_order_ids = [str(item) for item in linked_raw if str(item).strip()]
+        elif linked_raw:
+            linked_order_ids = [str(linked_raw).strip()]
+        else:
+            linked_order_ids = None
+
+        try:
+            limit_offset = float(limit_offset_raw) if limit_offset_raw is not None else None
+        except (TypeError, ValueError):
+            limit_offset = None
+
+        try:
+            price_value = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price_value = None
+
+        order_identifier = (
+            instructions.get("client_order_id")
+            or payload.get("client_order_id")
+            or instructions.get("order_id")
+            or f"ord-{uuid.uuid4().hex[:12]}"
+        )
+
+        summary: Dict[str, Any] = {
+            "order_id": order_identifier,
+            "client_order_id": payload.get("client_order_id") or instructions.get("client_order_id"),
+            "venue_order_id": None,
+            "symbol": symbol,
+            "venue": venue,
+            "side": side,
+            "type": order_type,
+            "quantity": round(quantity, 4),
+            "filled_quantity": 0.0,
+            "price": price_value,
+            "average_price": None,
+            "status": "pending",
+            "time_in_force": time_in_force,
+            "expire_time": expire_time,
+            "post_only": None if post_only is None else bool(post_only),
+            "reduce_only": None if reduce_only is None else bool(reduce_only),
+            "limit_offset": limit_offset,
+            "contingency_type": contingency_type,
+            "order_list_id": order_list_id,
+            "linked_order_ids": linked_order_ids,
+            "parent_order_id": parent_order_id,
+            "instructions": deepcopy(instructions),
+            "node_id": node_id,
+            "created_at": now,
+            "updated_at": now,
+        }
+        return summary
 
     def topic_stream(self, topic: str):
         async def generator():
@@ -2800,6 +2894,92 @@ class NautilusService:
 
     def risk_alert_stream(self):
         return self.topic_stream("engine.risk.alerts")
+
+    def create_order(self, payload: Dict[str, Any]) -> dict:
+        if not self._engine_active():
+            return self._mock.create_order(payload)
+
+        engine_payload = self._mock._translate_order_payload(payload)
+        client_order_id = payload.get("client_order_id")
+        if client_order_id:
+            engine_payload.setdefault("client_order_id", client_order_id)
+        node_reference = payload.get("node_id")
+        if node_reference:
+            engine_payload.setdefault("node_id", node_reference)
+
+        try:
+            self._engine.submit_order(engine_payload)
+        except Exception:
+            return self._mock.create_order(payload)
+
+        summary = self._build_engine_order_summary(payload, engine_payload)
+        self._engine_orders[summary["order_id"]] = {
+            "summary": summary,
+            "instructions": dict(engine_payload),
+        }
+        self._engine.publish(
+            "engine.orders",
+            {"event": "created", "order": summary},
+        )
+        return {"order": summary}
+
+    def cancel_order(self, order_id: str) -> dict:
+        if not self._engine_active():
+            return self._mock.cancel_order(order_id)
+
+        entry = self._engine_orders.get(order_id)
+        if entry is None:
+            result = self._mock.cancel_order(order_id)
+            instructions = {"order_id": order_id}
+            cancel = getattr(self._engine, "cancel_order", None)
+            if callable(cancel):
+                try:
+                    cancel(instructions)
+                except TypeError:
+                    try:
+                        cancel(**instructions)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            return result
+
+        summary = dict(entry.get("summary", {}))
+        if not summary:
+            return self._mock.cancel_order(order_id)
+
+        summary["status"] = "pending_cancel"
+        summary["updated_at"] = _utcnow_iso()
+
+        instructions = dict(entry.get("instructions", {}))
+        instructions.setdefault("order_id", order_id)
+        if summary.get("client_order_id"):
+            instructions.setdefault("client_order_id", summary["client_order_id"])
+        if summary.get("node_id"):
+            instructions.setdefault("node_id", summary["node_id"])
+
+        cancel = getattr(self._engine, "cancel_order", None)
+        if callable(cancel):
+            try:
+                cancel(instructions)
+            except TypeError:
+                try:
+                    cancel(**instructions)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        entry["summary"] = summary
+        entry["instructions"] = instructions
+        self._engine_orders[order_id] = entry
+
+        self._engine.publish(
+            "engine.orders",
+            {"event": "cancel_requested", "order": summary},
+        )
+
+        return {"order": summary}
 
     def list_instruments(self, venue: Optional[str] = None) -> dict:
         engine_method = getattr(self._engine, "list_instruments", None)
