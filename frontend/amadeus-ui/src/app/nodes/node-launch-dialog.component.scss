@@ -113,6 +113,7 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+  flex: 1 1 auto;
 }
 
 .launch-dialog__section {
@@ -385,16 +386,31 @@
 
 .launch-dialog__footer {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
-  justify-content: flex-end;
+  padding: 16px 28px;
   border-top: 1px solid rgba(148, 163, 184, 0.08);
-  padding-top: 16px;
-  margin-top: auto;
+  background: rgba(15, 23, 42, 0.82);
 }
 
-.launch-dialog__spacer {
-  flex: 1;
+.launch-dialog__footer-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 540px) {
+  .launch-dialog__footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .launch-dialog__footer-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 .preset-list {
