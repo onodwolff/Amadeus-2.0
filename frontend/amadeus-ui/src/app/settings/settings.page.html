@@ -1,121 +1,189 @@
-<section class="keys-page">
-  <header class="keys-page__header">
+<section class="settings-page">
+  <header class="settings-page__header">
     <div>
-      <h1 class="keys-page__title">API keys</h1>
-      <p class="keys-page__subtitle">
-        Store encrypted exchange credentials and manage adapter access across Nautilus Trader nodes.
+      <p class="settings-page__eyebrow">Workspace</p>
+      <h1 class="settings-page__title">Settings</h1>
+      <p class="settings-page__subtitle">
+        Manage your Amadeus account preferences and provision encrypted exchange credentials for Nautilus Trader.
       </p>
-    </div>
-    <div class="keys-page__actions">
-      <button
-        type="button"
-        class="btn btn--ghost"
-        (click)="refresh()"
-        [disabled]="isLoading() || isRefreshing()"
-        aria-label="Refresh API keys"
-      >
-        <span *ngIf="isRefreshing(); else refreshLabel">Refreshing…</span>
-        <ng-template #refreshLabel>Refresh</ng-template>
-      </button>
-      <button type="button" class="btn btn--primary" (click)="openCreateDialog()">New key</button>
     </div>
   </header>
 
-  <section class="keys-page__meta" *ngIf="lastUpdated() as updated">
-    <div class="meta-card">
-      <span class="meta-card__label">Last synced</span>
-      <span class="meta-card__value">{{ updated | date: 'medium' }}</span>
-    </div>
-    <div class="meta-card" *ngIf="keys().length">
-      <span class="meta-card__label">Provisioned</span>
-      <span class="meta-card__value">{{ keys().length }}</span>
-    </div>
+  <section class="account-settings">
+    <header class="account-settings__header">
+      <div>
+        <h2 class="account-settings__title">Account</h2>
+        <p class="account-settings__subtitle">
+          Update your display information, login and password used to access the control plane.
+        </p>
+      </div>
+      <span class="account-settings__timestamp" *ngIf="activeUser() as user">Last updated {{ user.updated_at | date: 'medium' }}</span>
+    </header>
+
+    <form class="account-settings__form" [formGroup]="accountForm" (ngSubmit)="saveAccountSettings()">
+      <div class="account-settings__grid">
+        <label class="field">
+          <span class="field__label">Full name</span>
+          <input class="field__control" formControlName="name" type="text" placeholder="Jane Operator" required />
+        </label>
+
+        <label class="field">
+          <span class="field__label">Email</span>
+          <input class="field__control" formControlName="email" type="email" placeholder="operator@example.com" required />
+        </label>
+
+        <label class="field">
+          <span class="field__label">Login</span>
+          <input class="field__control" formControlName="username" type="text" placeholder="operator" required />
+        </label>
+
+        <label class="field">
+          <span class="field__label">New password</span>
+          <input class="field__control" formControlName="password" type="password" autocomplete="new-password" />
+          <span class="field__hint">Leave blank to keep the current password.</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Confirm password</span>
+          <input class="field__control" formControlName="confirmPassword" type="password" autocomplete="new-password" />
+        </label>
+      </div>
+
+      <div class="account-settings__alerts">
+        <p class="account-settings__error" *ngIf="accountError() as error">{{ error }}</p>
+        <p class="account-settings__success" *ngIf="accountSuccess() as success">{{ success }}</p>
+      </div>
+
+      <footer class="account-settings__footer">
+        <button type="submit" class="btn btn--primary" [disabled]="isAccountSaving() || accountForm.pristine">
+          <span *ngIf="isAccountSaving(); else saveLabel">Saving…</span>
+          <ng-template #saveLabel>Save changes</ng-template>
+        </button>
+      </footer>
+    </form>
   </section>
 
-  <p class="keys-page__error" *ngIf="errorText() as error">{{ error }}</p>
-
-  <div class="keys-page__loading" *ngIf="isLoading()" role="status" aria-live="polite">
-    <span class="keys-page__spinner" aria-hidden="true"></span>
-    <span>Loading API keys…</span>
-  </div>
-
-  <ng-container *ngIf="!isLoading()">
-    <section class="keys-table" *ngIf="keys().length > 0; else emptyState">
-      <table>
-        <thead>
-          <tr>
-            <th>Label</th>
-            <th>Venue</th>
-            <th>Access key</th>
-            <th>Scopes</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let key of keys(); trackBy: trackByKeyId">
-            <td data-label="Label">
-              <div class="cell-main">{{ key.label || key.key_id }}</div>
-              <div class="cell-sub"><code>{{ key.key_id }}</code></div>
-            </td>
-            <td data-label="Venue">
-              <div class="cell-main">{{ key.venue }}</div>
-            </td>
-            <td data-label="Access key">
-              <div class="cell-main">{{ maskSecret(key) }}</div>
-              <div class="cell-sub" *ngIf="key.fingerprint">Fingerprint {{ key.fingerprint }}</div>
-            </td>
-            <td data-label="Scopes">
-              <ul class="scope-list">
-                <li *ngFor="let scope of key.scopes">{{ scope }}</li>
-              </ul>
-            </td>
-            <td data-label="Status">
-              <ng-container *ngIf="keyStatus(key) as status">
-                <span
-                  class="status"
-                  [class.status--active]="status.tone === 'active'"
-                  [class.status--stale]="status.tone === 'stale'"
-                  [class.status--idle]="status.tone === 'idle'"
-                  [class.status--expiring]="status.tone === 'expiring'"
-                  [class.status--expired]="status.tone === 'expired'"
-                >
-                  {{ status.label }}
-                </span>
-                <div class="cell-sub">{{ status.description }}</div>
-              </ng-container>
-            </td>
-            <td data-label="Created">
-              <div class="cell-main">{{ key.created_at | date: 'medium' }}</div>
-              <div class="cell-sub" *ngIf="key.last_used_at">Last used {{ key.last_used_at | date: 'medium' }}</div>
-            </td>
-            <td data-label="Actions" class="keys-table__actions">
-              <button type="button" class="btn btn--ghost" (click)="openEditDialog(key)">Edit</button>
-              <button type="button" class="btn btn--ghost" (click)="openDeleteDialog(key)">Delete</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-  </ng-container>
-
-  <ng-template #emptyState>
-    <div class="keys-page__empty">
-      <h2>Securely manage your credentials</h2>
-      <p>
-        Provision encrypted API keys for each venue to unlock trading, data collection and withdrawal
-        workflows across your Nautilus Trader infrastructure.
-      </p>
-      <button type="button" class="btn btn--primary" (click)="openCreateDialog()">Create your first key</button>
-    </div>
-  </ng-template>
-
-  <section class="keys-assignment" aria-label="Credential assignments">
-    <header class="keys-assignment__header">
+  <section class="credentials-section">
+    <header class="credentials-section__header">
       <div>
-        <h2 class="keys-assignment__title">Adapter credential assignments</h2>
-        <p class="keys-assignment__subtitle">
+        <h2 class="credentials-section__title">API keys</h2>
+        <p class="credentials-section__subtitle">
+          Store encrypted exchange credentials and manage adapter access across Nautilus Trader nodes.
+        </p>
+      </div>
+      <div class="credentials-section__actions">
+        <button
+          type="button"
+          class="btn btn--ghost"
+          (click)="refresh()"
+          [disabled]="isLoading() || isRefreshing()"
+          aria-label="Refresh API keys"
+        >
+          <span *ngIf="isRefreshing(); else refreshLabel">Refreshing…</span>
+          <ng-template #refreshLabel>Refresh</ng-template>
+        </button>
+        <button type="button" class="btn btn--primary" (click)="openCreateDialog()">New key</button>
+      </div>
+    </header>
+
+    <p class="credentials-section__notice" *ngIf="exchangesError() as exchangeError">{{ exchangeError }}</p>
+
+    <section class="credentials-meta" *ngIf="lastUpdated() as updated">
+      <div class="meta-card">
+        <span class="meta-card__label">Last synced</span>
+        <span class="meta-card__value">{{ updated | date: 'medium' }}</span>
+      </div>
+      <div class="meta-card" *ngIf="keys().length">
+        <span class="meta-card__label">Provisioned</span>
+        <span class="meta-card__value">{{ keys().length }}</span>
+      </div>
+    </section>
+
+    <p class="credentials-error" *ngIf="errorText() as error">{{ error }}</p>
+
+    <div class="credentials-loading" *ngIf="isLoading()" role="status" aria-live="polite">
+      <span class="credentials-spinner" aria-hidden="true"></span>
+      <span>Loading API keys…</span>
+    </div>
+
+    <ng-container *ngIf="!isLoading()">
+      <section class="credentials-table" *ngIf="keys().length > 0; else emptyState">
+        <table>
+          <thead>
+            <tr>
+              <th>Label</th>
+              <th>Venue</th>
+              <th>Access key</th>
+              <th>Scopes</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let key of keys(); trackBy: trackByKeyId">
+              <td data-label="Label">
+                <div class="cell-main">{{ key.label || key.key_id }}</div>
+                <div class="cell-sub"><code>{{ key.key_id }}</code></div>
+              </td>
+              <td data-label="Venue">
+                <div class="cell-main">{{ key.venue }}</div>
+              </td>
+              <td data-label="Access key">
+                <div class="cell-main">{{ maskSecret(key) }}</div>
+                <div class="cell-sub" *ngIf="key.fingerprint">Fingerprint {{ key.fingerprint }}</div>
+              </td>
+              <td data-label="Scopes">
+                <ul class="scope-list">
+                  <li *ngFor="let scope of key.scopes">{{ scope }}</li>
+                </ul>
+              </td>
+              <td data-label="Status">
+                <ng-container *ngIf="keyStatus(key) as status">
+                  <span
+                    class="status"
+                    [class.status--active]="status.tone === 'active'"
+                    [class.status--stale]="status.tone === 'stale'"
+                    [class.status--idle]="status.tone === 'idle'"
+                    [class.status--expiring]="status.tone === 'expiring'"
+                    [class.status--expired]="status.tone === 'expired'"
+                  >
+                    {{ status.label }}
+                  </span>
+                  <div class="cell-sub">{{ status.description }}</div>
+                </ng-container>
+              </td>
+              <td data-label="Created">
+                <div class="cell-main">{{ key.created_at | date: 'medium' }}</div>
+                <div class="cell-sub" *ngIf="key.last_used_at">Last used {{ key.last_used_at | date: 'medium' }}</div>
+              </td>
+              <td data-label="Actions" class="credentials-table__actions">
+                <button type="button" class="btn btn--ghost" (click)="openEditDialog(key)">Edit</button>
+                <button type="button" class="btn btn--ghost" (click)="openDeleteDialog(key)">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </ng-container>
+
+    <ng-template #emptyState>
+      <div class="credentials-empty">
+        <h3>Securely manage your credentials</h3>
+        <p>
+          Provision encrypted API keys for each venue to unlock trading, data collection and withdrawal workflows across your
+          Nautilus Trader infrastructure.
+        </p>
+        <button type="button" class="btn btn--primary" (click)="openCreateDialog()">Create your first key</button>
+      </div>
+    </ng-template>
+  </section>
+
+  <section class="assignments-section" aria-label="Credential assignments">
+    <header class="assignments-section__header">
+      <div>
+        <h2 class="assignments-section__title">Adapter credential assignments</h2>
+        <p class="assignments-section__subtitle">
           Link provisioned API keys to node adapters and execution strategies to ensure venue access.
         </p>
       </div>
@@ -130,9 +198,9 @@
       </button>
     </header>
 
-    <p class="keys-assignment__error" *ngIf="assignmentsError() as assignError">{{ assignError }}</p>
+    <p class="assignments-section__error" *ngIf="assignmentsError() as assignError">{{ assignError }}</p>
 
-    <div class="keys-assignment__loading" *ngIf="isAssignmentsLoading()" role="status" aria-live="polite">
+    <div class="assignments-section__loading" *ngIf="isAssignmentsLoading()" role="status" aria-live="polite">
       Loading node context…
     </div>
 
@@ -194,7 +262,7 @@
     </ng-container>
 
     <ng-template #noAssignments>
-      <p class="keys-assignment__empty">
+      <p class="assignments-section__empty">
         No active nodes require credential assignments. Launch a node to begin mapping API keys.
       </p>
     </ng-template>
@@ -240,10 +308,30 @@
 
             <label class="field">
               <span class="field__label">Venue</span>
-              <input class="field__control" formControlName="venue" type="text" placeholder="BINANCE" required />
-              <span class="field__hint" *ngIf="createForm.controls.venue.invalid && createForm.controls.venue.touched">
-                Venue is required.
-              </span>
+              <select
+                class="field__control field__control--select"
+                [value]="isCreateCustomVenue() ? '__custom__' : createForm.controls.venue.value"
+                (change)="onCreateVenueSelected($any($event.target).value)"
+                required
+              >
+                <option value="" disabled>Select a venue</option>
+                <option *ngFor="let exchange of venueOptions()" [value]="exchange.code">
+                  {{ exchange.name }} ({{ exchange.code }})
+                </option>
+                <option value="__custom__">Custom venue…</option>
+              </select>
+              <span class="field__hint" *ngIf="isExchangesLoading()">Loading exchanges…</span>
+            </label>
+
+            <label class="field" *ngIf="isCreateCustomVenue()">
+              <span class="field__label">Custom venue</span>
+              <input
+                class="field__control"
+                type="text"
+                formControlName="venue"
+                placeholder="BINANCE"
+                required
+              />
             </label>
 
             <label class="field">
@@ -359,6 +447,22 @@
 
             <label class="field">
               <span class="field__label">Venue</span>
+              <select
+                class="field__control field__control--select"
+                [value]="isEditCustomVenue() ? '__custom__' : editForm.controls.venue.value"
+                (change)="onEditVenueSelected($any($event.target).value)"
+                required
+              >
+                <option value="" disabled>Select a venue</option>
+                <option *ngFor="let exchange of venueOptions()" [value]="exchange.code">
+                  {{ exchange.name }} ({{ exchange.code }})
+                </option>
+                <option value="__custom__">Custom venue…</option>
+              </select>
+            </label>
+
+            <label class="field" *ngIf="isEditCustomVenue()">
+              <span class="field__label">Custom venue</span>
               <input class="field__control" formControlName="venue" type="text" required />
             </label>
 
@@ -447,8 +551,7 @@
             <p class="dialog__eyebrow">Delete credential</p>
             <h2 class="dialog__title" id="deleteKeyTitle">Remove {{ key.label || key.key_id }}?</h2>
             <p class="dialog__subtitle">
-              Deleting a key immediately revokes adapter access. Confirm the identifier and provide your
-              passphrase to continue.
+              Deleting a key immediately revokes adapter access. Confirm the identifier and provide your passphrase to continue.
             </p>
           </div>
           <button type="button" class="dialog__close" (click)="closeDeleteDialog()" aria-label="Close delete dialog">

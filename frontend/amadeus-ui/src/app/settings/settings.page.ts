@@ -19,6 +19,8 @@ import { firstValueFrom } from 'rxjs';
 import { KeysApi } from '../api/clients/keys.api';
 import { MarketApi } from '../api/clients/market.api';
 import { NodesApi } from '../api/clients/nodes.api';
+import { UsersApi } from '../api/clients/users.api';
+import { IntegrationsApi } from '../api/clients/integrations.api';
 import {
   ApiKey,
   KeyCreateRequest,
@@ -27,6 +29,9 @@ import {
   KeyUpdateRequest,
   NodeDetailResponse,
   NodeMode,
+  ExchangeDescriptor,
+  UserProfile,
+  UserUpdateRequest,
 } from '../api/models';
 import { NotificationService } from '../shared/notifications/notification.service';
 import { encryptSecret, hashPassphrase } from './secret-crypto';
@@ -63,6 +68,14 @@ type KeyEditFormGroup = FormGroup<{
 type KeyDeleteFormGroup = FormGroup<{
   confirmation: FormControl<string>;
   passphrase: FormControl<string>;
+}>;
+
+type AccountFormGroup = FormGroup<{
+  name: FormControl<string>;
+  email: FormControl<string>;
+  username: FormControl<string>;
+  password: FormControl<string>;
+  confirmPassword: FormControl<string>;
 }>;
 
 type KeyStatusTone = 'active' | 'stale' | 'idle' | 'expiring' | 'expired';
@@ -110,16 +123,18 @@ interface NodeAssignmentView extends NodeAssignmentContext {
 
 @Component({
   standalone: true,
-  selector: 'app-keys-page',
+  selector: 'app-settings-page',
   imports: [CommonModule, ReactiveFormsModule],
-  templateUrl: './keys.page.html',
-  styleUrls: ['./keys.page.scss'],
+  templateUrl: './settings.page.html',
+  styleUrls: ['./settings.page.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class KeysPage implements OnInit {
+export class SettingsPage implements OnInit {
   private readonly keysApi = inject(KeysApi);
   private readonly nodesApi = inject(NodesApi);
   private readonly marketApi = inject(MarketApi);
+  private readonly usersApi = inject(UsersApi);
+  private readonly integrationsApi = inject(IntegrationsApi);
   private readonly fb = inject(FormBuilder);
   private readonly notifications = inject(NotificationService);
 
@@ -150,6 +165,17 @@ export class KeysPage implements OnInit {
   readonly assignmentsError = signal<string | null>(null);
   readonly assignmentsView = computed<NodeAssignmentView[]>(() => this.computeAssignmentView());
 
+  readonly availableExchanges = signal<ExchangeDescriptor[]>([]);
+  readonly isExchangesLoading = signal(false);
+  readonly exchangesError = signal<string | null>(null);
+
+  readonly activeUser = signal<UserProfile | null>(null);
+  readonly isAccountSaving = signal(false);
+  readonly accountError = signal<string | null>(null);
+  readonly accountSuccess = signal<string | null>(null);
+
+  readonly accountForm: AccountFormGroup = this.createAccountForm();
+  
   private readonly healthAlertsDisplayed = new Set<string>();
 
   private readonly rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
@@ -157,19 +183,85 @@ export class KeysPage implements OnInit {
   readonly createForm: KeyCreateFormGroup = this.createKeyForm();
   readonly editForm: KeyEditFormGroup = this.createEditForm();
   readonly deleteForm: KeyDeleteFormGroup = this.createDeleteForm();
+  readonly isCreateCustomVenue = signal(false);
+  readonly isEditCustomVenue = signal(false);
+  readonly venueOptions = computed<ExchangeDescriptor[]>(() => this.computeVenueOptions());
 
   ngOnInit(): void {
     this.fetchKeys();
     void this.loadAssignmentContext();
+    this.loadExchangeCatalog();
+    this.loadAccountProfile();
   }
 
   refresh(): void {
     this.fetchKeys({ silent: true });
   }
 
+  private loadExchangeCatalog(): void {
+    this.isExchangesLoading.set(true);
+    this.exchangesError.set(null);
+    this.integrationsApi.listExchanges().subscribe({
+      next: (response) => {
+        const sanitized = (response.exchanges ?? [])
+          .map((exchange) => ({
+            code: (exchange.code || '').toUpperCase(),
+            name: exchange.name || exchange.code || '',
+          }))
+          .filter((exchange) => exchange.code.length > 0);
+        sanitized.sort((a, b) => a.name.localeCompare(b.name));
+        this.availableExchanges.set(sanitized);
+        this.isExchangesLoading.set(false);
+      },
+      error: (error) => {
+        console.error(error);
+        this.exchangesError.set('Unable to load exchange catalog.');
+        this.isExchangesLoading.set(false);
+      },
+    });
+  }
+
+  private loadAccountProfile(): void {
+    this.accountError.set(null);
+    this.accountSuccess.set(null);
+    this.usersApi.listUsers().subscribe({
+      next: (response) => {
+        const users = response.users ?? [];
+        const primary = users[0] ?? null;
+        this.activeUser.set(primary);
+        if (primary) {
+          this.accountForm.reset({
+            name: primary.name ?? '',
+            email: primary.email ?? '',
+            username: primary.username ?? '',
+            password: '',
+            confirmPassword: '',
+          });
+          this.accountForm.markAsPristine();
+          this.accountForm.markAsUntouched();
+        } else {
+          this.accountForm.reset({
+            name: '',
+            email: '',
+            username: '',
+            password: '',
+            confirmPassword: '',
+          });
+          this.accountForm.markAsPristine();
+          this.accountForm.markAsUntouched();
+        }
+      },
+      error: (error) => {
+        console.error(error);
+        this.accountError.set('Unable to load user profile.');
+      },
+    });
+  }
+
   openCreateDialog(): void {
     this.resetCreateForm();
     this.createError.set(null);
+    this.isCreateCustomVenue.set(false);
     this.isCreateDialogOpen.set(true);
   }
 
@@ -182,6 +274,7 @@ export class KeysPage implements OnInit {
     this.editDialogKey.set(key);
     this.resetEditForm(key);
     this.editError.set(null);
+    this.isEditCustomVenue.set(!this.hasKnownVenue(key.venue));
     this.isEditDialogOpen.set(true);
   }
 
@@ -239,6 +332,106 @@ export class KeysPage implements OnInit {
       this.notifications.success(`Assigned ${keyLabel} to ${adapter.label}.`, 'Key assignments');
     } else {
       this.notifications.info(`Cleared credential assignment for ${adapter.label}.`, 'Key assignments');
+    }
+  }
+
+  onCreateVenueSelected(value: string): void {
+    if (value === '__custom__') {
+      this.isCreateCustomVenue.set(true);
+      this.createForm.controls.venue.setValue('');
+    } else {
+      this.isCreateCustomVenue.set(false);
+      this.createForm.controls.venue.setValue(value);
+    }
+  }
+
+  onEditVenueSelected(value: string): void {
+    if (value === '__custom__') {
+      this.isEditCustomVenue.set(true);
+      this.editForm.controls.venue.setValue('');
+    } else {
+      this.isEditCustomVenue.set(false);
+      this.editForm.controls.venue.setValue(value);
+    }
+  }
+
+  async saveAccountSettings(): Promise<void> {
+    this.accountError.set(null);
+    this.accountSuccess.set(null);
+
+    const currentUser = this.activeUser();
+    if (!currentUser) {
+      this.accountError.set('No user profile available.');
+      return;
+    }
+
+    if (this.accountForm.invalid) {
+      this.accountForm.markAllAsTouched();
+      return;
+    }
+
+    const raw = this.accountForm.getRawValue();
+    const password = raw.password.trim();
+    const confirmPassword = raw.confirmPassword.trim();
+
+    if (password || confirmPassword) {
+      if (password.length < 8) {
+        this.accountError.set('Password must be at least 8 characters.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        this.accountError.set('Password confirmation does not match.');
+        return;
+      }
+    }
+
+    const payload: UserUpdateRequest = {};
+    const name = raw.name.trim();
+    if (name && name !== currentUser.name) {
+      payload.name = name;
+    }
+
+    const email = raw.email.trim();
+    if (email && email !== currentUser.email) {
+      payload.email = email;
+    }
+
+    const username = raw.username.trim();
+    if (username && username !== currentUser.username) {
+      payload.username = username;
+    }
+
+    if (password) {
+      payload.password = password;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      this.accountSuccess.set('Account settings are already up to date.');
+      return;
+    }
+
+    this.isAccountSaving.set(true);
+    try {
+      const response = await firstValueFrom(
+        this.usersApi.updateUser(currentUser.id, payload),
+      );
+      const updated = response.user;
+      this.activeUser.set(updated);
+      this.accountForm.reset({
+        name: updated.name ?? '',
+        email: updated.email ?? '',
+        username: updated.username ?? '',
+        password: '',
+        confirmPassword: '',
+      });
+      this.accountForm.markAsPristine();
+      this.accountForm.markAsUntouched();
+      this.accountSuccess.set('Account settings updated successfully.');
+      this.notifications.success('Account settings updated.');
+    } catch (error) {
+      this.handleError(error, this.accountError, 'Failed to update account settings.');
+    } finally {
+      this.isAccountSaving.set(false);
     }
   }
 
@@ -915,6 +1108,20 @@ export class KeysPage implements OnInit {
     return Array.from(scopes);
   }
 
+  private createAccountForm(): AccountFormGroup {
+    return this.fb.group({
+      name: this.fb.nonNullable.control('', { validators: [Validators.required] }),
+      email: this.fb.nonNullable.control('', {
+        validators: [Validators.required, Validators.email],
+      }),
+      username: this.fb.nonNullable.control('', {
+        validators: [Validators.required, Validators.minLength(3)],
+      }),
+      password: this.fb.nonNullable.control(''),
+      confirmPassword: this.fb.nonNullable.control(''),
+    });
+  }
+
   private createKeyForm(): KeyCreateFormGroup {
     return this.fb.group({
       keyId: this.fb.nonNullable.control('', { validators: [Validators.required] }),
@@ -949,6 +1156,7 @@ export class KeysPage implements OnInit {
     });
     this.createForm.markAsPristine();
     this.createForm.markAsUntouched();
+    this.isCreateCustomVenue.set(false);
   }
 
   private createEditForm(): KeyEditFormGroup {
@@ -988,6 +1196,7 @@ export class KeysPage implements OnInit {
       });
       this.editForm.markAsPristine();
       this.editForm.markAsUntouched();
+      this.isEditCustomVenue.set(false);
       return;
     }
 
@@ -1011,6 +1220,7 @@ export class KeysPage implements OnInit {
 
     this.editForm.markAsPristine();
     this.editForm.markAsUntouched();
+    this.isEditCustomVenue.set(!this.hasKnownVenue(key.venue));
   }
 
   private createDeleteForm(): KeyDeleteFormGroup {
@@ -1029,6 +1239,46 @@ export class KeysPage implements OnInit {
     });
     this.deleteForm.markAsPristine();
     this.deleteForm.markAsUntouched();
+  }
+
+  private computeVenueOptions(): ExchangeDescriptor[] {
+    const map = new Map<string, string>();
+
+    for (const exchange of this.availableExchanges()) {
+      const code = (exchange.code || '').toUpperCase();
+      if (code.length === 0) {
+        continue;
+      }
+      map.set(code, exchange.name || code);
+    }
+
+    for (const venue of this.knownVenues()) {
+      const code = (venue || '').toUpperCase();
+      if (code.length === 0 || map.has(code)) {
+        continue;
+      }
+      map.set(code, code);
+    }
+
+    for (const key of this.keys()) {
+      const code = (key.venue || '').toUpperCase();
+      if (code.length === 0 || map.has(code)) {
+        continue;
+      }
+      map.set(code, key.venue || code);
+    }
+
+    return Array.from(map.entries())
+      .map(([code, name]) => ({ code, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private hasKnownVenue(venue: string | null | undefined): boolean {
+    if (!venue) {
+      return false;
+    }
+    const code = venue.toUpperCase();
+    return this.venueOptions().some((option) => option.code === code);
   }
 
   private formatRelativeTime(date: Date): string {

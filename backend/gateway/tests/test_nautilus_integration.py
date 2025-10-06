@@ -77,12 +77,15 @@ def test_user_management_flow():
         {
             "name": "Quality Analyst",
             "email": "qa.user@example.com",
+            "username": "qa.user",
+            "password": "secure-pass-123",
             "role": "viewer",
         }
     )["user"]
 
     assert created["name"] == "Quality Analyst"
     assert created["email"] == "qa.user@example.com"
+    assert created["username"] == "qa.user"
     assert created["active"] is True
 
     fetched = service.get_user(created["user_id"])["user"]
@@ -102,6 +105,8 @@ def test_user_management_flow():
             {
                 "name": "Duplicate QA",
                 "email": created["email"],
+                "username": "qa.duplicate",
+                "password": "another-pass-123",
                 "role": "viewer",
             }
         )
