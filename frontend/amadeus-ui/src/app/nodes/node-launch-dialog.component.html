@@ -19,7 +19,12 @@
       </ol>
     </nav>
 
-    <form class="launch-dialog__form" [formGroup]="form" (ngSubmit)="submit()">
+    <form
+      class="launch-dialog__form"
+      id="nodeLaunchForm"
+      [formGroup]="form"
+      (ngSubmit)="submit()"
+    >
       <section *ngIf="currentStep() === 0" class="launch-dialog__section" aria-label="Node type selection">
         <div class="option-grid">
           <label *ngFor="let option of nodeTypeOptions" class="option-card" [class.option-card--active]="form.value.nodeType === option.value">
@@ -228,12 +233,34 @@
       <p class="launch-dialog__error" *ngIf="stepError()">{{ stepError() }}</p>
       <p class="launch-dialog__error" *ngIf="submissionError()">{{ submissionError() }}</p>
 
-      <footer class="launch-dialog__footer">
-        <button type="button" class="btn-tertiary" (click)="previousStep()" [disabled]="currentStep() === 0">Back</button>
-        <span class="launch-dialog__spacer"></span>
-        <button type="button" class="btn-secondary" (click)="nextStep()" *ngIf="currentStep() < steps.length - 1">Next</button>
-        <button type="submit" class="btn-primary" *ngIf="currentStep() === steps.length - 1">Launch node</button>
-      </footer>
     </form>
+    <footer class="launch-dialog__footer">
+      <button
+        type="button"
+        class="btn-tertiary"
+        (click)="previousStep()"
+        [disabled]="currentStep() === 0"
+      >
+        Back
+      </button>
+      <div class="launch-dialog__footer-actions">
+        <button
+          type="button"
+          class="btn-secondary"
+          (click)="nextStep()"
+          *ngIf="currentStep() < steps.length - 1"
+        >
+          Next
+        </button>
+        <button
+          type="submit"
+          class="btn-primary"
+          form="nodeLaunchForm"
+          *ngIf="currentStep() === steps.length - 1"
+        >
+          Launch node
+        </button>
+      </div>
+    </footer>
   </div>
 </div>

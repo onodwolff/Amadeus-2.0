@@ -105,6 +105,7 @@ class NodeState:
     lifecycle: List[NodeLifecycleEvent]
     logs: List[NodeLogEntry]
     metrics: List[NodeMetricsSample]
+    engine_handle: Any = None
 
 
 @dataclass
@@ -1693,6 +1694,10 @@ class MockNautilusService:
                 if enums:
                     translated["nautilus_enums"] = enums
 
+        node_reference = payload.get("node_id")
+        if isinstance(node_reference, str) and node_reference.strip():
+            translated["node_id"] = node_reference.strip()
+
         return translated
 
     def _submit_to_engine(self, instructions: Dict[str, Any]) -> None:
@@ -2273,12 +2278,19 @@ class MockNautilusService:
             "keyReferences": [],
             "constraints": {"maxRuntimeMinutes": 480, "autoStopOnError": True},
         }
-        return self._create_node(
+        handle = self._create_node(
             mode="backtest",
             detail=detail
             or f"Backtest node prepared (symbol={symbol}, venue={venue}, bar={bar})",
             config=config_data,
             config_metadata=config_metadata,
+        )
+        return self._launch_engine_for_node(
+            handle,
+            EngineMode.BACKTEST,
+            config_data,
+            detail=handle.detail,
+            metadata=config_metadata,
         )
 
     def start_live(
@@ -2311,11 +2323,18 @@ class MockNautilusService:
             ],
             "constraints": {"autoStopOnError": True},
         }
-        return self._create_node(
+        handle = self._create_node(
             mode="live",
             detail=detail or f"Live node prepared (venue={venue}). Configure adapters to proceed.",
             config=config_data,
             config_metadata=config_metadata,
+        )
+        return self._launch_engine_for_node(
+            handle,
+            EngineMode.LIVE,
+            config_data,
+            detail=handle.detail,
+            metadata=config_metadata,
         )
 
     def stop_node(self, node_id: str) -> NodeHandle:
@@ -2397,68 +2416,134 @@ class MockNautilusService:
             "engine.nodes",
             {"event": "created", "node": self.as_dict(handle)},
         )
+        return handle
+
+    def _persist_node_config(
+        self,
+        node_id: str,
+        mode: EngineMode,
+        config: Dict[str, Any],
+        *,
+        detail: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+    ) -> None:
+        meta_payload: Dict[str, Any] = {}
+        if detail:
+            meta_payload["detail"] = detail
+        if metadata:
+            meta_payload.update({key: value for key, value in metadata.items() if value is not None})
+        else:
+            meta_payload.update({"source": "generated", "format": "json"})
 
         try:
-            engine_mode = EngineMode(mode)
-        except ValueError:
-            engine_mode = None
-
-        if engine_mode is not None:
-            metadata: Dict[str, Any] = {}
-            if detail:
-                metadata["detail"] = detail
-            if config_metadata:
-                metadata.update(
-                    {key: value for key, value in config_metadata.items() if value is not None}
-                )
-            else:
-                metadata.update({"source": "generated", "format": "json"})
-
-            try:
-                self._engine_service.store_node_config(
-                    node_id=node_id,
-                    mode=engine_mode,
-                    config=config,
-                    source=metadata.get("source"),
-                    fmt=metadata.get("format"),
-                    metadata=metadata,
-                )
-            except EngineConfigError as exc:
-                self._append_log(
-                    node_id,
-                    "warning",
-                    f"Failed to persist configuration: {exc}",
-                    source="gateway",
-                )
-
-        if nt is None:
-            handle.status = "error"
-            handle.detail = (
-                "Nautilus core not available. Install package into backend venv."
+            path = self._engine_service.store_node_config(
+                node_id=node_id,
+                mode=mode,
+                config=config,
+                source=meta_payload.get("source"),
+                fmt=meta_payload.get("format"),
+                metadata=meta_payload,
             )
-            handle.updated_at = _utcnow_iso()
-            self._record_lifecycle(node_id, "error", handle.detail)
-            self._append_log(node_id, "error", handle.detail, source="system")
-            self._publish(
-                "engine.nodes",
-                {"event": "error", "node": self.as_dict(handle)},
+        except EngineConfigError as exc:
+            self._append_log(
+                node_id,
+                "warning",
+                f"Failed to persist configuration: {exc}",
+                source="gateway",
             )
-            return handle
+        else:
+            self._append_log(
+                node_id,
+                "debug",
+                f"Configuration persisted to {path.name}",
+                source="gateway",
+            )
 
+    def _mark_node_error(
+        self,
+        node_id: str,
+        message: str,
+        *,
+        source: str = "engine",
+    ) -> NodeHandle:
+        state = self._require_node(node_id)
+        handle = state.handle
+        state.engine_handle = None
+        handle.status = "error"
+        handle.detail = message
+        handle.updated_at = _utcnow_iso()
+        self._record_lifecycle(node_id, "error", message)
+        self._append_log(node_id, "error", message, source=source)
+        self._publish(
+            "engine.nodes",
+            {"event": "error", "node": self.as_dict(handle)},
+        )
+        return handle
+
+    def _mark_node_running(self, node_id: str, message: str) -> NodeHandle:
+        state = self._require_node(node_id)
+        handle = state.handle
         handle.status = "running"
         handle.updated_at = _utcnow_iso()
-        self._record_lifecycle(node_id, "running", "Node started")
+        self._record_lifecycle(node_id, "running", message)
         self._append_log(node_id, "info", "Node entered running state", source="engine")
-        self._append_log(
-            node_id,
-            "debug",
-            f"Configuration loaded: {config.get('strategy', {}).get('name', 'strategy')}",
-            source="engine",
-        )
         self._publish(
             "engine.nodes",
             {"event": "running", "node": self.as_dict(handle)},
         )
+        return handle
+
+    def _launch_engine_for_node(
+        self,
+        handle: NodeHandle,
+        engine_mode: EngineMode,
+        config: Dict[str, Any],
+        *,
+        detail: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+    ) -> NodeHandle:
+        node_id = handle.id
+        self._persist_node_config(
+            node_id,
+            engine_mode,
+            config,
+            detail=detail,
+            metadata=metadata,
+        )
+
+        if not self._engine_service.ensure_package():
+            return self._mark_node_error(
+                node_id,
+                "Nautilus core not available. Install package into backend venv.",
+                source="system",
+            )
+
+        try:
+            engine_handle = self._engine_service.launch_trading_node(
+                mode=engine_mode,
+                config=config,
+                node_id=node_id,
+            )
+        except Exception as exc:
+            return self._mark_node_error(
+                node_id,
+                f"Failed to start Nautilus {engine_mode.value} node: {exc}",
+                source="engine",
+            )
+
+        state = self._require_node(node_id)
+        state.engine_handle = engine_handle
+
+        strategy_name = config.get("strategy", {}).get("name")
+        running_message = f"Nautilus {engine_mode.value} engine running"
+        handle = self._mark_node_running(node_id, running_message)
+        if strategy_name:
+            self._append_log(
+                node_id,
+                "debug",
+                f"Configuration loaded: {strategy_name}",
+                source="engine",
+            )
         return handle
 
     def _record_lifecycle(self, node_id: str, status: str, message: str) -> None:

@@ -13,14 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 import threading
-from typing import Any, AsyncIterator, Dict, Iterable, Optional
+from typing import Any, AsyncIterator, Callable, Dict, Iterable, Optional, Tuple
 
 try:  # pragma: no cover - optional dependency during unit tests
     import nautilus_trader as _nt  # type: ignore
@@ -194,6 +196,8 @@ class NautilusEngineService:
         self._bus = bus or EngineEventBus()
         self._nt = _nt
         self._storage_root = storage_root or self._default_storage_root()
+        self._logger = logging.getLogger(__name__)
+        self._nodes_running: Dict[str, Dict[str, Any]] = {}
 
     @property
     def bus(self) -> EngineEventBus:
@@ -387,6 +391,351 @@ class NautilusEngineService:
 
         document = self.load_config_document(content, fmt=fmt)
         return self.validate_config(document, mode=mode)
+
+    def launch_trading_node(
+        self,
+        mode: EngineMode,
+        config: Dict[str, Any],
+        *,
+        node_id: Optional[str] = None,
+    ) -> Any:
+        """Instantiate and start a Nautilus :class:`TradingNode` in the background."""
+
+        if self._nt is None:
+            raise RuntimeError(
+                "nautilus_trader package is not available – unable to start engine nodes."
+            )
+
+        trading_module = getattr(self._nt, "trading", None)
+        if trading_module is None:
+            raise RuntimeError("nautilus_trader.trading module is not available")
+
+        node_api = getattr(trading_module, "node", None)
+        TradingNode = getattr(node_api, "TradingNode", None)
+        if TradingNode is None:
+            raise RuntimeError("nautilus_trader.trading.node.TradingNode is not available")
+
+        safe_config = deepcopy(config)
+        resolved_node_id = node_id or safe_config.get("id") or f"node-{len(self._nodes_running) + 1}"
+        if resolved_node_id in self._nodes_running:
+            raise RuntimeError(f"Node '{resolved_node_id}' is already running")
+
+        node = TradingNode(config=safe_config)
+
+        self._configure_node_logging(node, resolved_node_id, mode)
+        self._configure_adapters(node, mode, safe_config, resolved_node_id)
+
+        def runner() -> None:
+            try:
+                node.start()
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.exception(
+                    "Nautilus node %s terminated unexpectedly: %s", resolved_node_id, exc
+                )
+
+        thread = threading.Thread(
+            target=runner,
+            name=f"nautilus-node-{resolved_node_id}",
+            daemon=True,
+        )
+        thread.start()
+
+        self._nodes_running[resolved_node_id] = {
+            "node": node,
+            "mode": mode,
+            "thread": thread,
+        }
+
+        try:
+            self.attach_bus_listeners(node, resolved_node_id)
+        except Exception as exc:  # pragma: no cover - best-effort wiring
+            self._logger.debug(
+                "Failed to attach Nautilus event listeners for node %s: %s",
+                resolved_node_id,
+                exc,
+            )
+
+        return node
+
+    def attach_bus_listeners(self, node: Any, node_id: str) -> None:
+        """Bridge Nautilus event callbacks to the gateway event bus."""
+
+        dispatcher = getattr(node, "event_dispatcher", None)
+        if dispatcher is None:
+            self._logger.debug(
+                "Node %s exposes no event dispatcher – skipping bus bridge.", node_id
+            )
+            return
+
+        subscribe_all = getattr(dispatcher, "subscribe_all", None)
+        if not callable(subscribe_all):
+            self._logger.debug(
+                "Nautilus dispatcher for node %s has no subscribe_all method.", node_id
+            )
+            return
+
+        def forward(event: Any) -> None:
+            event_name = getattr(event, "__class__", type(event)).__name__
+            topic, field = self._map_event_to_topic(event_name)
+            payload = {
+                "event": event_name,
+                "node_id": node_id,
+            }
+            serialised = self._serialise_event(event)
+            if isinstance(serialised, dict):
+                payload[field] = serialised
+            else:
+                payload[field] = {"repr": repr(serialised)}
+            self.publish(topic, payload)
+
+        try:
+            subscribe_all(forward)
+        except TypeError:
+            try:
+                subscribe_all(callback=forward)
+            except Exception as exc:  # pragma: no cover - optional API shapes
+                self._logger.debug(
+                    "Unable to subscribe to Nautilus events for node %s: %s", node_id, exc
+                )
+        except Exception as exc:  # pragma: no cover - optional API shapes
+            self._logger.debug(
+                "Unable to subscribe to Nautilus events for node %s: %s", node_id, exc
+            )
+
+    def submit_order(self, instructions: Dict[str, Any]) -> None:
+        """Forward order instructions to a running Nautilus trading node if available."""
+
+        if not self._nodes_running:
+            self._logger.debug("No Nautilus nodes active – skipping order submission.")
+            return
+
+        target_id = instructions.get("node_id")
+        candidates: Iterable[Tuple[str, Dict[str, Any]]]
+        if isinstance(target_id, str) and target_id in self._nodes_running:
+            candidates = [(target_id, self._nodes_running[target_id])]
+        else:
+            candidates = list(self._nodes_running.items())
+
+        payload = {key: value for key, value in instructions.items() if key != "node_id"}
+
+        for node_key, entry in candidates:
+            node_obj = entry.get("node")
+            if node_obj is None:
+                continue
+            submit = (
+                getattr(node_obj, "submit_order", None)
+                or getattr(node_obj, "create_order", None)
+                or getattr(node_obj, "send_order", None)
+            )
+            if not callable(submit):
+                continue
+            try:
+                self._call_with_signature(submit, payload)
+                self._logger.debug("Submitted order via node %s", node_key)
+                return
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.debug(
+                    "Nautilus node %s rejected order submission: %s", node_key, exc
+                )
+
+        self._logger.warning("Unable to submit order via Nautilus – no compatible node")
+
+    def get_historical_bars(
+        self,
+        *,
+        instrument_id: str,
+        granularity: str,
+        limit: Optional[int] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Attempt to retrieve historical bars via the running Nautilus nodes."""
+
+        if not self._nodes_running:
+            return None
+
+        params = {
+            "instrument_id": instrument_id,
+            "granularity": granularity,
+            "limit": limit,
+            "start": start,
+            "end": end,
+        }
+
+        data_attributes = (
+            "data_engine",
+            "data",
+            "data_api",
+            "cache",
+        )
+        method_candidates = (
+            "get_historical_bars",
+            "fetch_historical_bars",
+            "query_bars",
+            "get_bars",
+            "bars",
+        )
+
+        for node_key, entry in self._nodes_running.items():
+            node_obj = entry.get("node")
+            if node_obj is None:
+                continue
+            for attribute in data_attributes:
+                provider = getattr(node_obj, attribute, None)
+                if provider is None:
+                    continue
+                for method_name in method_candidates:
+                    method = getattr(provider, method_name, None)
+                    if not callable(method):
+                        continue
+                    try:
+                        result = self._call_with_signature(method, params)
+                    except Exception as exc:
+                        self._logger.debug(
+                            "Node %s data provider %s.%s failed: %s",
+                            node_key,
+                            attribute,
+                            method_name,
+                            exc,
+                        )
+                        continue
+                    if result is not None:
+                        return result
+        return None
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _configure_node_logging(
+        self,
+        node: Any,
+        node_id: str,
+        mode: EngineMode,
+    ) -> None:
+        if self._nt is None:
+            return
+
+        config_module = getattr(self._nt, "config", None)
+        LoggingConfig = getattr(config_module, "LoggingConfig", None)
+        LogLevel = getattr(config_module, "LogLevel", None)
+        if LoggingConfig is None:
+            return
+
+        try:
+            log_path = self._ensure_node_storage(node_id) / f"{mode.value}.log"
+            kwargs: Dict[str, Any] = {
+                "log_to_stdout": True,
+                "log_to_file": True,
+                "log_file_path": str(log_path),
+            }
+            if LogLevel is not None:
+                kwargs["log_level"] = getattr(LogLevel, "INFO", "INFO")
+            logging_config = LoggingConfig(**kwargs)
+            configure = getattr(node, "configure_logging", None)
+            if callable(configure):
+                configure(logging_config)
+        except Exception as exc:  # pragma: no cover - optional integration
+            self._logger.debug(
+                "Unable to configure Nautilus logging for node %s: %s", node_id, exc
+            )
+
+    def _configure_adapters(
+        self,
+        node: Any,
+        mode: EngineMode,
+        config: Dict[str, Any],
+        node_id: str,
+    ) -> None:
+        data_sources = config.get("dataSources")
+        if not isinstance(data_sources, list):
+            return
+
+        for source in data_sources:
+            if not isinstance(source, dict):
+                continue
+            identifier = str(source.get("id") or "").strip()
+            adapter_type = str(source.get("type") or "").lower()
+            adapter_mode = str(source.get("mode") or "").lower()
+            if not identifier:
+                continue
+
+            self._logger.debug(
+                "Node %s adapter placeholder – id=%s type=%s mode=%s",
+                node_id,
+                identifier,
+                adapter_type or "unknown",
+                adapter_mode or "unknown",
+            )
+
+    def _map_event_to_topic(self, event_name: str) -> Tuple[str, str]:
+        lowered = event_name.lower()
+        if "order" in lowered:
+            return "engine.orders", "order"
+        if any(keyword in lowered for keyword in ("fill", "execution", "trade")):
+            return "engine.executions", "execution"
+        if "position" in lowered or "portfolio" in lowered:
+            return "engine.portfolio", "position"
+        if any(keyword in lowered for keyword in ("risk", "margin", "limit")):
+            return "engine.risk.alerts", "alert"
+        if any(keyword in lowered for keyword in ("lifecycle", "status", "stop", "start")):
+            return "engine.nodes", "lifecycle"
+        return "engine.nautilus.events", "payload"
+
+    def _serialise_event(self, event: Any) -> Dict[str, Any]:
+        if event is None:
+            return {"value": None}
+
+        for attr in ("as_dict", "to_dict", "dict"):
+            candidate = getattr(event, attr, None)
+            if callable(candidate):
+                try:
+                    result = candidate()
+                    if isinstance(result, dict):
+                        return result
+                except Exception:
+                    continue
+        mapping = getattr(event, "__dict__", None)
+        if isinstance(mapping, dict):
+            serialised: Dict[str, Any] = {}
+            for key, value in mapping.items():
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    serialised[key] = value
+                else:
+                    serialised[key] = repr(value)
+            return serialised
+        return {"repr": repr(event)}
+
+    def _call_with_signature(
+        self,
+        method: Callable[..., Any],
+        arguments: Dict[str, Any],
+    ) -> Any:
+        try:
+            signature = inspect.signature(method)
+        except (TypeError, ValueError):
+            signature = None
+
+        if signature is not None:
+            kwargs: Dict[str, Any] = {}
+            for name, parameter in signature.parameters.items():
+                if name == "self":
+                    continue
+                if name in arguments and arguments[name] is not None:
+                    kwargs[name] = arguments[name]
+            if kwargs:
+                return method(**kwargs)
+
+        ordered_keys = ["instrument_id", "granularity", "start", "end", "limit"]
+        ordered_args = [
+            arguments[key]
+            for key in ordered_keys
+            if key in arguments and arguments[key] is not None
+        ]
+        if ordered_args:
+            return method(*ordered_args)
+
+        return method()
 
     def store_node_config(
         self,

@@ -43,6 +43,20 @@
   <div class="node-detail__content">
     <section class="node-detail__metrics">
       <app-node-metrics-panel [nodeId]="current.id"></app-node-metrics-panel>
+      <article class="node-detail__pnl-card" aria-label="Recent PnL trend">
+        <header class="node-detail__pnl-header">
+          <h3>Recent PnL</h3>
+          <span class="node-detail__pnl-value" *ngIf="latestPnl !== null">
+            {{ latestPnl | number: '1.2-2' }}
+          </span>
+        </header>
+        <canvas
+          #pnlChart
+          class="node-detail__pnl-chart"
+          aria-label="Recent profit and loss sparkline"
+        ></canvas>
+        <p class="node-detail__hint" *ngIf="pnlSampleCount < 2">Awaiting live PnL metrics…</p>
+      </article>
     </section>
 
     <section class="node-detail__section">
