@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ from pathlib import Path
 import itertools
 import random
 import sys
+import threading
 import uuid
 from typing import Any, Coroutine, Dict, List, Optional, Tuple, Literal
 
@@ -189,9 +191,9 @@ class OrderRecord:
     linked_order_ids: Optional[List[str]] = None
     parent_order_id: Optional[str] = None
     instructions: Dict[str, Any] = field(default_factory=dict)
-    node_id: Optional[str]
-    created_at: str
-    updated_at: str
+    node_id: Optional[str] = None
+    created_at: str = field(default_factory=_utcnow_iso)
+    updated_at: str = field(default_factory=_utcnow_iso)
 
 
 @dataclass
@@ -213,11 +215,23 @@ class MockNautilusService:
     """Mock orchestration layer used when a live Nautilus engine isn't available."""
 
     def __init__(self, engine: Optional[NautilusEngineService] = None) -> None:
-        self._engine = engine or build_engine_service()
-        self._bus: EngineEventBus = self._engine.bus
+        engine_service = engine or build_engine_service()
+        self._engine_service: NautilusEngineService = engine_service
+        self._bus: EngineEventBus = self._engine_service.bus
         self._mode = "mock"
 
         self._nodes: Dict[str, NodeState] = {}
+        (
+            self._instrument_catalog,
+            self._instrument_price_seed,
+        ) = self._seed_instrument_catalog()
+        self._instrument_index: Dict[str, Dict[str, Any]] = {
+            instrument["instrument_id"]: instrument for instrument in self._instrument_catalog
+        }
+        self._historical_bar_cache: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        self._watchlist_lock = threading.RLock()
+        self._watchlist_path = self._watchlist_store_path()
+        self._watchlist_ids: List[str] = self._load_watchlist()
         self._engine = None  # Optional Nautilus engine handle for live integrations
         self._seed_portfolio_state()
         self._orders: Dict[str, OrderRecord] = {}
@@ -247,7 +261,7 @@ class MockNautilusService:
         return self._bus
 
     def _publish(self, topic: str, payload: Dict[str, Any]) -> None:
-        self._engine.publish(topic, payload)
+        self._engine_service.publish(topic, payload)
 
     def _publish_portfolio(self) -> None:
         snapshot = self.portfolio_snapshot()
@@ -319,6 +333,337 @@ class MockNautilusService:
         """Attach a real NautilusTrader engine implementation."""
 
         self._engine = engine
+
+    # ------------------------------------------------------------------
+    # Market data helpers
+    # ------------------------------------------------------------------
+
+    def _watchlist_store_path(self) -> Path:
+        root = Path(__file__).resolve().parents[2] / ".gateway"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / "watchlist.json"
+
+    def _seed_instrument_catalog(self) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
+        now = datetime.utcnow()
+        futures_expiry = now + timedelta(days=45)
+        alt_expiry = now + timedelta(days=90)
+
+        raw_entries: List[Tuple[Dict[str, Any], float]] = [
+            (
+                {
+                    "instrument_id": "BINANCE:SPOT:BTCUSDT",
+                    "symbol": "BTCUSDT",
+                    "venue": "BINANCE",
+                    "type": "spot",
+                    "base_currency": "BTC",
+                    "quote_currency": "USDT",
+                    "tick_size": 0.1,
+                    "lot_size": 0.0001,
+                    "min_notional": 10.0,
+                },
+                38_950.0,
+            ),
+            (
+                {
+                    "instrument_id": "BINANCE:SPOT:ETHUSDT",
+                    "symbol": "ETHUSDT",
+                    "venue": "BINANCE",
+                    "type": "spot",
+                    "base_currency": "ETH",
+                    "quote_currency": "USDT",
+                    "tick_size": 0.05,
+                    "lot_size": 0.001,
+                    "min_notional": 10.0,
+                },
+                2_205.0,
+            ),
+            (
+                {
+                    "instrument_id": "BINANCE:PERP:BTCUSDC",
+                    "symbol": "BTCUSDC",
+                    "venue": "BINANCE",
+                    "type": "perpetual",
+                    "base_currency": "BTC",
+                    "quote_currency": "USDC",
+                    "tick_size": 0.1,
+                    "lot_size": 0.001,
+                    "contract_size": 1.0,
+                },
+                38_980.0,
+            ),
+            (
+                {
+                    "instrument_id": "COINBASE:SPOT:BTCUSD",
+                    "symbol": "BTCUSD",
+                    "venue": "COINBASE",
+                    "type": "spot",
+                    "base_currency": "BTC",
+                    "quote_currency": "USD",
+                    "tick_size": 0.1,
+                    "lot_size": 0.0001,
+                },
+                38_870.0,
+            ),
+            (
+                {
+                    "instrument_id": "COINBASE:SPOT:ETHUSD",
+                    "symbol": "ETHUSD",
+                    "venue": "COINBASE",
+                    "type": "spot",
+                    "base_currency": "ETH",
+                    "quote_currency": "USD",
+                    "tick_size": 0.05,
+                    "lot_size": 0.001,
+                },
+                2_198.0,
+            ),
+            (
+                {
+                    "instrument_id": "BINANCE:SPOT:SOLUSDT",
+                    "symbol": "SOLUSDT",
+                    "venue": "BINANCE",
+                    "type": "spot",
+                    "base_currency": "SOL",
+                    "quote_currency": "USDT",
+                    "tick_size": 0.001,
+                    "lot_size": 0.01,
+                    "min_notional": 5.0,
+                },
+                95.4,
+            ),
+            (
+                {
+                    "instrument_id": "BINANCE:SPOT:ADAUSDT",
+                    "symbol": "ADAUSDT",
+                    "venue": "BINANCE",
+                    "type": "spot",
+                    "base_currency": "ADA",
+                    "quote_currency": "USDT",
+                    "tick_size": 0.0001,
+                    "lot_size": 1.0,
+                    "min_notional": 5.0,
+                },
+                0.612,
+            ),
+            (
+                {
+                    "instrument_id": "CME:FUT:BTC-QUARTER",
+                    "symbol": "BTC-2024Q3",
+                    "venue": "CME",
+                    "type": "future",
+                    "base_currency": "BTC",
+                    "quote_currency": "USD",
+                    "tick_size": 5.0,
+                    "contract_size": 5.0,
+                    "expiry": _isoformat(futures_expiry),
+                },
+                39_200.0,
+            ),
+            (
+                {
+                    "instrument_id": "DERIBIT:OPT:BTC-50K-CALL",
+                    "symbol": "BTC-50K-C",
+                    "venue": "DERIBIT",
+                    "type": "option",
+                    "base_currency": "BTC",
+                    "quote_currency": "USD",
+                    "tick_size": 1.0,
+                    "contract_size": 1.0,
+                    "expiry": _isoformat(alt_expiry),
+                },
+                2_150.0,
+            ),
+        ]
+
+        catalog: List[Dict[str, Any]] = []
+        seeds: Dict[str, float] = {}
+        for payload, price in raw_entries:
+            catalog.append(dict(payload))
+            seeds[payload["instrument_id"]] = price
+        return catalog, seeds
+
+    def _load_watchlist(self) -> List[str]:
+        try:
+            raw = self._watchlist_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return []
+        except OSError:
+            return []
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(payload, dict):
+            return []
+        favorites = payload.get("favorites")
+        if not isinstance(favorites, list):
+            return []
+        return self._sanitize_watchlist_ids(favorites)
+
+    def _persist_watchlist(self, favorites: List[str]) -> None:
+        payload = {"favorites": favorites, "updated_at": _utcnow_iso()}
+        try:
+            self._watchlist_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    @staticmethod
+    def _sanitize_watchlist_ids(values: List[Any]) -> List[str]:
+        seen: set[str] = set()
+        sanitized: List[str] = []
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            sanitized.append(value)
+        return sanitized
+
+    @staticmethod
+    def _granularity_to_timedelta(granularity: str) -> timedelta:
+        if not granularity:
+            raise ValueError("Granularity is required")
+        unit = granularity[-1]
+        try:
+            amount = int(granularity[:-1])
+        except ValueError as exc:
+            raise ValueError(f"Invalid granularity '{granularity}'") from exc
+        if amount <= 0:
+            raise ValueError("Granularity must be positive")
+
+        if unit == "m":
+            return timedelta(minutes=amount)
+        if unit == "h":
+            return timedelta(hours=amount)
+        if unit == "d":
+            return timedelta(days=amount)
+        if unit == "w":
+            return timedelta(weeks=amount)
+        raise ValueError(f"Unsupported granularity unit '{unit}'")
+
+    @staticmethod
+    def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        if trimmed.endswith("Z"):
+            trimmed = trimmed[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(trimmed)
+        except ValueError as exc:
+            raise ValueError(f"Invalid timestamp '{value}'") from exc
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(tz=None).replace(tzinfo=None)
+        return parsed
+
+    def _resolve_instrument(self, instrument_id: str) -> Dict[str, Any]:
+        instrument = self._instrument_index.get(instrument_id)
+        if instrument is None:
+            raise ValueError(f"Instrument '{instrument_id}' not found")
+        return instrument
+
+    def _price_seed(self, instrument_id: str) -> float:
+        return self._instrument_price_seed.get(instrument_id, 1_000.0)
+
+    def list_instruments(self, venue: Optional[str] = None) -> dict:
+        if venue:
+            venue_key = venue.upper()
+            instruments = [
+                deepcopy(instrument)
+                for instrument in self._instrument_catalog
+                if instrument.get("venue", "").upper() == venue_key
+            ]
+        else:
+            instruments = [deepcopy(instrument) for instrument in self._instrument_catalog]
+        return {"instruments": instruments}
+
+    def get_watchlist(self) -> dict:
+        with self._watchlist_lock:
+            return {"favorites": list(self._watchlist_ids)}
+
+    def update_watchlist(self, favorites: List[str]) -> dict:
+        cleaned = self._sanitize_watchlist_ids(favorites)
+        with self._watchlist_lock:
+            self._watchlist_ids = cleaned
+            self._persist_watchlist(cleaned)
+            return {"favorites": list(self._watchlist_ids)}
+
+    def _generate_historical_series(
+        self,
+        instrument_id: str,
+        granularity: str,
+        limit: int,
+        end: datetime,
+    ) -> List[Dict[str, Any]]:
+        delta = self._granularity_to_timedelta(granularity)
+        start = end - delta * (limit - 1)
+        seed = hash((instrument_id, granularity)) & 0xFFFFFFFF
+        rng = random.Random(seed)
+        price = self._price_seed(instrument_id)
+        bars: List[Dict[str, Any]] = []
+        timestamp = start
+        for _ in range(limit):
+            drift = rng.uniform(-0.012, 0.012)
+            open_price = price
+            close_price = max(0.1, open_price * (1 + drift))
+            high = max(open_price, close_price) * (1 + abs(rng.uniform(0.0, 0.006)))
+            low = min(open_price, close_price) * (1 - abs(rng.uniform(0.0, 0.006)))
+            volume_scale = max(1.0, price / 1_000.0)
+            volume = rng.uniform(50.0, 250.0) * volume_scale
+            bars.append(
+                {
+                    "timestamp": _isoformat(timestamp),
+                    "open": round(open_price, 2),
+                    "high": round(high, 2),
+                    "low": round(low, 2),
+                    "close": round(close_price, 2),
+                    "volume": round(volume, 4),
+                }
+            )
+            price = close_price
+            timestamp += delta
+        return bars
+
+    def get_historical_bars(
+        self,
+        instrument_id: str,
+        granularity: str,
+        limit: Optional[int] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> dict:
+        self._resolve_instrument(instrument_id)
+        delta = self._granularity_to_timedelta(granularity)
+        end_dt = self._parse_timestamp(end) or datetime.utcnow()
+        start_dt = self._parse_timestamp(start)
+
+        if start_dt and start_dt > end_dt:
+            raise ValueError("Start timestamp must be before end timestamp")
+
+        count = limit or 200
+        if start_dt:
+            max_count = int(((end_dt - start_dt).total_seconds() // delta.total_seconds())) + 1
+            count = min(count, max(1, max_count))
+        if count <= 0:
+            raise ValueError("Requested bar count must be positive")
+
+        end_aligned = end_dt.replace(microsecond=0)
+        cache_key = (instrument_id, granularity)
+        bars = self._historical_bar_cache.get(cache_key)
+        if not bars or len(bars) < count:
+            bars = self._generate_historical_series(instrument_id, granularity, count, end_aligned)
+            self._historical_bar_cache[cache_key] = bars
+        else:
+            bars = bars[-count:]
+
+        return {
+            "instrument_id": instrument_id,
+            "granularity": granularity,
+            "bars": [deepcopy(bar) for bar in bars],
+        }
 
     def _seed_portfolio_state(self) -> None:
         now = _utcnow_iso()
@@ -2030,6 +2375,53 @@ class NautilusService:
 
     def risk_alert_stream(self):
         return self.topic_stream("engine.risk.alerts")
+
+    def list_instruments(self, venue: Optional[str] = None) -> dict:
+        engine_method = getattr(self._engine, "list_instruments", None)
+        if callable(engine_method):
+            try:
+                payload = engine_method(venue=venue)
+                if payload:
+                    return payload
+            except Exception:
+                pass
+        return self._mock.list_instruments(venue=venue)
+
+    def get_watchlist(self) -> dict:
+        return self._mock.get_watchlist()
+
+    def update_watchlist(self, favorites: List[str]) -> dict:
+        return self._mock.update_watchlist(favorites)
+
+    def get_historical_bars(
+        self,
+        instrument_id: str,
+        granularity: str,
+        limit: Optional[int] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> dict:
+        engine_method = getattr(self._engine, "get_historical_bars", None)
+        if callable(engine_method):
+            try:
+                payload = engine_method(
+                    instrument_id=instrument_id,
+                    granularity=granularity,
+                    limit=limit,
+                    start=start,
+                    end=end,
+                )
+                if payload:
+                    return payload
+            except Exception:
+                pass
+        return self._mock.get_historical_bars(
+            instrument_id=instrument_id,
+            granularity=granularity,
+            limit=limit,
+            start=start,
+            end=end,
+        )
 
 
 svc = NautilusService()

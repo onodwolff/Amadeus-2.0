@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio, json
 from typing import List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -70,6 +70,10 @@ class OrderCreatePayload(BaseModel):
     parent_order_id: Optional[str] = None
     client_order_id: Optional[str] = None
     node_id: Optional[str] = None
+
+
+class WatchlistUpdatePayload(BaseModel):
+    favorites: List[str] = Field(default_factory=list)
 
 
 def build_launch_detail(payload: NodeLaunchPayload) -> str:
@@ -198,6 +202,47 @@ def export_node_logs(node_id: str):
 @app.get("/portfolio")
 def get_portfolio():
     return svc.portfolio_snapshot()
+
+
+@app.get("/market/instruments")
+def list_instruments(venue: Optional[str] = Query(default=None)):
+    try:
+        return svc.list_instruments(venue=venue)
+    except ValueError as exc:  # pragma: no cover - fastapi exception adapter
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/market/watchlist")
+def get_watchlist():
+    return svc.get_watchlist()
+
+
+@app.put("/market/watchlist")
+def update_watchlist(payload: WatchlistUpdatePayload):
+    return svc.update_watchlist(payload.favorites)
+
+
+@app.get("/market/instruments/{instrument_id}/bars")
+def get_historical_bars(
+    instrument_id: str,
+    *,
+    granularity: str = Query(..., description="Bar granularity such as 1m, 1h or 1d"),
+    limit: Optional[int] = Query(None, ge=1, le=5000),
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+):
+    try:
+        return svc.get_historical_bars(
+            instrument_id=instrument_id,
+            granularity=granularity,
+            limit=limit,
+            start=start,
+            end=end,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @app.get("/portfolio/history")
