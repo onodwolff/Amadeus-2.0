@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import pkgutil
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
@@ -25,7 +26,11 @@ from .nautilus_engine_service import (
     build_engine_service,
 )
 from .persistence import NullStorage, build_storage
+from .state_sync import EngineStateSync
 from .storage import CacheFacade, build_cache
+
+
+LOGGER = logging.getLogger("gateway.nautilus_service")
 
 
 def _utcnow_iso() -> str:
@@ -2991,6 +2996,17 @@ class NautilusService:
         storage: Optional[NullStorage] = None,
     ) -> None:
         self._engine = engine or build_engine_service()
+        self._state_sync: Optional[EngineStateSync] = None
+        try:
+            self._state_sync = EngineStateSync(
+                bus=self._engine.bus,
+                database_url=settings.database_url,
+                redis_url=settings.redis_url,
+            )
+            self._state_sync.start()
+        except Exception:  # pragma: no cover - defensive guard
+            LOGGER.warning("state_sync_start_failed", exc_info=True)
+            self._state_sync = None
         if storage is None:
             if settings.use_mock_services:
                 storage = NullStorage()
