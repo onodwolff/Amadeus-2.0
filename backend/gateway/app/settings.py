@@ -1,7 +1,5 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+"""Compatibility layer for importing application settings."""
 
-class Settings(BaseSettings):
-    env: str = "dev"
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+from backend.gateway.config.settings import settings
 
-settings = Settings()
+__all__ = ["settings"]
