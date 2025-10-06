@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import sys
 from typing import Any
@@ -28,6 +29,64 @@ else:  # pragma: no cover - executed only when structlog is missing at runtime
 
     def _clear_contextvars() -> None:
         """No-op replacement when structlog.contextvars is unavailable."""
+
+
+class _StructlogFallbackLogger:
+    """Minimal structlog-compatible logger when structlog is absent."""
+
+    __slots__ = ("_logger", "_context")
+
+    def __init__(self, logger: logging.Logger, context: dict[str, Any] | None = None) -> None:
+        self._logger = logger
+        self._context = dict(context or {})
+
+    def bind(self, **kwargs: Any) -> "_StructlogFallbackLogger":
+        new_context = self._context.copy()
+        new_context.update(kwargs)
+        return _StructlogFallbackLogger(self._logger, new_context)
+
+    def unbind(self, *keys: str) -> "_StructlogFallbackLogger":
+        new_context = self._context.copy()
+        for key in keys:
+            new_context.pop(key, None)
+        return _StructlogFallbackLogger(self._logger, new_context)
+
+    def new(self, **kwargs: Any) -> "_StructlogFallbackLogger":
+        return _StructlogFallbackLogger(self._logger, kwargs)
+
+    def _serialize(self, event: str, data: dict[str, Any]) -> str:
+        payload: dict[str, Any] = {"event": event, **self._context}
+        if data:
+            payload.update(data)
+        try:
+            return json.dumps(payload, default=str, sort_keys=True)
+        except Exception:  # pragma: no cover - extremely defensive
+            return f"{event} | {payload}"
+
+    def _log(self, level: int, event: str, *, exc_info: bool = False, **kwargs: Any) -> None:
+        message = self._serialize(event, kwargs)
+        self._logger.log(level, message, exc_info=exc_info)
+
+    def debug(self, event: str, **kwargs: Any) -> None:
+        self._log(logging.DEBUG, event, **kwargs)
+
+    def info(self, event: str, **kwargs: Any) -> None:
+        self._log(logging.INFO, event, **kwargs)
+
+    def warning(self, event: str, **kwargs: Any) -> None:
+        self._log(logging.WARNING, event, **kwargs)
+
+    def error(self, event: str, **kwargs: Any) -> None:
+        self._log(logging.ERROR, event, **kwargs)
+
+    def critical(self, event: str, **kwargs: Any) -> None:
+        self._log(logging.CRITICAL, event, **kwargs)
+
+    def exception(self, event: str, **kwargs: Any) -> None:
+        self._log(logging.ERROR, event, exc_info=True, **kwargs)
+
+    def log(self, level: int, event: str, **kwargs: Any) -> None:
+        self._log(level, event, **kwargs)
 
 
 def _resolve_log_level(level: str | int | None) -> int:
@@ -77,7 +136,7 @@ def get_logger(name: str | None = None) -> Any:
 
     if structlog is not None:
         return structlog.get_logger(name)
-    return logging.getLogger(name)
+    return _StructlogFallbackLogger(logging.getLogger(name or __name__))
 
 
 def bind_contextvars(**kwargs: Any) -> None:
