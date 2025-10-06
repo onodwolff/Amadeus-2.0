@@ -489,6 +489,9 @@
   gap: 12px;
   padding: 16px 24px 24px;
   border-top: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.45);
+  flex-shrink: 0;
 }
 
 .dialog__error {

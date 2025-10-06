@@ -3,7 +3,8 @@
     <div>
       <h1 class="nodes-page__title">Nodes</h1>
       <p class="nodes-page__subtitle">
-        Manage Nautilus Trader sessions. Launch new backtests or live trading nodes and monitor their status in real time.
+        Manage Nautilus Trader sessions. Launch new backtests, sandbox nodes, or live trading sessions and monitor their status in
+        real time.
       </p>
     </div>
     <div class="nodes-page__actions">
@@ -14,6 +15,14 @@
         [disabled]="isLaunching()"
       >
         Launch backtest
+      </button>
+      <button
+        type="button"
+        class="btn btn--primary"
+        (click)="openWizard(launchDialog, 'sandbox')"
+        [disabled]="isLaunching()"
+      >
+        Launch sandbox
       </button>
       <button
         type="button"
@@ -77,13 +86,13 @@
                 [class.is-selected]="selectedNodeId() === node.id"
               >
                 <td data-label="ID"><code>{{ node.id }}</code></td>
-                <td data-label="Mode"><span class="tag">{{ node.mode }}</span></td>
+                <td data-label="Mode"><span class="tag">{{ node.mode | titlecase }}</span></td>
                 <td data-label="Status">
                   <span
                     class="status"
                     [class.status--running]="node.status === 'running'"
                     [class.status--stopped]="node.status !== 'running'"
-                    >{{ node.status }}</span
+                    >{{ node.status | titlecase }}</span
                   >
                 </td>
                 <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
@@ -118,10 +127,10 @@
           [isRestarting]="isRestarting()"
           [isStopping]="isStopping()"
           [isDownloadingLogs]="isDownloadingLogs()"
-          (close)="closeDetail()"
-          (restart)="restart(selected)"
-          (stop)="stop(selected)"
-          (downloadLogs)="downloadLogs(selected)"
+          (closed)="closeDetail()"
+          (restartRequested)="restart(selected)"
+          (stopRequested)="stop(selected)"
+          (logsDownloadRequested)="downloadLogs(selected)"
         ></app-node-detail>
       </div>
     </ng-container>
@@ -130,7 +139,7 @@
   <ng-template #emptyState>
     <div class="empty-state">
       <h2>No nodes yet</h2>
-      <p>Launch a new backtest or live session to see it appear here.</p>
+      <p>Launch a backtest, sandbox, or live session to see it appear here.</p>
     </div>
   </ng-template>
 </section>

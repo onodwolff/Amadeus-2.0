@@ -394,7 +394,9 @@
   padding: 16px 28px 24px;
   padding-top: 16px;
   border-top: 1px solid rgba(148, 163, 184, 0.08);
-  background: rgba(15, 23, 42, 0.82);
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 -12px 24px rgba(15, 23, 42, 0.4);
+  flex-shrink: 0;
 }
 
 .launch-dialog__footer-actions {

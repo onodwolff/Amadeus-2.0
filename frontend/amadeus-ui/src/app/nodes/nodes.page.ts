@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { NodesApi } from '../api/clients/nodes.api';
 import { SystemApi } from '../api/clients/system.api';
 import {
@@ -48,11 +48,9 @@ export class NodesPage implements OnInit, OnDestroy {
   readonly isStopping = signal(false);
   readonly isDownloadingLogs = signal(false);
 
-  constructor(
-    private readonly nodesApi: NodesApi,
-    private readonly systemApi: SystemApi,
-    private readonly ws: WsService,
-  ) {}
+  private readonly nodesApi = inject(NodesApi);
+  private readonly systemApi = inject(SystemApi);
+  private readonly ws = inject(WsService);
 
   private logStreamSubscription: Subscription | null = null;
   private logStreamStateSubscription: Subscription | null = null;

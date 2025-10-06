@@ -58,6 +58,11 @@ export class NodeLaunchDialogComponent {
       description: 'Launch a historical simulation with deterministic data replay.',
     },
     {
+      value: 'sandbox',
+      label: 'Sandbox trading node',
+      description: 'Connect to simulated adapters for paper trading workflows.',
+    },
+    {
       value: 'live',
       label: 'Live trading node',
       description: 'Connect to live market adapters and execute strategies in production.',
@@ -106,6 +111,8 @@ export class NodeLaunchDialogComponent {
     { id: 'binance-btcusdt-1m', label: 'Binance BTC/USDT 1m klines', type: 'historical', mode: 'read' },
     { id: 'binance-btcusdt-live', label: 'Binance BTC/USDT live trades', type: 'live', mode: 'read' },
     { id: 'binance-order-entry', label: 'Binance order entry', type: 'live', mode: 'write' },
+    { id: 'binance-sandbox-market', label: 'Binance sandbox market feed', type: 'synthetic', mode: 'read' },
+    { id: 'binance-sandbox-entry', label: 'Binance sandbox order entry', type: 'synthetic', mode: 'write' },
   ];
 
   readonly availableKeys: Array<{ id: string; alias: string; description: string }> = [
@@ -115,7 +122,11 @@ export class NodeLaunchDialogComponent {
   ];
 
   readonly steps = [
-    { key: 'type', title: 'Select node type', description: 'Choose between historical backtesting or live trading execution.' },
+    {
+      key: 'type',
+      title: 'Select node type',
+      description: 'Choose between historical backtesting, sandbox, or live trading execution.',
+    },
     {
       key: 'strategy',
       title: 'Strategy configuration',
@@ -325,6 +336,23 @@ export class NodeLaunchDialogComponent {
       dataSources.push(
         this.createDataSourceGroup({ id: 'binance-order-entry', label: 'Binance order entry', type: 'live', mode: 'write' }),
       );
+    } else if (initialType === 'sandbox') {
+      dataSources.push(
+        this.createDataSourceGroup({
+          id: 'binance-sandbox-market',
+          label: 'Binance sandbox market feed',
+          type: 'synthetic',
+          mode: 'read',
+        }),
+      );
+      dataSources.push(
+        this.createDataSourceGroup({
+          id: 'binance-sandbox-entry',
+          label: 'Binance sandbox order entry',
+          type: 'synthetic',
+          mode: 'write',
+        }),
+      );
     } else {
       dataSources.push(
         this.createDataSourceGroup({ id: 'binance-btcusdt-1m', label: 'Binance BTC/USDT 1m klines', type: 'historical', mode: 'read' }),
@@ -333,13 +361,17 @@ export class NodeLaunchDialogComponent {
 
     const keyRefs = this.keyReferencesArray();
     keyRefs.clear();
-    keyRefs.push(this.createKeyReferenceGroup({ alias: 'Binance primary key', keyId: 'binance-primary', required: true }));
+    if (initialType === 'sandbox') {
+      keyRefs.push(this.createKeyReferenceGroup({ alias: 'Paper trading sandbox', keyId: 'paper-trading', required: true }));
+    } else {
+      keyRefs.push(this.createKeyReferenceGroup({ alias: 'Binance primary key', keyId: 'binance-primary', required: true }));
+    }
 
     this.form.controls.constraints.patchValue({
-      maxRuntimeMinutes: initialType === 'live' ? null : 480,
+      maxRuntimeMinutes: initialType === 'live' ? null : initialType === 'sandbox' ? 720 : 480,
       maxDrawdownPercent: 20,
       autoStopOnError: true,
-      concurrencyLimit: initialType === 'live' ? 1 : null,
+      concurrencyLimit: initialType === 'live' ? 1 : initialType === 'sandbox' ? 1 : null,
     });
   }
 
