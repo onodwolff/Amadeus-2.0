@@ -102,6 +102,31 @@ class EngineNodeLaunch:
     config: Dict[str, Any]
 
 
+@dataclass
+class EngineNodeHandle:
+    """Handle referencing a Nautilus trading node running in the background."""
+
+    id: str
+    mode: EngineMode
+    node: Any
+    thread: threading.Thread
+    user_id: Optional[str]
+    started_at: datetime
+    config_version: int
+
+    def summary(self) -> Dict[str, Any]:
+        """Return a serialisable snapshot describing the running node."""
+
+        return {
+            "id": self.id,
+            "mode": self.mode.value,
+            "user_id": self.user_id,
+            "started_at": self.started_at.isoformat().replace("+00:00", "Z"),
+            "alive": self.thread.is_alive(),
+            "config_version": self.config_version,
+        }
+
+
 class EngineEventBus:
     """Thread-safe asynchronous pub/sub helper for gateway telemetry."""
 
@@ -228,7 +253,7 @@ class NautilusEngineService:
         self._nt = nt
         self._storage_root = storage_root or self._default_storage_root()
         self._logger = logging.getLogger(__name__)
-        self._nodes_running: Dict[str, Dict[str, Any]] = {}
+        self._nodes_running: Dict[str, EngineNodeHandle] = {}
         self._config_versions: Dict[str, int] = {}
 
     @property
@@ -468,8 +493,14 @@ class NautilusEngineService:
         user_id: Optional[str] = None,
         *,
         node_id: Optional[str] = None,
-    ) -> Any:
-        """Instantiate and start a Nautilus :class:`TradingNode` in the background."""
+    ) -> EngineNodeHandle:
+        """Instantiate and start a Nautilus :class:`TradingNode` in the background.
+
+        The returned :class:`EngineNodeHandle` exposes metadata about the running
+        node, including the owning thread and the config version used for the
+        launch.  Callers may store the handle to perform orchestration tasks
+        without holding a strong reference to the underlying ``TradingNode``.
+        """
 
         if self._nt is None:
             raise RuntimeError(
@@ -524,12 +555,17 @@ class NautilusEngineService:
         )
         thread.start()
 
-        self._nodes_running[resolved_node_id] = {
-            "node": node,
-            "mode": mode,
-            "thread": thread,
-            "user_id": user_id,
-        }
+        handle = EngineNodeHandle(
+            id=resolved_node_id,
+            mode=mode,
+            node=node,
+            thread=thread,
+            user_id=user_id,
+            started_at=datetime.now(tz=timezone.utc),
+            config_version=version,
+        )
+
+        self._nodes_running[resolved_node_id] = handle
 
         try:
             self.attach_bus_listeners(node, resolved_node_id)
@@ -540,7 +576,7 @@ class NautilusEngineService:
                 exc,
             )
 
-        return node
+        return handle
 
     def attach_bus_listeners(self, node: Any, node_id: str) -> None:
         """Bridge Nautilus event callbacks to the gateway event bus."""
@@ -700,7 +736,7 @@ class NautilusEngineService:
             return
 
         target_id = instructions.get("node_id")
-        candidates: Iterable[Tuple[str, Dict[str, Any]]]
+        candidates: Iterable[Tuple[str, EngineNodeHandle]]
         if isinstance(target_id, str) and target_id in self._nodes_running:
             candidates = [(target_id, self._nodes_running[target_id])]
         else:
@@ -709,7 +745,7 @@ class NautilusEngineService:
         payload = {key: value for key, value in instructions.items() if key != "node_id"}
 
         for node_key, entry in candidates:
-            node_obj = entry.get("node")
+            node_obj = entry.node
             if node_obj is None:
                 continue
             submit = (
@@ -738,7 +774,7 @@ class NautilusEngineService:
             return
 
         target_id = instructions.get("node_id")
-        candidates: Iterable[Tuple[str, Dict[str, Any]]]
+        candidates: Iterable[Tuple[str, EngineNodeHandle]]
         if isinstance(target_id, str) and target_id in self._nodes_running:
             candidates = [(target_id, self._nodes_running[target_id])]
         else:
@@ -747,7 +783,7 @@ class NautilusEngineService:
         payload = {key: value for key, value in instructions.items() if key != "node_id"}
 
         for node_key, entry in candidates:
-            node_obj = entry.get("node")
+            node_obj = entry.node
             if node_obj is None:
                 continue
             cancel = (
@@ -809,7 +845,7 @@ class NautilusEngineService:
         )
 
         for node_key, entry in self._nodes_running.items():
-            node_obj = entry.get("node")
+            node_obj = entry.node
             if node_obj is None:
                 continue
             for attribute in data_attributes:

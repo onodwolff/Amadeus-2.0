@@ -2484,6 +2484,16 @@ class MockNautilusService:
         state = self._require_node(node_id)
         state.engine_handle = engine_handle
 
+        LOGGER.debug(
+            "nautilus_node_launched",
+            extra={
+                "node_id": node_id,
+                "mode": engine_mode.value,
+                "thread": getattr(engine_handle.thread, "name", "unknown"),
+                "config_version": getattr(engine_handle, "config_version", None),
+            },
+        )
+
         running_message = f"Nautilus {engine_mode.value} engine running"
         handle = self._mark_node_running(node_id, running_message)
 
@@ -2549,6 +2559,16 @@ class MockNautilusService:
 
         state = self._require_node(node_id)
         state.engine_handle = engine_handle
+
+        LOGGER.debug(
+            "nautilus_node_launched",
+            extra={
+                "node_id": node_id,
+                "mode": engine_mode.value,
+                "thread": getattr(engine_handle.thread, "name", "unknown"),
+                "config_version": getattr(engine_handle, "config_version", None),
+            },
+        )
 
         running_message = f"Nautilus {engine_mode.value} engine running"
         handle = self._mark_node_running(node_id, running_message)
