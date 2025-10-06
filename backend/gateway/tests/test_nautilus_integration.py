@@ -105,3 +105,26 @@ def test_user_management_flow():
                 "role": "viewer",
             }
         )
+
+
+def test_engine_empty_payloads_are_not_overridden():
+    engine = build_engine_service()
+    service = NautilusService(engine=engine)
+
+    engine.list_instruments = lambda venue=None: {"instruments": []}
+    engine.get_historical_bars = lambda **kwargs: {"bars": []}
+
+    def fail_list_instruments(**kwargs):
+        raise AssertionError("mock list_instruments should not be used")
+
+    def fail_get_historical_bars(**kwargs):
+        raise AssertionError("mock get_historical_bars should not be used")
+
+    service._mock.list_instruments = fail_list_instruments
+    service._mock.get_historical_bars = fail_get_historical_bars
+
+    assert service.list_instruments() == {"instruments": []}
+    assert service.get_historical_bars(
+        instrument_id="BTCUSDT",
+        granularity="1m",
+    ) == {"bars": []}

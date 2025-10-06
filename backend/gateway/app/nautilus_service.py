@@ -2542,7 +2542,12 @@ class MockNautilusService:
 
 
 class NautilusService:
-    """Facade which delegates to the real engine or mock service."""
+    """Facade which delegates to the real engine or mock service.
+
+    Only a literal ``None`` return value from the engine should trigger
+    delegation to the mock fallback; empty payloads are considered valid
+    engine responses and must be passed through unchanged.
+    """
 
     def __init__(self, engine: Optional[NautilusEngineService] = None) -> None:
         self._engine = engine or build_engine_service()
@@ -2592,7 +2597,8 @@ class NautilusService:
         if callable(engine_method):
             try:
                 payload = engine_method(venue=venue)
-                if payload:
+                # Only ``None`` indicates the engine could not provide data.
+                if payload is not None:
                     return payload
             except Exception:
                 pass
@@ -2622,7 +2628,8 @@ class NautilusService:
                     start=start,
                     end=end,
                 )
-                if payload:
+                # Only ``None`` indicates the engine could not provide data.
+                if payload is not None:
                     return payload
             except Exception:
                 pass
