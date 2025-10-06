@@ -317,7 +317,6 @@ export class OrderTicketComponent implements OnInit {
     const type = (value.type ?? 'market').toLowerCase() as OrderType;
     const quantity = Number(value.quantity);
     const price = value.price != null ? Number(value.price) : null;
-    const limitOffset = this.parseLimitOffset(value.limit_offset);
     const tif = (value.time_in_force ?? '').trim().toUpperCase();
     const expireTime = (value.expire_time ?? '').trim();
     const contingency = (value.contingency_type ?? '').toUpperCase();
@@ -503,7 +502,6 @@ export class OrderTicketComponent implements OnInit {
       return null;
     }
     const price = raw.price != null ? Number(raw.price) : null;
-    const limitOffset = this.parseLimitOffset(raw.limit_offset);
     const symbol = (raw.symbol ?? '').trim().toUpperCase();
     const venue = (raw.venue ?? '').trim().toUpperCase();
     const type = (raw.type ?? 'market').toLowerCase() as OrderType;
