@@ -21,6 +21,7 @@ import {
 } from '../ws';
 import { PortfolioMetricsPanelComponent } from './components/metrics-panel/portfolio-metrics-panel.component';
 import { PortfolioMetricsStore } from './components/metrics-panel/portfolio-metrics.store';
+import { PositionSparklineComponent } from './components/position-sparkline/position-sparkline.component';
 
 interface FilterableEntity {
   venue?: string | null;
@@ -31,7 +32,7 @@ interface FilterableEntity {
 @Component({
   standalone: true,
   selector: 'app-portfolio-page',
-  imports: [CommonModule, FormsModule, PortfolioMetricsPanelComponent],
+  imports: [CommonModule, FormsModule, PortfolioMetricsPanelComponent, PositionSparklineComponent],
   templateUrl: './portfolio.page.html',
   styleUrls: ['./portfolio.page.scss'],
   providers: [PortfolioMetricsStore],
@@ -48,6 +49,7 @@ export class PortfolioPage implements OnInit {
   readonly balances = signal<Balance[]>([]);
   readonly positions = signal<Position[]>([]);
   readonly movements = signal<CashMovement[]>([]);
+  readonly positionHistory = signal<Record<string, readonly number[]>>({});
 
   readonly balancesStreamState = signal<WsConnectionState>('connecting');
   readonly positionsStreamState = signal<WsConnectionState>('connecting');
@@ -99,6 +101,15 @@ export class PortfolioPage implements OnInit {
   readonly hasPositions = computed(() => this.filteredPositions().length > 0);
   readonly hasMovements = computed(() => this.filteredMovements().length > 0);
 
+  positionSparkline(position: Position): readonly number[] {
+    const key = this.buildPositionKey(position);
+    if (!key) {
+      return [];
+    }
+    const history = this.positionHistory();
+    return history[key] ?? [];
+  }
+
   onVenueChange(value: string): void {
     this.selectedVenue.set(value || null);
   }
@@ -126,6 +137,7 @@ export class PortfolioPage implements OnInit {
         this.balances.set(portfolio.balances ?? []);
         this.positions.set(portfolio.positions ?? []);
         this.movements.set(portfolio.cash_movements ?? []);
+        this.updatePositionHistory(portfolio.positions ?? []);
         this.metricsStore.ingestPositions(
           portfolio.positions ?? [],
           portfolio.timestamp,
@@ -162,12 +174,14 @@ export class PortfolioPage implements OnInit {
       next: (payload: PortfolioPositionsStreamMessage) => {
         if (Array.isArray(payload?.positions)) {
           this.positions.set(payload.positions);
+          this.updatePositionHistory(payload.positions);
           this.metricsStore.ingestPositions(
             payload.positions,
             payload.timestamp,
             payload.equity_value,
           );
         } else if (payload) {
+          this.updatePositionHistory(this.positions());
           this.metricsStore.ingestPositions(
             this.positions(),
             payload.timestamp,
@@ -252,5 +266,70 @@ export class PortfolioPage implements OnInit {
       return false;
     }
     return true;
+  }
+
+  private updatePositionHistory(positions: readonly Position[] | null | undefined): void {
+    if (!positions) {
+      return;
+    }
+    const maxPoints = 180;
+    const current = this.positionHistory();
+    const next: Record<string, readonly number[]> = { ...current };
+    const seen = new Set<string>();
+
+    for (const position of positions) {
+      const key = this.buildPositionKey(position);
+      if (!key) {
+        continue;
+      }
+      seen.add(key);
+      const pnlCandidate = position.unrealized_pnl ?? position.realized_pnl ?? 0;
+      const pnl = Number(pnlCandidate);
+      if (!Number.isFinite(pnl)) {
+        continue;
+      }
+      const history = next[key] ? [...next[key]] : [];
+      history.push(Number(pnl.toFixed(2)));
+      next[key] = history.length > maxPoints ? history.slice(-maxPoints) : history;
+    }
+
+    for (const key of Object.keys(next)) {
+      if (!seen.has(key)) {
+        delete next[key];
+      }
+    }
+
+    const hasChanged =
+      Object.keys(current).length !== Object.keys(next).length ||
+      Object.entries(next).some(([key, value]) => {
+        const existing = current[key];
+        if (!existing || existing.length !== value.length) {
+          return true;
+        }
+        for (let index = 0; index < value.length; index += 1) {
+          if (existing[index] !== value[index]) {
+            return true;
+          }
+        }
+        return false;
+      });
+
+    if (hasChanged) {
+      this.positionHistory.set(next);
+    }
+  }
+
+  private buildPositionKey(position: Position | null | undefined): string | null {
+    if (!position) {
+      return null;
+    }
+    if (position.position_id) {
+      return position.position_id;
+    }
+    const symbol = position.symbol ?? '';
+    const account = position.account_id ?? '';
+    const venue = position.venue ?? '';
+    const composite = [symbol, account, venue].filter((value) => value).join('::');
+    return composite || null;
   }
 }

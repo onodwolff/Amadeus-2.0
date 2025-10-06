@@ -123,6 +123,7 @@
               <th class="numeric">Mark price</th>
               <th class="numeric">Unrealized P&amp;L</th>
               <th class="numeric">Realized P&amp;L</th>
+              <th class="sparkline">Trend</th>
               <th class="numeric">Margin</th>
               <th>Updated</th>
             </tr>
@@ -146,6 +147,11 @@
               </td>
               <td class="numeric pnl" [attr.data-positive]="(position.realized_pnl ?? 0) >= 0">
                 {{ (position.realized_pnl ?? 0) | number: '1.2-2' }}
+              </td>
+              <td class="sparkline-cell">
+                <app-position-sparkline
+                  [values]="positionSparkline(position)"
+                ></app-position-sparkline>
               </td>
               <td class="numeric">{{ (position.margin_used ?? 0) | number: '1.2-2' }}</td>
               <td>{{ position.updated_at ? (position.updated_at | date: 'short') : '—' }}</td>

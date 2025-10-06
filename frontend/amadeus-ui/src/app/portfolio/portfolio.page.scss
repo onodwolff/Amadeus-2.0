@@ -184,9 +184,22 @@ th {
   letter-spacing: 0.06em;
 }
 
+th.sparkline {
+  text-align: center;
+  width: 140px;
+}
+
 .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.sparkline-cell {
+  text-align: center;
+}
+
+.sparkline-cell app-position-sparkline {
+  display: inline-block;
 }
 
 .primary {
