@@ -60,3 +60,48 @@ async def test_orders_stream_tracks_new_order():
     assert payload["order"]["venue"] == "BINANCE"
 
     await order_stream.aclose()
+
+
+def test_user_management_flow():
+    loop = asyncio.get_event_loop()
+    bus = EngineEventBus(loop=loop)
+    engine = build_engine_service(bus=bus)
+    service = NautilusService(engine=engine)
+
+    listing = service.list_users()
+    assert "users" in listing
+    existing_count = len(listing["users"])
+    assert existing_count >= 1
+
+    created = service.create_user(
+        {
+            "name": "Quality Analyst",
+            "email": "qa.user@example.com",
+            "role": "viewer",
+        }
+    )["user"]
+
+    assert created["name"] == "Quality Analyst"
+    assert created["email"] == "qa.user@example.com"
+    assert created["active"] is True
+
+    fetched = service.get_user(created["user_id"])["user"]
+    assert fetched["user_id"] == created["user_id"]
+    assert fetched["created_at"] == created["created_at"]
+
+    updated = service.update_user(
+        created["user_id"],
+        {"name": "QA Lead", "active": False},
+    )["user"]
+    assert updated["name"] == "QA Lead"
+    assert updated["active"] is False
+    assert updated["updated_at"] != created["updated_at"]
+
+    with pytest.raises(ValueError):
+        service.create_user(
+            {
+                "name": "Duplicate QA",
+                "email": created["email"],
+                "role": "viewer",
+            }
+        )
