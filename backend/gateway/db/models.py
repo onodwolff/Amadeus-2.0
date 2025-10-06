@@ -1,171 +1,556 @@
-"""SQLAlchemy ORM models describing the gateway persistent state."""
+"""SQLAlchemy ORM models for the gateway data store."""
 from __future__ import annotations
 
+import enum
 from datetime import datetime
-from typing import Any, Dict, Optional
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     DateTime,
     Enum,
-    Float,
     ForeignKey,
+    Index,
     Integer,
-    JSON,
+    LargeBinary,
+    Numeric,
     String,
     Text,
+    UniqueConstraint,
+    func,
+    text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-try:  # pragma: no cover - support running from backend/ directory
-    from gateway.app.nautilus_engine_service import EngineMode
-except ModuleNotFoundError:  # pragma: no cover - support running from backend/
-    from backend.gateway.app.nautilus_engine_service import EngineMode  # type: ignore
 
 from .base import Base
 
 
-class Instrument(Base):
-    __tablename__ = "instruments"
+class UserRole(str, enum.Enum):
+    """Role associated with a user account."""
 
-    instrument_id: Mapped[str] = mapped_column(String(120), primary_key=True)
-    venue: Mapped[str] = mapped_column(String(60), index=True)
-    symbol: Mapped[str] = mapped_column(String(120), index=True)
-    raw: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
+    ADMIN = "admin"
+    MEMBER = "member"
+    VIEWER = "viewer"
+
+
+class NodeMode(str, enum.Enum):
+    """Runtime mode of a node."""
+
+    BACKTEST = "backtest"
+    SANDBOX = "sandbox"
+    LIVE = "live"
+
+
+class NodeStatus(str, enum.Enum):
+    """Lifecycle status of a node."""
+
+    CREATED = "created"
+    RUNNING = "running"
+    STOPPED = "stopped"
+    ERROR = "error"
+
+
+class ConfigSource(str, enum.Enum):
+    """Source of a configuration payload."""
+
+    UPLOAD = "upload"
+    TEMPLATE = "template"
+    UI = "ui"
+
+
+class ConfigFormat(str, enum.Enum):
+    """Encoding format of configuration content."""
+
+    YAML = "yaml"
+    JSON = "json"
+
+
+class PositionMode(str, enum.Enum):
+    """Position accounting mode."""
+
+    NET = "net"
+    HEDGE = "hedge"
+
+
+class OrderStatus(str, enum.Enum):
+    """Status of an order."""
+
+    NEW = "new"
+    PENDING = "pending"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    CANCELED = "canceled"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    FAILED = "failed"
+
+
+JSON_EMPTY_OBJECT = text("'{}'::jsonb")
+JSON_EMPTY_ARRAY = text("'[]'::jsonb")
+
+
+class User(Base):
+    """Registered user of the platform."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(255))
+    pwd_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, name="user_role"),
+        nullable=False,
+        default=UserRole.MEMBER,
+        server_default=UserRole.MEMBER.value,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    api_keys: Mapped[List["ApiKey"]] = relationship(
+        "ApiKey", back_populates="user", cascade="all, delete-orphan"
+    )
+    nodes: Mapped[List["Node"]] = relationship(
+        "Node", back_populates="user", cascade="all, delete-orphan"
+    )
+    risk_limits: Mapped[List["RiskLimit"]] = relationship(
+        "RiskLimit", back_populates="user", cascade="all, delete-orphan"
+    )
+    watchlists: Mapped[List["Watchlist"]] = relationship(
+        "Watchlist", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class ApiKey(Base):
+    """API key material issued to a user."""
+
+    __tablename__ = "api_keys"
+    __table_args__ = (
+        Index("ix_api_keys_user_id", "user_id"),
+        Index("ix_api_keys_created_at", "created_at"),
+        UniqueConstraint("key_id", name="uq_api_keys_key_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    venue: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[Optional[str]] = mapped_column(String(120))
+    key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    api_key_masked: Mapped[str] = mapped_column(String(128), nullable=False)
+    secret_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    scopes: Mapped[List[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=JSON_EMPTY_ARRAY,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship("User", back_populates="api_keys")
 
 
 class Node(Base):
+    """Execution node launched for a user strategy."""
+
     __tablename__ = "nodes"
-
-    node_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    mode: Mapped[EngineMode] = mapped_column(Enum(EngineMode), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    detail: Mapped[Optional[str]] = mapped_column(Text)
-    metrics: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    __table_args__ = (
+        Index("ix_nodes_user_id", "user_id"),
+        Index("ix_nodes_mode", "mode"),
+        Index("ix_nodes_status", "status"),
     )
-
-    lifecycle_events: Mapped[list["NodeLifecycle"]] = relationship(
-        "NodeLifecycle", cascade="all, delete-orphan", back_populates="node"
-    )
-    logs: Mapped[list["NodeLog"]] = relationship(
-        "NodeLog", cascade="all, delete-orphan", back_populates="node"
-    )
-    metrics_series: Mapped[list["NodeMetric"]] = relationship(
-        "NodeMetric", cascade="all, delete-orphan", back_populates="node"
-    )
-
-
-class NodeLifecycle(Base):
-    __tablename__ = "node_lifecycle"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.node_id", ondelete="CASCADE"), index=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    message: Mapped[str] = mapped_column(Text, nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    mode: Mapped[NodeMode] = mapped_column(
+        Enum(NodeMode, name="node_mode"), nullable=False
+    )
+    strategy_id: Mapped[Optional[str]] = mapped_column(String(128))
+    status: Mapped[NodeStatus] = mapped_column(
+        Enum(NodeStatus, name="node_status"),
+        nullable=False,
+        default=NodeStatus.CREATED,
+        server_default=NodeStatus.CREATED.value,
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    stopped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
 
-    node: Mapped[Node] = relationship("Node", back_populates="lifecycle_events")
+    user: Mapped[User] = relationship("User", back_populates="nodes")
+    configs: Mapped[List["Config"]] = relationship(
+        "Config", back_populates="node", cascade="all, delete-orphan"
+    )
+    orders: Mapped[List["Order"]] = relationship(
+        "Order", back_populates="node", cascade="all, delete-orphan"
+    )
+    positions: Mapped[List["Position"]] = relationship(
+        "Position", back_populates="node", cascade="all, delete-orphan"
+    )
+    balances: Mapped[List["Balance"]] = relationship(
+        "Balance", back_populates="node", cascade="all, delete-orphan"
+    )
+    risk_alerts: Mapped[List["RiskAlert"]] = relationship(
+        "RiskAlert", back_populates="node", cascade="all, delete-orphan"
+    )
+    logs_index: Mapped[List["LogsIndex"]] = relationship(
+        "LogsIndex", back_populates="node", cascade="all, delete-orphan"
+    )
+    equity_history: Mapped[List["EquityHistory"]] = relationship(
+        "EquityHistory", back_populates="node", cascade="all, delete-orphan"
+    )
 
 
-class NodeLog(Base):
-    __tablename__ = "node_logs"
+class Config(Base):
+    """Versioned configuration attached to a node."""
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.node_id", ondelete="CASCADE"), index=True)
-    level: Mapped[str] = mapped_column(String(16), nullable=False)
-    message: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(String(64), nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    __tablename__ = "configs"
+    __table_args__ = (
+        Index("ix_configs_node_id", "node_id"),
+        Index("ix_configs_created_at", "created_at"),
+        UniqueConstraint("node_id", "version", name="uq_configs_node_version"),
+    )
 
-    node: Mapped[Node] = relationship("Node", back_populates="logs")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[ConfigSource] = mapped_column(
+        Enum(ConfigSource, name="config_source"), nullable=False
+    )
+    format: Mapped[ConfigFormat] = mapped_column(
+        Enum(ConfigFormat, name="config_format"), nullable=False
+    )
+    content: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
-
-class NodeMetric(Base):
-    __tablename__ = "node_metrics"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.node_id", ondelete="CASCADE"), index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
-    pnl: Mapped[float] = mapped_column(Float, default=0.0)
-    latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
-    cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
-    memory_mb: Mapped[float] = mapped_column(Float, default=0.0)
-
-    node: Mapped[Node] = relationship("Node", back_populates="metrics_series")
+    node: Mapped[Node] = relationship("Node", back_populates="configs")
 
 
 class Order(Base):
-    __tablename__ = "orders"
+    """Order submitted by a node."""
 
-    order_id: Mapped[str] = mapped_column(String(80), primary_key=True)
-    client_order_id: Mapped[Optional[str]] = mapped_column(String(80), index=True)
-    venue_order_id: Mapped[Optional[str]] = mapped_column(String(80), index=True)
-    symbol: Mapped[str] = mapped_column(String(120), index=True)
-    venue: Mapped[str] = mapped_column(String(60), index=True)
-    side: Mapped[str] = mapped_column(String(16))
-    type: Mapped[str] = mapped_column(String(16))
-    quantity: Mapped[float] = mapped_column(Float)
-    filled_quantity: Mapped[float] = mapped_column(Float, default=0.0)
-    price: Mapped[Optional[float]] = mapped_column(Float)
-    average_price: Mapped[Optional[float]] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(32))
-    time_in_force: Mapped[Optional[str]] = mapped_column(String(16))
-    expire_time: Mapped[Optional[str]] = mapped_column(String(64))
-    instructions: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
-    node_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    __tablename__ = "orders"
+    __table_args__ = (
+        Index("ix_orders_node_id", "node_id"),
+        Index("ix_orders_client_order_id", "client_order_id"),
+        Index("ix_orders_instrument", "instrument"),
+        Index("ix_orders_created_at", "created_at"),
     )
 
-    executions: Mapped[list["Execution"]] = relationship(
-        "Execution", cascade="all, delete-orphan", back_populates="order"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    client_order_id: Mapped[Optional[str]] = mapped_column(String(128))
+    instrument: Mapped[str] = mapped_column(String(120), nullable=False)
+    side: Mapped[str] = mapped_column(String(16), nullable=False)
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    tif: Mapped[Optional[str]] = mapped_column(String(16))
+    post_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reduce_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    price: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=28, scale=8))
+    qty: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+    status: Mapped[OrderStatus] = mapped_column(
+        Enum(OrderStatus, name="order_status"),
+        nullable=False,
+        default=OrderStatus.NEW,
+        server_default=OrderStatus.NEW.value,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    extra: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+
+    node: Mapped[Node] = relationship("Node", back_populates="orders")
+    executions: Mapped[List["Execution"]] = relationship(
+        "Execution", back_populates="order", cascade="all, delete-orphan"
     )
 
 
 class Execution(Base):
-    __tablename__ = "executions"
+    """Execution information linked to an order."""
 
-    execution_id: Mapped[str] = mapped_column(String(80), primary_key=True)
-    order_id: Mapped[str] = mapped_column(ForeignKey("orders.order_id", ondelete="CASCADE"), index=True)
-    symbol: Mapped[str] = mapped_column(String(120), index=True)
-    venue: Mapped[str] = mapped_column(String(60), index=True)
-    price: Mapped[float] = mapped_column(Float)
-    quantity: Mapped[float] = mapped_column(Float)
-    side: Mapped[str] = mapped_column(String(16))
-    liquidity: Mapped[Optional[str]] = mapped_column(String(16))
-    fees: Mapped[float] = mapped_column(Float, default=0.0)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
-    node_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    __tablename__ = "executions"
+    __table_args__ = (
+        Index("ix_executions_order_id", "order_id"),
+        Index("ix_executions_trade_id", "trade_id", unique=True),
+        Index("ix_executions_ts", "ts"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
+    )
+    trade_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+    qty: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+    fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=28, scale=8))
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    extra: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
 
     order: Mapped[Order] = relationship("Order", back_populates="executions")
 
 
-class RiskAlertRecord(Base):
-    __tablename__ = "risk_alerts"
+class Position(Base):
+    """Current position for an instrument on a node."""
 
-    alert_id: Mapped[str] = mapped_column(String(80), primary_key=True)
-    category: Mapped[str] = mapped_column(String(32), index=True)
-    severity: Mapped[str] = mapped_column(String(16), index=True)
-    title: Mapped[str] = mapped_column(String(120))
-    message: Mapped[str] = mapped_column(Text)
-    node_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
-    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
-    context: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    __tablename__ = "positions"
+    __table_args__ = (
+        Index("ix_positions_node_id", "node_id"),
+        Index("ix_positions_updated_at", "updated_at"),
+        UniqueConstraint("node_id", "instrument", "mode", name="uq_positions_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    instrument: Mapped[str] = mapped_column(String(120), nullable=False)
+    mode: Mapped[PositionMode] = mapped_column(
+        Enum(PositionMode, name="position_mode"), nullable=False
+    )
+    qty: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+    avg_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=28, scale=8))
+    unrealized_pnl: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(precision=28, scale=8)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    node: Mapped[Node] = relationship("Node", back_populates="positions")
+
+
+class Balance(Base):
+    """Account balance captured for a node."""
+
+    __tablename__ = "balances"
+    __table_args__ = (
+        Index("ix_balances_node_id", "node_id"),
+        UniqueConstraint("node_id", "account", "asset", name="uq_balances_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    account: Mapped[str] = mapped_column(String(120), nullable=False)
+    asset: Mapped[str] = mapped_column(String(64), nullable=False)
+    free: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+    locked: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    node: Mapped[Node] = relationship("Node", back_populates="balances")
+
+
+class RiskLimit(Base):
+    """Risk constraint configuration for a user or node."""
+
+    __tablename__ = "risk_limits"
+    __table_args__ = (
+        Index("ix_risk_limits_user_id", "user_id"),
+        Index("ix_risk_limits_node_id", "node_id"),
+        UniqueConstraint("user_id", "node_id", name="uq_risk_limits_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    node_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=True
+    )
+    cfg: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="risk_limits")
+    node: Mapped[Optional[Node]] = relationship("Node")
+
+
+class RiskAlert(Base):
+    """Alert emitted by the risk engine."""
+
+    __tablename__ = "risk_alerts"
+    __table_args__ = (
+        Index("ix_risk_alerts_node_id", "node_id"),
+        Index("ix_risk_alerts_ts", "ts"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=True
+    )
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    cleared_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    node: Mapped[Optional[Node]] = relationship("Node", back_populates="risk_alerts")
+
+
+class Watchlist(Base):
+    """User defined watchlist."""
+
+    __tablename__ = "watchlists"
+    __table_args__ = (
+        Index("ix_watchlists_user_id", "user_id"),
+        Index("ix_watchlists_created_at", "created_at"),
+        UniqueConstraint("user_id", "name", name="uq_watchlists_user_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="watchlists")
+    items: Mapped[List["WatchlistItem"]] = relationship(
+        "WatchlistItem", back_populates="watchlist", cascade="all, delete-orphan"
+    )
+
+
+class WatchlistItem(Base):
+    """Instrument entry within a watchlist."""
+
+    __tablename__ = "watchlist_items"
+    __table_args__ = (
+        Index("ix_watchlist_items_watchlist_id", "watchlist_id"),
+        UniqueConstraint("watchlist_id", "instrument", name="uq_watchlist_items_unique"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    watchlist_id: Mapped[int] = mapped_column(
+        ForeignKey("watchlists.id", ondelete="CASCADE"), nullable=False
+    )
+    instrument: Mapped[str] = mapped_column(String(120), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    watchlist: Mapped[Watchlist] = relationship("Watchlist", back_populates="items")
+
+
+class LogsIndex(Base):
+    """Tracks log ingestion progress for a node log file."""
+
+    __tablename__ = "logs_index"
+    __table_args__ = (
+        Index("ix_logs_index_node_id", "node_id"),
+        UniqueConstraint("node_id", "file_path", name="uq_logs_index_path"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    file_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_offset: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    node: Mapped[Node] = relationship("Node", back_populates="logs_index")
+
+
+class EquityHistory(Base):
+    """Historical equity curve for a node."""
+
+    __tablename__ = "equity_history"
+    __table_args__ = (
+        Index("ix_equity_history_node_id", "node_id"),
+        Index("ix_equity_history_ts", "ts"),
+        UniqueConstraint("node_id", "ts", name="uq_equity_history_node_ts"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    equity: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+    pnl: Mapped[Decimal] = mapped_column(Numeric(precision=28, scale=8), nullable=False)
+
+    node: Mapped[Node] = relationship("Node", back_populates="equity_history")
 
 
 __all__ = [
+    "ApiKey",
+    "Balance",
+    "Config",
+    "ConfigFormat",
+    "ConfigSource",
+    "EquityHistory",
     "Execution",
-    "Instrument",
+    "LogsIndex",
     "Node",
-    "NodeLifecycle",
-    "NodeLog",
-    "NodeMetric",
+    "NodeMode",
+    "NodeStatus",
     "Order",
-    "RiskAlertRecord",
+    "OrderStatus",
+    "Position",
+    "PositionMode",
+    "RiskAlert",
+    "RiskLimit",
+    "User",
+    "UserRole",
+    "Watchlist",
+    "WatchlistItem",
 ]
