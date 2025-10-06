@@ -1164,11 +1164,15 @@ class NautilusEngineService:
         if self._nt is None:
             return
 
-        config_module = getattr(self._nt, "config", None)
-        LoggingConfig = getattr(config_module, "LoggingConfig", None)
-        LogLevel = getattr(config_module, "LogLevel", None)
-        if LoggingConfig is None:
+        try:
+            from nautilus_trader.config import LoggingConfig  # type: ignore
+        except Exception:  # pragma: no cover - optional dependency
             return
+
+        try:
+            from nautilus_trader.config import LogLevel  # type: ignore
+        except Exception:  # pragma: no cover - optional dependency
+            LogLevel = None
 
         try:
             log_path = self._ensure_node_storage(node_id) / f"{mode.value}.log"
@@ -1179,6 +1183,7 @@ class NautilusEngineService:
             }
             if LogLevel is not None:
                 kwargs["log_level"] = getattr(LogLevel, "INFO", "INFO")
+
             logging_config = LoggingConfig(**kwargs)
             configure = getattr(node, "configure_logging", None)
             if callable(configure):

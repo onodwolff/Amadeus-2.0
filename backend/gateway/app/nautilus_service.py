@@ -374,7 +374,21 @@ class MockNautilusService:
     def attach_engine(self, engine: Any) -> None:
         """Attach a real NautilusTrader engine implementation."""
 
+        self._cancel_background_jobs()
         self._engine = engine
+
+    def _cancel_background_jobs(self) -> None:
+        if not self._background_tasks:
+            return
+
+        loop = self._bus.loop
+
+        def cancel_all() -> None:
+            for task in list(self._background_tasks):
+                task.cancel()
+            self._background_tasks.clear()
+
+        loop.call_soon_threadsafe(cancel_all)
 
     # ------------------------------------------------------------------
     # Market data helpers
