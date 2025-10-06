@@ -9,7 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .settings import settings
-from .nautilus_service import NodeHandle, svc
+from .nautilus_service import (
+    NodeHandle,
+    UserConflictError,
+    UserNotFoundError,
+    UserValidationError,
+    svc,
+)
 
 
 class NodeLaunchStrategyParameter(BaseModel):
@@ -74,6 +80,20 @@ class OrderCreatePayload(BaseModel):
 
 class WatchlistUpdatePayload(BaseModel):
     favorites: List[str] = Field(default_factory=list)
+
+
+class UserCreatePayload(BaseModel):
+    name: str = Field(..., min_length=1)
+    email: str = Field(..., min_length=3)
+    role: str = Field(default="viewer", min_length=1)
+    active: bool = True
+
+
+class UserUpdatePayload(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1)
+    email: Optional[str] = Field(default=None, min_length=3)
+    role: Optional[str] = Field(default=None, min_length=1)
+    active: Optional[bool] = None
 
 
 def build_launch_detail(payload: NodeLaunchPayload) -> str:
@@ -220,6 +240,41 @@ def get_watchlist():
 @app.put("/market/watchlist")
 def update_watchlist(payload: WatchlistUpdatePayload):
     return svc.update_watchlist(payload.favorites)
+
+
+@app.get("/users")
+def list_users():
+    return svc.list_users()
+
+
+@app.post("/users", status_code=201)
+def create_user(payload: UserCreatePayload):
+    try:
+        return svc.create_user(payload.dict())
+    except UserConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except UserValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/users/{user_id}")
+def get_user(user_id: str):
+    try:
+        return svc.get_user(user_id)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.put("/users/{user_id}")
+def update_user(user_id: str, payload: UserUpdatePayload):
+    try:
+        return svc.update_user(user_id, payload.dict(exclude_unset=True))
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except UserConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except UserValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/market/instruments/{instrument_id}/bars")

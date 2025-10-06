@@ -141,6 +141,33 @@ class CashMovement:
     timestamp: str
 
 
+@dataclass
+class UserProfile:
+    user_id: str
+    name: str
+    email: str
+    role: str
+    active: bool = True
+    created_at: str = field(default_factory=_utcnow_iso)
+    updated_at: str = field(default_factory=_utcnow_iso)
+
+
+class UserError(ValueError):
+    """Base class for user management errors."""
+
+
+class UserValidationError(UserError):
+    """Raised when user payload validation fails."""
+
+
+class UserConflictError(UserValidationError):
+    """Raised when attempting to create a user with conflicting data."""
+
+
+class UserNotFoundError(UserError):
+    """Raised when a user cannot be located."""
+
+
 RiskAlertCategory = Literal["limit_breach", "circuit_breaker", "margin_call"]
 RiskAlertSeverity = Literal["low", "medium", "high", "critical"]
 
@@ -245,6 +272,8 @@ class MockNautilusService:
             "margin_call": [],
         }
         self._seed_risk_alerts()
+        self._users: Dict[str, UserProfile] = {}
+        self._seed_users()
         self._publish_portfolio()
         self._publish_orders_snapshot()
         self._publish_risk_snapshot()
@@ -590,6 +619,144 @@ class MockNautilusService:
             self._watchlist_ids = cleaned
             self._persist_watchlist(cleaned)
             return {"favorites": list(self._watchlist_ids)}
+
+    # ------------------------------------------------------------------
+    # User management
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_email(email: str) -> str:
+        return email.strip().lower()
+
+    def _seed_users(self) -> None:
+        defaults = [
+            {"name": "Operator", "email": "operator@example.com", "role": "admin"},
+            {"name": "Risk Analyst", "email": "risk.analyst@example.com", "role": "risk"},
+            {"name": "Execution Trader", "email": "trader@example.com", "role": "trader"},
+        ]
+        for entry in defaults:
+            timestamp = _utcnow_iso()
+            user = UserProfile(
+                user_id=uuid.uuid4().hex,
+                name=entry["name"],
+                email=self._normalize_email(entry["email"]),
+                role=entry["role"],
+                active=entry.get("active", True),
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+            self._users[user.user_id] = user
+
+    def _require_user(self, user_id: str) -> UserProfile:
+        try:
+            return self._users[user_id]
+        except KeyError as exc:
+            raise UserNotFoundError(f"User '{user_id}' not found") from exc
+
+    @staticmethod
+    def _user_to_dict(user: UserProfile) -> Dict[str, Any]:
+        payload = asdict(user)
+        payload["id"] = payload["user_id"]
+        return payload
+
+    def list_users(self) -> dict:
+        users = sorted(self._users.values(), key=lambda entry: entry.name.lower())
+        return {"users": [self._user_to_dict(user) for user in users]}
+
+    def get_user(self, user_id: str) -> dict:
+        user = self._require_user(user_id)
+        return {"user": self._user_to_dict(user)}
+
+    def _ensure_unique_email(self, email: str, *, exclude_user_id: Optional[str] = None) -> None:
+        normalized = self._normalize_email(email)
+        for existing in self._users.values():
+            if exclude_user_id and existing.user_id == exclude_user_id:
+                continue
+            if existing.email == normalized:
+                raise UserConflictError(f"User with email '{normalized}' already exists")
+
+    def create_user(self, payload: Dict[str, Any]) -> dict:
+        name_raw = payload.get("name")
+        if not isinstance(name_raw, str) or not name_raw.strip():
+            raise UserValidationError("Name is required")
+        name = name_raw.strip()
+
+        email_raw = payload.get("email")
+        if not isinstance(email_raw, str) or not email_raw.strip():
+            raise UserValidationError("Email is required")
+        email = self._normalize_email(email_raw)
+        if "@" not in email:
+            raise UserValidationError("Email must contain '@'")
+        self._ensure_unique_email(email)
+
+        role_raw = payload.get("role", "viewer")
+        if not isinstance(role_raw, str) or not role_raw.strip():
+            raise UserValidationError("Role is required")
+        role = role_raw.strip()
+
+        active = payload.get("active", True)
+        if not isinstance(active, bool):
+            raise UserValidationError("Active flag must be a boolean")
+
+        now = _utcnow_iso()
+        user = UserProfile(
+            user_id=uuid.uuid4().hex,
+            name=name,
+            email=email,
+            role=role,
+            active=active,
+            created_at=now,
+            updated_at=now,
+        )
+        self._users[user.user_id] = user
+        return {"user": self._user_to_dict(user)}
+
+    def update_user(self, user_id: str, payload: Dict[str, Any]) -> dict:
+        user = self._require_user(user_id)
+        changed = False
+
+        if "name" in payload:
+            name_raw = payload.get("name")
+            if not isinstance(name_raw, str) or not name_raw.strip():
+                raise UserValidationError("Name cannot be empty")
+            name = name_raw.strip()
+            if name != user.name:
+                user.name = name
+                changed = True
+
+        if "email" in payload:
+            email_raw = payload.get("email")
+            if not isinstance(email_raw, str) or not email_raw.strip():
+                raise UserValidationError("Email cannot be empty")
+            email = self._normalize_email(email_raw)
+            if "@" not in email:
+                raise UserValidationError("Email must contain '@'")
+            self._ensure_unique_email(email, exclude_user_id=user_id)
+            if email != user.email:
+                user.email = email
+                changed = True
+
+        if "role" in payload:
+            role_raw = payload.get("role")
+            if not isinstance(role_raw, str) or not role_raw.strip():
+                raise UserValidationError("Role cannot be empty")
+            role = role_raw.strip()
+            if role != user.role:
+                user.role = role
+                changed = True
+
+        if "active" in payload:
+            active_raw = payload.get("active")
+            if not isinstance(active_raw, bool):
+                raise UserValidationError("Active flag must be a boolean")
+            if active_raw != user.active:
+                user.active = active_raw
+                changed = True
+
+        if changed:
+            user.updated_at = _utcnow_iso()
+
+        return {"user": self._user_to_dict(user)}
 
     def _generate_historical_series(
         self,
