@@ -10,6 +10,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ROOT_DIR = Path(__file__).resolve().parents[3]
 _GATEWAY_DIR = _ROOT_DIR / "backend" / "gateway"
+_DEFAULT_ENV_FILES: tuple[Path, ...] = (
+    _ROOT_DIR / ".env",
+    _GATEWAY_DIR / ".env",
+)
 
 
 class EngineSettings(BaseModel):
@@ -103,10 +107,7 @@ class Settings(BaseSettings):
     security: SecuritySettings = Field(default_factory=SecuritySettings)
 
     model_config = SettingsConfigDict(
-        env_file=(
-            _ROOT_DIR / ".env",
-            _GATEWAY_DIR / ".env",
-        ),
+        env_file=_DEFAULT_ENV_FILES,
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         extra="ignore",
