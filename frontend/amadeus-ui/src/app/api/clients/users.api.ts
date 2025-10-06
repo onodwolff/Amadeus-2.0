@@ -2,7 +2,13 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
-import { UserResponse, UserUpdateRequest, UsersResponse } from '../models';
+import {
+  AccountResponse,
+  AccountUpdateRequest,
+  PasswordUpdateRequest,
+  UsersResponse,
+  UserResponse,
+} from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class UsersApi {
@@ -12,7 +18,19 @@ export class UsersApi {
     return this.http.get<UsersResponse>(buildApiUrl('/users'));
   }
 
-  updateUser(userId: string, payload: UserUpdateRequest): Observable<UserResponse> {
+  updateUser(userId: string, payload: AccountUpdateRequest): Observable<UserResponse> {
     return this.http.put<UserResponse>(buildApiUrl(`/users/${encodeURIComponent(userId)}`), payload);
+  }
+
+  getAccount(): Observable<AccountResponse> {
+    return this.http.get<AccountResponse>(buildApiUrl('/settings/account'));
+  }
+
+  updateAccount(payload: AccountUpdateRequest): Observable<AccountResponse> {
+    return this.http.put<AccountResponse>(buildApiUrl('/settings/account'), payload);
+  }
+
+  updatePassword(payload: PasswordUpdateRequest): Observable<AccountResponse> {
+    return this.http.put<AccountResponse>(buildApiUrl('/settings/password'), payload);
   }
 }

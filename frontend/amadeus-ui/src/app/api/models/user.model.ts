@@ -17,9 +17,17 @@ export interface UserResponse {
   user: UserProfile;
 }
 
-export interface UserUpdateRequest {
+export interface AccountResponse {
+  account: UserProfile;
+}
+
+export interface AccountUpdateRequest {
   name?: string;
   email?: string;
   username?: string;
-  password?: string;
+}
+
+export interface PasswordUpdateRequest {
+  currentPassword: string;
+  newPassword: string;
 }

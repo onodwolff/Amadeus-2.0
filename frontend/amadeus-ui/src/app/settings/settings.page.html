@@ -38,6 +38,17 @@
         </label>
 
         <label class="field">
+          <span class="field__label">Current password</span>
+          <input
+            class="field__control"
+            formControlName="currentPassword"
+            type="password"
+            autocomplete="current-password"
+          />
+          <span class="field__hint">Required when updating your password.</span>
+        </label>
+
+        <label class="field">
           <span class="field__label">New password</span>
           <input class="field__control" formControlName="password" type="password" autocomplete="new-password" />
           <span class="field__hint">Leave blank to keep the current password.</span>

@@ -31,7 +31,8 @@ import {
   NodeMode,
   ExchangeDescriptor,
   UserProfile,
-  UserUpdateRequest,
+  AccountUpdateRequest,
+  PasswordUpdateRequest,
 } from '../api/models';
 import { NotificationService } from '../shared/notifications/notification.service';
 import { encryptSecret, hashPassphrase } from './secret-crypto';
@@ -74,6 +75,7 @@ type AccountFormGroup = FormGroup<{
   name: FormControl<string>;
   email: FormControl<string>;
   username: FormControl<string>;
+  currentPassword: FormControl<string>;
   password: FormControl<string>;
   confirmPassword: FormControl<string>;
 }>;
@@ -224,36 +226,34 @@ export class SettingsPage implements OnInit {
   private loadAccountProfile(): void {
     this.accountError.set(null);
     this.accountSuccess.set(null);
-    this.usersApi.listUsers().subscribe({
+    this.usersApi.getAccount().subscribe({
       next: (response) => {
-        const users = response.users ?? [];
-        const primary = users[0] ?? null;
-        this.activeUser.set(primary);
-        if (primary) {
+        const account = response.account ?? null;
+        this.activeUser.set(account);
+        if (account) {
           this.accountForm.reset({
-            name: primary.name ?? '',
-            email: primary.email ?? '',
-            username: primary.username ?? '',
+            name: account.name ?? '',
+            email: account.email ?? '',
+            username: account.username ?? '',
+            currentPassword: '',
             password: '',
             confirmPassword: '',
           });
-          this.accountForm.markAsPristine();
-          this.accountForm.markAsUntouched();
         } else {
           this.accountForm.reset({
             name: '',
             email: '',
             username: '',
+            currentPassword: '',
             password: '',
             confirmPassword: '',
           });
-          this.accountForm.markAsPristine();
-          this.accountForm.markAsUntouched();
         }
+        this.accountForm.markAsPristine();
+        this.accountForm.markAsUntouched();
       },
       error: (error) => {
-        console.error(error);
-        this.accountError.set('Unable to load user profile.');
+        this.handleError(error, this.accountError, 'Unable to load account profile.');
       },
     });
   }
@@ -374,63 +374,107 @@ export class SettingsPage implements OnInit {
     }
 
     const raw = this.accountForm.getRawValue();
-    const password = raw.password.trim();
+    const currentPassword = raw.currentPassword.trim();
+    const newPassword = raw.password.trim();
     const confirmPassword = raw.confirmPassword.trim();
 
-    if (password || confirmPassword) {
-      if (password.length < 8) {
+    const wantsPasswordChange =
+      currentPassword.length > 0 || newPassword.length > 0 || confirmPassword.length > 0;
+
+    if (wantsPasswordChange) {
+      if (!currentPassword) {
+        this.accountError.set('Current password is required to update your password.');
+        return;
+      }
+      if (!newPassword) {
+        this.accountError.set('New password must be provided.');
+        return;
+      }
+      if (newPassword.length < 8) {
         this.accountError.set('Password must be at least 8 characters.');
         return;
       }
-      if (password !== confirmPassword) {
+      if (newPassword !== confirmPassword) {
         this.accountError.set('Password confirmation does not match.');
         return;
       }
     }
 
-    const payload: UserUpdateRequest = {};
+    const accountPayload: AccountUpdateRequest = {};
     const name = raw.name.trim();
     if (name && name !== currentUser.name) {
-      payload.name = name;
+      accountPayload.name = name;
     }
 
     const email = raw.email.trim();
     if (email && email !== currentUser.email) {
-      payload.email = email;
+      accountPayload.email = email;
     }
 
     const username = raw.username.trim();
     if (username && username !== currentUser.username) {
-      payload.username = username;
+      accountPayload.username = username;
     }
 
-    if (password) {
-      payload.password = password;
+    const operations: Array<'account' | 'password'> = [];
+    if (Object.keys(accountPayload).length > 0) {
+      operations.push('account');
+    }
+    if (wantsPasswordChange && newPassword) {
+      operations.push('password');
     }
 
-    if (Object.keys(payload).length === 0) {
+    if (operations.length === 0) {
       this.accountSuccess.set('Account settings are already up to date.');
       return;
     }
 
     this.isAccountSaving.set(true);
     try {
-      const response = await firstValueFrom(
-        this.usersApi.updateUser(currentUser.id, payload),
-      );
-      const updated = response.user;
-      this.activeUser.set(updated);
+      let latestAccount = currentUser;
+
+      if (operations.includes('account')) {
+        const accountResponse = await firstValueFrom(this.usersApi.updateAccount(accountPayload));
+        latestAccount = accountResponse.account;
+        this.activeUser.set(latestAccount);
+      }
+
+      if (operations.includes('password')) {
+        const passwordPayload: PasswordUpdateRequest = {
+          currentPassword,
+          newPassword,
+        };
+        const passwordResponse = await firstValueFrom(this.usersApi.updatePassword(passwordPayload));
+        latestAccount = passwordResponse.account;
+        this.activeUser.set(latestAccount);
+      }
+
       this.accountForm.reset({
-        name: updated.name ?? '',
-        email: updated.email ?? '',
-        username: updated.username ?? '',
+        name: latestAccount.name ?? '',
+        email: latestAccount.email ?? '',
+        username: latestAccount.username ?? '',
+        currentPassword: '',
         password: '',
         confirmPassword: '',
       });
       this.accountForm.markAsPristine();
       this.accountForm.markAsUntouched();
-      this.accountSuccess.set('Account settings updated successfully.');
-      this.notifications.success('Account settings updated.');
+
+      const successMessage =
+        operations.length === 2
+          ? 'Account details and password updated successfully.'
+          : operations[0] === 'password'
+            ? 'Password updated successfully.'
+            : 'Account settings updated successfully.';
+      this.accountSuccess.set(successMessage);
+
+      const notificationMessage =
+        operations.length === 2
+          ? 'Account and password updated.'
+          : operations[0] === 'password'
+            ? 'Password updated.'
+            : 'Account settings updated.';
+      this.notifications.success(notificationMessage, 'Settings');
     } catch (error) {
       this.handleError(error, this.accountError, 'Failed to update account settings.');
     } finally {
@@ -1120,6 +1164,7 @@ export class SettingsPage implements OnInit {
       username: this.fb.nonNullable.control('', {
         validators: [Validators.required, Validators.minLength(3)],
       }),
+      currentPassword: this.fb.nonNullable.control(''),
       password: this.fb.nonNullable.control(''),
       confirmPassword: this.fb.nonNullable.control(''),
     });

@@ -16,3 +16,11 @@ npm --prefix frontend/amadeus-ui run lint
 ```
 
 This prevents "missing package.json" errors that occur when running the scripts from the wrong folder.
+
+## Backend setup
+
+Create a PostgreSQL role for the gateway services before running the backend:
+
+```sql
+CREATE USER amadeus WITH PASSWORD 'amadeus';
+```
