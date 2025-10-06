@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -34,6 +35,33 @@ try:  # pragma: no cover - optional dependency for YAML parsing
     import yaml
 except Exception:  # pragma: no cover - optional dependency during unit tests
     yaml = None
+
+
+def retrieve_key(key_id: str, key_type: str) -> Optional[str]:
+    """Best-effort helper returning a credential for *key_id* and *key_type*."""
+
+    if not key_id:
+        return None
+
+    normalised_id = key_id.upper().replace("-", "_").replace(":", "_")
+    normalised_type = key_type.upper().replace("-", "_")
+    candidates = [
+        f"{normalised_id}_{normalised_type}",
+        f"{normalised_id}_{key_type.upper()}",
+        f"{key_id}_{key_type}".upper(),
+        normalised_type,
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        value = os.environ.get(candidate)
+        if value:
+            return value
+    return None
 
 
 class EngineConfigError(ValueError):
@@ -799,6 +827,8 @@ class NautilusEngineService:
         if not isinstance(data_sources, list):
             return
 
+        key_refs = [ref for ref in config.get("keyReferences", []) if isinstance(ref, dict)]
+
         for source in data_sources:
             if not isinstance(source, dict):
                 continue
@@ -808,13 +838,120 @@ class NautilusEngineService:
             if not identifier:
                 continue
 
-            self._logger.debug(
-                "Node %s adapter placeholder – id=%s type=%s mode=%s",
+            if adapter_type != "live":
+                self._logger.debug(
+                    "Node %s skipping adapter %s – unsupported type '%s'", 
+                    node_id,
+                    identifier,
+                    adapter_type or "unknown",
+                )
+                continue
+
+            if identifier.lower().startswith("binance"):
+                self._configure_binance_adapter(
+                    node,
+                    identifier,
+                    adapter_mode,
+                    node_id,
+                    key_refs,
+                )
+            else:
+                self._logger.debug(
+                    "Node %s has no integration for adapter %s (type=%s mode=%s)",
+                    node_id,
+                    identifier,
+                    adapter_type or "unknown",
+                    adapter_mode or "unknown",
+                )
+
+    def _configure_binance_adapter(
+        self,
+        node: Any,
+        identifier: str,
+        adapter_mode: str,
+        node_id: str,
+        key_refs: Iterable[Dict[str, Any]],
+    ) -> None:
+        try:
+            from nautilus_trader.adapters.binance import (
+                BinanceLiveDataClientFactory,
+                BinanceLiveExecClientFactory,
+            )  # type: ignore
+        except Exception as exc:  # pragma: no cover - optional dependency
+            self._logger.warning(
+                "Node %s unable to import Binance adapters: %s",
                 node_id,
-                identifier,
-                adapter_type or "unknown",
-                adapter_mode or "unknown",
+                exc,
             )
+            return
+
+        add_data_factory = getattr(node, "add_data_client_factory", None)
+        add_exec_factory = getattr(node, "add_execution_client_factory", None)
+
+        if callable(add_data_factory):
+            data_factory = BinanceLiveDataClientFactory(client_id=identifier)
+            self._maybe_configure_binance_keys(node_id, key_refs)
+            add_data_factory(data_factory)
+            self._logger.debug(
+                "Node %s registered Binance live data factory for %s", node_id, identifier
+            )
+        else:
+            self._logger.debug(
+                "Node %s exposes no data factory hook – Binance data skipped", node_id
+            )
+
+        if adapter_mode != "read" and callable(add_exec_factory):
+            exec_factory = BinanceLiveExecClientFactory(client_id=identifier)
+            add_exec_factory(exec_factory)
+            self._logger.debug(
+                "Node %s registered Binance execution factory for %s", node_id, identifier
+            )
+        elif adapter_mode != "read":
+            self._logger.debug(
+                "Node %s exposes no execution factory hook – Binance exec skipped", node_id
+            )
+
+    def _maybe_configure_binance_keys(
+        self, node_id: str, key_refs: Iterable[Dict[str, Any]]
+    ) -> None:
+        key_ref = self._find_key_reference("binance", key_refs)
+        if not key_ref:
+            self._logger.debug(
+                "Node %s has no Binance key reference – expecting env variables", node_id
+            )
+            return
+
+        key_id = str(key_ref.get("keyId") or "").strip()
+        if not key_id:
+            self._logger.debug(
+                "Node %s Binance key reference missing keyId – expecting env variables", node_id
+            )
+            return
+
+        api_key = retrieve_key(key_id, "api_key")
+        api_secret = retrieve_key(key_id, "api_secret")
+
+        if api_key and "BINANCE_API_KEY" not in os.environ:
+            os.environ["BINANCE_API_KEY"] = api_key
+        if api_secret and "BINANCE_API_SECRET" not in os.environ:
+            os.environ["BINANCE_API_SECRET"] = api_secret
+
+        if not api_key or not api_secret:
+            self._logger.warning(
+                "Node %s Binance credentials not fully resolved for key '%s' – set BINANCE_API_KEY/BINANCE_API_SECRET",
+                node_id,
+                key_id,
+            )
+
+    def _find_key_reference(
+        self, prefix: str, key_refs: Iterable[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        lowered_prefix = prefix.lower()
+        for ref in key_refs:
+            alias = str(ref.get("alias") or "").lower()
+            if alias.startswith(lowered_prefix):
+                return ref
+        return None
 
     def _map_event_to_topic(self, event_name: str) -> Tuple[str, str]:
         lowered = event_name.lower()
