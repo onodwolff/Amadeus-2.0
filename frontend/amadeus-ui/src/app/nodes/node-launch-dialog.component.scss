@@ -5,6 +5,7 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  padding: 32px;
 }
 
 .launch-dialog__backdrop {
@@ -17,7 +18,7 @@
 .launch-dialog__panel {
   position: relative;
   width: min(960px, calc(100% - 48px));
-  max-height: calc(100vh - 80px);
+  max-height: calc(100vh - 64px);
   overflow: hidden;
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -388,8 +389,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 16px 28px 24px;
   gap: 12px;
-  padding: 16px 28px;
   border-top: 1px solid rgba(148, 163, 184, 0.08);
   background: rgba(15, 23, 42, 0.82);
 }
@@ -441,5 +442,22 @@
   .key-list__row {
     grid-template-columns: 1fr;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .launch-dialog {
+    padding: 16px;
+    align-items: flex-start;
+  }
+
+  .launch-dialog__panel {
+    max-height: calc(100vh - 32px);
+  }
+}
+
+@media (max-height: 720px) {
+  .launch-dialog {
+    align-items: flex-start;
   }
 }
