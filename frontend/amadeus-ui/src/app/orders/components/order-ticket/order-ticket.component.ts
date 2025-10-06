@@ -319,10 +319,7 @@ export class OrderTicketComponent implements OnInit {
     const type = (value.type ?? 'market').toLowerCase() as OrderType;
     const quantity = Number(value.quantity);
     const price = value.price != null ? Number(value.price) : null;
-    const limitOffset =
-      value.limit_offset != null && value.limit_offset !== ''
-        ? Number(value.limit_offset)
-        : null;
+    const limitOffset = this.parseLimitOffset(value.limit_offset);
     const tif = (value.time_in_force ?? '').trim().toUpperCase();
     const expireTime = (value.expire_time ?? '').trim();
     const contingency = (value.contingency_type ?? '').toUpperCase();
@@ -508,8 +505,7 @@ export class OrderTicketComponent implements OnInit {
       return null;
     }
     const price = raw.price != null ? Number(raw.price) : null;
-    const limitOffset =
-      raw.limit_offset != null && raw.limit_offset !== '' ? Number(raw.limit_offset) : null;
+    const limitOffset = this.parseLimitOffset(raw.limit_offset);
     const symbol = (raw.symbol ?? '').trim().toUpperCase();
     const venue = (raw.venue ?? '').trim().toUpperCase();
     const type = (raw.type ?? 'market').toLowerCase() as OrderType;
@@ -536,4 +532,23 @@ export class OrderTicketComponent implements OnInit {
     }
     return this.availablePositionQuantity(symbol, venue);
   });
+
+  private parseLimitOffset(raw: unknown): number | null {
+    if (raw == null) {
+      return null;
+    }
+    if (typeof raw === 'number') {
+      return Number.isFinite(raw) ? raw : null;
+    }
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed === '') {
+        return null;
+      }
+      const coerced = Number(trimmed);
+      return Number.isNaN(coerced) ? null : coerced;
+    }
+    const coerced = Number(raw);
+    return Number.isNaN(coerced) ? null : coerced;
+  }
 }
