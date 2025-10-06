@@ -457,6 +457,30 @@
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+  grid-template-columns: 1fr;
+}
+
+.field--full {
+  width: 100%;
+}
+
+.dialog__body > .checkbox--inline {
+  margin-top: 12px;
+}
+
+@media (min-width: 720px) {
+  .dialog__body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .field--full {
+    grid-column: 1 / -1;
+  }
+
+  .dialog__body > .field--fieldset,
+  .dialog__body > .checkbox--inline {
+    grid-column: 1 / -1;
+  }
 }
 
 .dialog__footer {
