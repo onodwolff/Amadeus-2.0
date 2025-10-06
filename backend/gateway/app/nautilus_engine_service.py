@@ -25,9 +25,9 @@ import threading
 from typing import Any, AsyncIterator, Callable, Dict, Iterable, Optional, Tuple
 
 try:  # pragma: no cover - optional dependency during unit tests
-    import nautilus_trader as _nt  # type: ignore
+    import nautilus_trader as nt  # type: ignore
 except Exception:  # pragma: no cover - optional dependency during unit tests
-    _nt = None
+    nt = None
 
 try:  # pragma: no cover - optional dependency for YAML parsing
     import yaml
@@ -194,7 +194,7 @@ class NautilusEngineService:
         storage_root: Optional[Path] = None,
     ) -> None:
         self._bus = bus or EngineEventBus()
-        self._nt = _nt
+        self._nt = nt
         self._storage_root = storage_root or self._default_storage_root()
         self._logger = logging.getLogger(__name__)
         self._nodes_running: Dict[str, Dict[str, Any]] = {}
@@ -406,17 +406,21 @@ class NautilusEngineService:
                 "nautilus_trader package is not available – unable to start engine nodes."
             )
 
-        trading_module = getattr(self._nt, "trading", None)
-        if trading_module is None:
-            raise RuntimeError("nautilus_trader.trading module is not available")
-
-        node_api = getattr(trading_module, "node", None)
-        TradingNode = getattr(node_api, "TradingNode", None)
-        if TradingNode is None:
-            raise RuntimeError("nautilus_trader.trading.node.TradingNode is not available")
+        try:
+            from nautilus_trader.trading.node import TradingNode  # type: ignore
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "nautilus_trader.trading.node.TradingNode could not be imported"
+            ) from exc
 
         safe_config = deepcopy(config)
-        resolved_node_id = node_id or safe_config.get("id") or f"node-{len(self._nodes_running) + 1}"
+        resolved_node_id = (
+            node_id
+            or str(safe_config.get("id") or "").strip()
+            or f"node-{len(self._nodes_running) + 1}"
+        )
+        safe_config.setdefault("id", resolved_node_id)
+
         if resolved_node_id in self._nodes_running:
             raise RuntimeError(f"Node '{resolved_node_id}' is already running")
 
