@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from backend.gateway.config import settings
+from gateway.config import settings
 from .nautilus_service import (
     NodeHandle,
     UserConflictError,
