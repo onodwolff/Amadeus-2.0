@@ -8,9 +8,6 @@ import uuid
 from functools import wraps
 from typing import Any, Dict, List, Literal, Optional
 
-import structlog
-from structlog.contextvars import bind_contextvars, clear_contextvars
-
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
@@ -25,9 +22,10 @@ from .nautilus_service import (
     svc,
 )
 from .nautilus_engine_service import EngineConfigError, EngineMode
+from .logging import bind_contextvars, clear_contextvars, get_logger
 
 
-logger = structlog.get_logger("gateway.api")
+logger = get_logger("gateway.api")
 
 
 def _resolve_node_id(request: Request) -> str | None:
