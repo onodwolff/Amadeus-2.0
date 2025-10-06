@@ -229,6 +229,7 @@ class NautilusEngineService:
         self._storage_root = storage_root or self._default_storage_root()
         self._logger = logging.getLogger(__name__)
         self._nodes_running: Dict[str, Dict[str, Any]] = {}
+        self._config_versions: Dict[str, int] = {}
 
     @property
     def bus(self) -> EngineEventBus:
@@ -269,6 +270,43 @@ class NautilusEngineService:
         root = self.storage_root / "nodes" / node_id
         root.mkdir(parents=True, exist_ok=True)
         return root
+
+    def _persist_config_version(
+        self,
+        *,
+        node_id: str,
+        mode: EngineMode,
+        version: int,
+        config: Dict[str, Any],
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Persist a snapshot of the node configuration for auditing purposes."""
+
+        node_dir = self._ensure_node_storage(node_id)
+        version_dir = node_dir / "configs"
+        version_dir.mkdir(parents=True, exist_ok=True)
+
+        metadata: Dict[str, Any] = {
+            "node_id": node_id,
+            "mode": mode.value,
+            "version": version,
+            "saved_at": datetime.utcnow().isoformat() + "Z",
+        }
+        if user_id:
+            metadata["user_id"] = user_id
+
+        version_path = version_dir / f"{mode.value}.v{version}.json"
+        meta_path = version_dir / f"{mode.value}.v{version}.meta.json"
+
+        try:
+            version_path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            meta_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        except OSError as exc:  # pragma: no cover - filesystem issues
+            self._logger.debug(
+                "Unable to persist config version for node %s: %s",
+                node_id,
+                exc,
+            )
 
     def load_config_document(
         self,
@@ -427,6 +465,7 @@ class NautilusEngineService:
         self,
         mode: EngineMode,
         config: Dict[str, Any],
+        user_id: Optional[str] = None,
         *,
         node_id: Optional[str] = None,
     ) -> Any:
@@ -460,6 +499,16 @@ class NautilusEngineService:
         self._configure_node_logging(node, resolved_node_id, mode)
         self._configure_adapters(node, mode, safe_config, resolved_node_id)
 
+        version = self._config_versions.get(resolved_node_id, 0) + 1
+        self._config_versions[resolved_node_id] = version
+        self._persist_config_version(
+            node_id=resolved_node_id,
+            mode=mode,
+            version=version,
+            config=safe_config,
+            user_id=user_id,
+        )
+
         def runner() -> None:
             try:
                 node.start()
@@ -479,6 +528,7 @@ class NautilusEngineService:
             "node": node,
             "mode": mode,
             "thread": thread,
+            "user_id": user_id,
         }
 
         try:

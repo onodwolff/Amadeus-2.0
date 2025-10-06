@@ -8,10 +8,21 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import AsyncIterator, Callable, Optional, Awaitable, Any
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+try:  # pragma: no cover - optional dependency
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+    from sqlalchemy.orm import sessionmaker
+    SQLALCHEMY_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency
+    AsyncEngine = AsyncSession = create_async_engine = sessionmaker = None  # type: ignore[assignment]
+    SQLALCHEMY_AVAILABLE = False
 
-from gateway.db.base import Base
+if SQLALCHEMY_AVAILABLE:
+    try:  # pragma: no cover - support running from backend/
+        from gateway.db.base import Base
+    except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+        from backend.gateway.db.base import Base  # type: ignore
+else:  # pragma: no cover - fallback when SQLAlchemy missing
+    Base = object  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency
     import redis.asyncio as redis
@@ -45,6 +56,8 @@ class AsyncDatabase:
         self._engine: Optional[AsyncEngine] = None
         self._session_factory: Optional[Callable[[], AsyncSession]] = None
         self._lock = asyncio.Lock()
+        if not SQLALCHEMY_AVAILABLE:
+            raise DatabaseNotAvailable("SQLAlchemy is not installed")
 
     @property
     def engine(self) -> AsyncEngine:
@@ -60,6 +73,9 @@ class AsyncDatabase:
             if self._engine is not None:
                 return self._engine
 
+            if create_async_engine is None:
+                raise DatabaseNotAvailable("SQLAlchemy async engine unavailable")
+
             LOGGER.debug("initialising async engine", url=self._config.url)
             engine = create_async_engine(
                 self._config.url,
@@ -70,6 +86,8 @@ class AsyncDatabase:
                 future=True,
             )
             self._engine = engine
+            if sessionmaker is None or AsyncSession is None:
+                raise DatabaseNotAvailable("SQLAlchemy sessionmaker unavailable")
             self._session_factory = sessionmaker(
                 engine,
                 expire_on_commit=False,
