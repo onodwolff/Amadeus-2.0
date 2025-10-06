@@ -320,6 +320,7 @@ export class OrderTicketComponent implements OnInit {
     const tif = (value.time_in_force ?? '').trim().toUpperCase();
     const expireTime = (value.expire_time ?? '').trim();
     const contingency = (value.contingency_type ?? '').toUpperCase();
+    const limitOffset = this.parseLimitOffset(value.limit_offset);
 
     if (!symbol) {
       errors.push('Symbol is required.');
@@ -505,6 +506,7 @@ export class OrderTicketComponent implements OnInit {
     const symbol = (raw.symbol ?? '').trim().toUpperCase();
     const venue = (raw.venue ?? '').trim().toUpperCase();
     const type = (raw.type ?? 'market').toLowerCase() as OrderType;
+    const limitOffset = this.parseLimitOffset(raw.limit_offset);
     if (!symbol || !venue) {
       return null;
     }
