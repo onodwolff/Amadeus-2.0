@@ -21,10 +21,11 @@ from enum import Enum
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 import uuid
 import threading
-from typing import Any, AsyncIterator, Callable, Dict, Iterable, Optional, Tuple
+from typing import Any, AsyncIterator, Callable, Dict, Iterable, List, Optional, Tuple
 
 try:  # pragma: no cover - optional dependency during unit tests
     import nautilus_trader as nt  # type: ignore
@@ -730,10 +731,14 @@ class NautilusEngineService:
         if not self._nodes_running:
             return None
 
+        start_dt = self._parse_iso8601(start)
+        end_dt = self._parse_iso8601(end)
+        limit_value = self._coerce_positive_int(limit)
+
         params = {
             "instrument_id": instrument_id,
             "granularity": granularity,
-            "limit": limit,
+            "limit": limit_value,
             "start": start,
             "end": end,
         }
@@ -765,7 +770,16 @@ class NautilusEngineService:
                     if not callable(method):
                         continue
                     try:
-                        result = self._call_with_signature(method, params)
+                        prepared = self._prepare_historical_call_params(
+                            method_name=method_name,
+                            base_params=params,
+                            instrument_id=instrument_id,
+                            granularity=granularity,
+                            start_dt=start_dt,
+                            end_dt=end_dt,
+                            limit=limit_value,
+                        )
+                        result = self._call_with_signature(method, prepared)
                     except Exception as exc:
                         self._logger.debug(
                             "Node %s data provider %s.%s failed: %s",
@@ -775,9 +789,367 @@ class NautilusEngineService:
                             exc,
                         )
                         continue
-                    if result is not None:
-                        return result
+                    if result is None:
+                        continue
+                    try:
+                        payload = self._normalise_historical_bars(
+                            result,
+                            instrument_id=instrument_id,
+                            granularity=granularity,
+                            start_dt=start_dt,
+                            end_dt=end_dt,
+                            limit=limit_value,
+                        )
+                    except Exception as exc:
+                        self._logger.debug(
+                            "Node %s returned unsupported bar payload via %s.%s: %s",
+                            node_key,
+                            attribute,
+                            method_name,
+                            exc,
+                        )
+                        continue
+                    if payload is not None:
+                        return payload
         return None
+
+    def _coerce_positive_int(self, value: Optional[int]) -> Optional[int]:
+        """Return ``value`` as a positive integer or ``None`` if invalid."""
+
+        if value is None:
+            return None
+        try:
+            coerced = int(value)
+        except (TypeError, ValueError):
+            return None
+        return coerced if coerced > 0 else None
+
+    def _prepare_historical_call_params(
+        self,
+        *,
+        method_name: str,
+        base_params: Dict[str, Any],
+        instrument_id: str,
+        granularity: str,
+        start_dt: Optional[datetime],
+        end_dt: Optional[datetime],
+        limit: Optional[int],
+    ) -> Dict[str, Any]:
+        """Return parameters adapted for the concrete Nautilus data accessor."""
+
+        prepared = dict(base_params)
+        method_lower = method_name.lower()
+
+        if method_lower == "query_bars":
+            prepared = {
+                "instrument_ids": [instrument_id],
+            }
+            if start_dt is not None:
+                prepared["start"] = self._datetime_to_unix_nanos(start_dt)
+            if end_dt is not None:
+                prepared["end"] = self._datetime_to_unix_nanos(end_dt)
+            if limit is not None:
+                prepared["limit"] = limit
+            return prepared
+
+        prepared.setdefault("instrument_id", instrument_id)
+        prepared.setdefault("granularity", granularity)
+        if start_dt is not None and not prepared.get("start"):
+            prepared["start"] = self._format_datetime(start_dt)
+        if end_dt is not None and not prepared.get("end"):
+            prepared["end"] = self._format_datetime(end_dt)
+        if limit is not None and not prepared.get("limit"):
+            prepared["limit"] = limit
+        return prepared
+
+    def _normalise_historical_bars(
+        self,
+        data: Any,
+        *,
+        instrument_id: str,
+        granularity: str,
+        start_dt: Optional[datetime],
+        end_dt: Optional[datetime],
+        limit: Optional[int],
+    ) -> Optional[Dict[str, Any]]:
+        """Convert raw Nautilus payloads into the gateway schema."""
+
+        if isinstance(data, dict):
+            payload = dict(data)
+            bars_raw = payload.get("bars")
+            if isinstance(bars_raw, list):
+                bars = [
+                    bar
+                    for bar in (
+                        self._serialise_bar(entry)
+                        for entry in bars_raw
+                    )
+                    if bar is not None
+                ]
+            else:
+                bars = []
+            bars = self._filter_bars(bars, start_dt=start_dt, end_dt=end_dt, limit=limit)
+            payload["bars"] = bars
+            payload.setdefault("instrument_id", instrument_id)
+            payload.setdefault("granularity", granularity)
+            return payload
+
+        if isinstance(data, (list, tuple, set)) or hasattr(data, "__iter__"):
+            try:
+                iterable = list(data)  # type: ignore[arg-type]
+            except TypeError:
+                iterable = []
+        else:
+            return None
+
+        bars = [
+            bar
+            for bar in (self._serialise_bar(entry) for entry in iterable)
+            if bar is not None
+        ]
+        bars = self._filter_bars(bars, start_dt=start_dt, end_dt=end_dt, limit=limit)
+
+        return {
+            "instrument_id": instrument_id,
+            "granularity": granularity,
+            "bars": bars,
+        }
+
+    def _filter_bars(
+        self,
+        bars: List[Dict[str, Any]],
+        *,
+        start_dt: Optional[datetime],
+        end_dt: Optional[datetime],
+        limit: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        """Filter the list of bars by time range and limit."""
+
+        filtered: List[Dict[str, Any]] = []
+        for bar in bars:
+            timestamp = bar.get("timestamp")
+            if isinstance(timestamp, str):
+                ts_dt = self._parse_iso8601(timestamp)
+            else:
+                ts_dt = None
+            if ts_dt is not None:
+                if start_dt is not None and ts_dt < start_dt:
+                    continue
+                if end_dt is not None and ts_dt > end_dt:
+                    continue
+            filtered.append(bar)
+
+        filtered.sort(key=lambda item: item.get("timestamp") or "")
+
+        if limit is not None and limit > 0 and len(filtered) > limit:
+            filtered = filtered[-limit:]
+
+        return filtered
+
+    def _serialise_bar(self, bar: Any) -> Optional[Dict[str, Any]]:
+        """Convert Nautilus bar objects into primitive dictionaries."""
+
+        if bar is None:
+            return None
+
+        raw: Optional[Dict[str, Any]]
+        if isinstance(bar, dict):
+            raw = dict(bar)
+        else:
+            raw = None
+            for attr in ("to_dict", "as_dict", "dict"):
+                candidate = getattr(bar, attr, None)
+                if callable(candidate):
+                    try:
+                        result = candidate()
+                    except Exception:
+                        continue
+                    if isinstance(result, dict):
+                        raw = result
+                        break
+            if raw is None:
+                extracted: Dict[str, Any] = {}
+                for field in (
+                    "timestamp",
+                    "ts_event",
+                    "ts_init",
+                    "time",
+                    "open",
+                    "open_price",
+                    "open_px",
+                    "high",
+                    "high_price",
+                    "low",
+                    "low_price",
+                    "close",
+                    "close_price",
+                    "volume",
+                    "quantity",
+                    "qty",
+                ):
+                    if hasattr(bar, field):
+                        try:
+                            extracted[field] = getattr(bar, field)
+                        except Exception:
+                            continue
+                raw = extracted if extracted else None
+
+        if raw is None:
+            return None
+
+        timestamp = self._normalise_bar_timestamp(
+            raw.get("timestamp")
+            or raw.get("ts_event")
+            or raw.get("ts_init")
+            or raw.get("time")
+        )
+        open_price = self._normalise_bar_value(
+            raw.get("open") or raw.get("open_price") or raw.get("open_px")
+        )
+        high_price = self._normalise_bar_value(
+            raw.get("high") or raw.get("high_price")
+        )
+        low_price = self._normalise_bar_value(
+            raw.get("low") or raw.get("low_price")
+        )
+        close_price = self._normalise_bar_value(
+            raw.get("close") or raw.get("close_price")
+        )
+        volume = self._normalise_bar_value(
+            raw.get("volume") or raw.get("quantity") or raw.get("qty")
+        )
+
+        if (
+            timestamp is None
+            or open_price is None
+            or high_price is None
+            or low_price is None
+            or close_price is None
+        ):
+            return None
+
+        return {
+            "timestamp": timestamp,
+            "open": open_price,
+            "high": high_price,
+            "low": low_price,
+            "close": close_price,
+            "volume": volume if volume is not None else 0.0,
+        }
+
+    def _normalise_bar_value(self, value: Any) -> Optional[float]:
+        """Convert Nautilus numeric primitives into floats."""
+
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                return None
+
+        for attr in ("as_double", "as_decimal", "to_double", "to_decimal"):
+            candidate = getattr(value, attr, None)
+            if callable(candidate):
+                try:
+                    result = candidate()
+                except Exception:
+                    continue
+                if isinstance(result, Decimal):
+                    return float(result)
+                if result is not None:
+                    try:
+                        return float(result)
+                    except (TypeError, ValueError):
+                        continue
+
+        if hasattr(value, "value"):
+            try:
+                return float(getattr(value, "value"))
+            except (TypeError, ValueError):
+                pass
+
+        try:
+            return float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+
+    def _normalise_bar_timestamp(self, value: Any) -> Optional[str]:
+        """Convert timestamps into ISO-8601 strings."""
+
+        if value is None:
+            return None
+        if isinstance(value, str):
+            parsed = self._parse_iso8601(value)
+            if parsed is None:
+                return value
+            return self._format_datetime(parsed)
+        if isinstance(value, datetime):
+            return self._format_datetime(value)
+        if isinstance(value, (int, float)):
+            return self._format_unix_nanos(int(value))
+        if hasattr(value, "to_pydatetime"):
+            try:
+                dt_value = value.to_pydatetime()  # type: ignore[attr-defined]
+            except Exception:
+                dt_value = None
+            if isinstance(dt_value, datetime):
+                return self._format_datetime(dt_value)
+        if hasattr(value, "value"):
+            inner = getattr(value, "value")
+            if isinstance(inner, (int, float)):
+                return self._format_unix_nanos(int(inner))
+        try:
+            coerced = float(value)
+        except (TypeError, ValueError):
+            return None
+        return self._format_unix_nanos(int(coerced))
+
+    def _format_unix_nanos(self, nanos: int) -> str:
+        seconds, remainder = divmod(int(nanos), 1_000_000_000)
+        micros = remainder // 1_000
+        dt_value = datetime.fromtimestamp(seconds, tz=timezone.utc).replace(
+            microsecond=micros
+        )
+        return self._format_datetime(dt_value)
+
+    def _datetime_to_unix_nanos(self, value: datetime) -> int:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        delta = value - epoch
+        return (
+            delta.days * 24 * 60 * 60 * 1_000_000_000
+            + delta.seconds * 1_000_000_000
+            + delta.microseconds * 1_000
+        )
+
+    def _parse_iso8601(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+        return parsed
+
+    def _format_datetime(self, value: datetime) -> str:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+        return value.isoformat().replace("+00:00", "Z")
 
     # ------------------------------------------------------------------
     # Internal helpers
