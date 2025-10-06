@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-import asyncio, json
+import asyncio
+import inspect
+import json
+import time
+import uuid
+from functools import wraps
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
+import structlog
+from structlog.contextvars import bind_contextvars, clear_contextvars
+
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .settings import settings
+from backend.gateway.config import settings
 from .nautilus_service import (
     NodeHandle,
     UserConflictError,
@@ -17,6 +25,82 @@ from .nautilus_service import (
     svc,
 )
 from .nautilus_engine_service import EngineConfigError, EngineMode
+
+
+logger = structlog.get_logger("gateway.api")
+
+
+def _resolve_node_id(request: Request) -> str | None:
+    """Attempt to extract a node identifier from the request."""
+
+    header_value = request.headers.get("X-Node-Id")
+    if header_value:
+        return header_value
+
+    path_params = request.path_params or {}
+    path_node = path_params.get("node_id")
+    if path_node:
+        return path_node
+
+    query_node = request.query_params.get("node_id")
+    if query_node:
+        return query_node
+
+    return None
+
+
+def log_websocket(func):
+    """Decorator to log WebSocket lifecycle events."""
+
+    signature = inspect.signature(func)
+
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        bound = signature.bind_partial(*args, **kwargs)
+        websocket = next(
+            (value for value in bound.arguments.values() if isinstance(value, WebSocket)),
+            None,
+        )
+        if websocket is None:
+            return await func(*args, **kwargs)
+
+        node_identifier = bound.arguments.get("node_id")
+
+        clear_contextvars()
+        request_id = str(uuid.uuid4())
+        bind_contextvars(request_id=request_id)
+        if node_identifier:
+            bind_contextvars(node_id=node_identifier)
+
+        client_ip = websocket.client.host if websocket.client else None
+        path = websocket.url.path
+
+        logger.info(
+            "websocket_connected",
+            path=path,
+            client_ip=client_ip,
+        )
+
+        try:
+            return await func(*args, **kwargs)
+        except WebSocketDisconnect:
+            logger.info(
+                "websocket_disconnected",
+                path=path,
+                client_ip=client_ip,
+            )
+            raise
+        except Exception:
+            logger.exception(
+                "websocket_error",
+                path=path,
+                client_ip=client_ip,
+            )
+            raise
+        finally:
+            clear_contextvars()
+
+    return wrapper
 
 
 class NodeLaunchStrategyParameter(BaseModel):
@@ -138,6 +222,67 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
     return " | ".join(parts)
 
 app = FastAPI(title="Amadeus Gateway")
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log every request/response pair in a structured JSON format."""
+
+    clear_contextvars()
+    request_id = str(uuid.uuid4())
+    bind_contextvars(request_id=request_id)
+
+    node_id = _resolve_node_id(request)
+    if node_id:
+        bind_contextvars(node_id=node_id)
+
+    query_keys = sorted(set(request.query_params.keys()))
+    client_ip = request.client.host if request.client else None
+
+    logger.info(
+        "request_received",
+        method=request.method,
+        path=request.url.path,
+        query_keys=query_keys,
+        client_ip=client_ip,
+    )
+
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except HTTPException as exc:
+        duration_ms = round((time.perf_counter() - started) * 1000, 3)
+        logger.info(
+            "request_completed",
+            method=request.method,
+            path=request.url.path,
+            status_code=exc.status_code,
+            duration_ms=duration_ms,
+            error_type="HTTPException",
+        )
+        clear_contextvars()
+        raise
+    except Exception:
+        duration_ms = round((time.perf_counter() - started) * 1000, 3)
+        logger.exception(
+            "request_failed",
+            method=request.method,
+            path=request.url.path,
+            duration_ms=duration_ms,
+        )
+        clear_contextvars()
+        raise
+
+    duration_ms = round((time.perf_counter() - started) * 1000, 3)
+    logger.info(
+        "request_completed",
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+    )
+    clear_contextvars()
+    return response
 
 # 👇 Разрешаем localhost и 127.0.0.1 (Angular dev)
 app.add_middleware(
@@ -468,6 +613,7 @@ def duplicate_order(order_id: str):
 
 
 @app.websocket("/ws/nodes")
+@log_websocket
 async def ws_nodes(ws: WebSocket):
     await ws.accept()
     baseline = [svc.as_dict(n) for n in svc.list_nodes()]
@@ -480,6 +626,7 @@ async def ws_nodes(ws: WebSocket):
 
 
 @app.websocket("/ws/nodes/{node_id}/logs")
+@log_websocket
 async def ws_node_logs(node_id: str, ws: WebSocket):
     await ws.accept()
     try:
@@ -497,6 +644,7 @@ async def ws_node_logs(node_id: str, ws: WebSocket):
 
 
 @app.websocket("/ws/nodes/{node_id}/metrics")
+@log_websocket
 async def ws_node_metrics(node_id: str, ws: WebSocket):
     await ws.accept()
     try:
@@ -514,6 +662,7 @@ async def ws_node_metrics(node_id: str, ws: WebSocket):
 
 
 @app.websocket("/ws/risk/limit-breaches")
+@log_websocket
 async def ws_risk_limit_breaches(ws: WebSocket):
     await ws.accept()
     await ws.send_text(json.dumps(svc.risk_limit_breaches_stream_payload()))
@@ -526,6 +675,7 @@ async def ws_risk_limit_breaches(ws: WebSocket):
 
 
 @app.websocket("/ws/risk/circuit-breakers")
+@log_websocket
 async def ws_risk_circuit_breakers(ws: WebSocket):
     await ws.accept()
     await ws.send_text(json.dumps(svc.risk_circuit_breakers_stream_payload()))
@@ -538,6 +688,7 @@ async def ws_risk_circuit_breakers(ws: WebSocket):
 
 
 @app.websocket("/ws/risk/margin-calls")
+@log_websocket
 async def ws_risk_margin_calls(ws: WebSocket):
     await ws.accept()
     await ws.send_text(json.dumps(svc.risk_margin_calls_stream_payload()))
@@ -550,6 +701,7 @@ async def ws_risk_margin_calls(ws: WebSocket):
 
 
 @app.websocket("/ws/portfolio/balances")
+@log_websocket
 async def ws_portfolio_balances(ws: WebSocket):
     await ws.accept()
     await ws.send_text(json.dumps(svc.portfolio_balances_stream_payload()))
@@ -561,6 +713,7 @@ async def ws_portfolio_balances(ws: WebSocket):
 
 
 @app.websocket("/ws/portfolio/positions")
+@log_websocket
 async def ws_portfolio_positions(ws: WebSocket):
     await ws.accept()
     try:
@@ -573,6 +726,7 @@ async def ws_portfolio_positions(ws: WebSocket):
 
 
 @app.websocket("/ws/portfolio/movements")
+@log_websocket
 async def ws_portfolio_movements(ws: WebSocket):
     await ws.accept()
     try:
@@ -585,6 +739,7 @@ async def ws_portfolio_movements(ws: WebSocket):
 
 
 @app.websocket("/ws/orders")
+@log_websocket
 async def ws_orders(ws: WebSocket):
     await ws.accept()
     try:
