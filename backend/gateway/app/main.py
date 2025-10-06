@@ -12,8 +12,10 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from gateway.config import settings
+from gateway.db.base import create_engine as create_db_engine, dispose_engine
 from .nautilus_service import (
     NodeHandle,
     UserConflictError,
@@ -224,6 +226,27 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
     return " | ".join(parts)
 
 app = FastAPI(title="Amadeus Gateway")
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Initialise shared resources when the application starts."""
+
+    engine = create_db_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception as exc:  # pragma: no cover - connectivity failures
+        logger.exception("database_connectivity_failed")
+        raise RuntimeError("Database connectivity check failed") from exc
+    logger.info("database_ready")
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Dispose of shared resources when the application stops."""
+
+    await dispose_engine()
 
 
 @app.middleware("http")

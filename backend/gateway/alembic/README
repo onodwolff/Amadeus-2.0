@@ -1,0 +1,3 @@
+This directory contains Alembic migration scripts for the Amadeus gateway
+service. Revisions are generated from the models defined in
+``backend/gateway/db/models.py``.
