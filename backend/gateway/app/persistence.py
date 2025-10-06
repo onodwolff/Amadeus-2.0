@@ -7,7 +7,29 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional, Awaitable
 
-from .models import Execution, Instrument, Node, NodeLifecycle, NodeLog, NodeMetric, Order, RiskAlertRecord
+try:  # pragma: no cover - optional dependency
+    from sqlalchemy import select
+except Exception:  # pragma: no cover - optional dependency
+    select = None  # type: ignore[assignment]
+
+SQLALCHEMY_AVAILABLE = True
+try:  # pragma: no cover - optional dependency
+    from .models import (
+        Config,
+        ConfigFormat,
+        ConfigSource,
+        Execution,
+        Instrument,
+        Node,
+        NodeLifecycle,
+        NodeLog,
+        NodeMetric,
+        Order,
+        RiskAlertRecord,
+    )
+except Exception:  # pragma: no cover - optional dependency
+    SQLALCHEMY_AVAILABLE = False
+    Config = ConfigFormat = ConfigSource = Execution = Instrument = Node = NodeLifecycle = NodeLog = NodeMetric = Order = RiskAlertRecord = object  # type: ignore[assignment]
 from .storage import AsyncDatabase, DatabaseConfig, DatabaseNotAvailable
 
 LOGGER = logging.getLogger("gateway.persistence")
@@ -58,6 +80,9 @@ class NullStorage:
     def record_risk_alert(self, payload: Dict[str, Any]) -> None:
         return None
 
+    def record_config_version(self, payload: Dict[str, Any]) -> None:
+        return None
+
 
 class GatewayStorage(NullStorage):
     """Threaded adapter exposing synchronous helpers backed by ``AsyncDatabase``."""
@@ -97,6 +122,10 @@ class GatewayStorage(NullStorage):
             LOGGER.warning("storage operation failed", exc_info=exc)
 
     async def _upsert_instruments(self, instruments: Iterable[Dict[str, Any]]) -> None:
+        if not SQLALCHEMY_AVAILABLE or select is None:
+            LOGGER.debug("config_persistence_skipped", reason="sqlalchemy_missing")
+            return
+
         async with self._database.session() as session:
             for instrument in instruments:
                 instrument_id = instrument.get("instrument_id") or instrument.get("id")
@@ -255,10 +284,86 @@ class GatewayStorage(NullStorage):
     def record_risk_alert(self, payload: Dict[str, Any]) -> None:  # type: ignore[override]
         self._submit(self._upsert_risk_alert(payload))
 
+    async def _insert_config_version(self, payload: Dict[str, Any]) -> None:
+        async with self._database.session() as session:
+            node_identifier = payload.get("node_id")
+            if not node_identifier:
+                return
+
+            node_pk: Optional[int]
+            try:
+                node_pk = int(node_identifier)
+            except (TypeError, ValueError):
+                result = await session.execute(
+                    select(Node.id).where(Node.summary["external_id"].astext == str(node_identifier))
+                )
+                node_pk = result.scalar_one_or_none()
+
+            if node_pk is None:
+                LOGGER.debug("config_persistence_skipped", node_id=node_identifier)
+                return
+
+            try:
+                version = int(payload.get("version") or 1)
+            except (TypeError, ValueError):
+                version = 1
+
+            source_raw = str(payload.get("source") or "ui").lower()
+            try:
+                source = ConfigSource(source_raw)
+            except ValueError:
+                if source_raw in {"generated", "gateway", "template"}:
+                    source = ConfigSource.TEMPLATE
+                elif source_raw in {"payload", "api"}:
+                    source = ConfigSource.UI
+                else:
+                    source = ConfigSource.UI
+
+            format_raw = str(payload.get("format") or "json").lower()
+            if format_raw in {"yml", "yaml"}:
+                fmt = ConfigFormat.YAML
+            else:
+                try:
+                    fmt = ConfigFormat(format_raw)
+                except ValueError:
+                    fmt = ConfigFormat.JSON
+
+            content_payload = payload.get("content") or {}
+            if not isinstance(content_payload, dict):
+                try:
+                    content_payload = dict(content_payload)
+                except Exception:
+                    content_payload = {"value": content_payload}
+
+            result = await session.execute(
+                select(Config).where(Config.node_id == node_pk, Config.version == version)
+            )
+            record = result.scalar_one_or_none()
+            if record is None:
+                record = Config(
+                    node_id=node_pk,
+                    version=version,
+                    source=source,
+                    format=fmt,
+                    content=dict(content_payload),
+                )
+                session.add(record)
+            else:
+                record.source = source
+                record.format = fmt
+                record.content = dict(content_payload)
+
+    def record_config_version(self, payload: Dict[str, Any]) -> None:  # type: ignore[override]
+        self._submit(self._insert_config_version(payload))
+
 
 def build_storage(database_url: str) -> NullStorage:
     config = DatabaseConfig(url=database_url)
-    database = AsyncDatabase(config)
+    try:
+        database = AsyncDatabase(config)
+    except DatabaseNotAvailable:
+        LOGGER.debug("database_backend_unavailable", reason="sqlalchemy_missing")
+        return NullStorage()
     storage = GatewayStorage(database)
     if storage.initialise():
         return storage

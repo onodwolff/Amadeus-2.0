@@ -15,7 +15,8 @@ import random
 import sys
 import threading
 import uuid
-from typing import Any, Coroutine, Dict, List, Optional, Tuple, Literal
+from copy import deepcopy
+from typing import Any, Coroutine, Dict, List, Optional, Tuple, Literal, Union
 
 from .config import settings
 from .nautilus_engine_service import (
@@ -279,6 +280,7 @@ class MockNautilusService:
         self._cache_ttl = max(0, cache_ttl)
 
         self._nodes: Dict[str, NodeState] = {}
+        self._config_versions: Dict[str, int] = {}
         (
             self._instrument_catalog,
             self._instrument_price_seed,
@@ -340,8 +342,67 @@ class MockNautilusService:
                 "metrics": handle.metrics,
                 "created_at": handle.created_at,
                 "updated_at": handle.updated_at,
+                "summary": {
+                    "external_id": handle.id,
+                    "detail": handle.detail,
+                    "mode": handle.mode,
+                },
             }
         )
+
+    def _record_config_version(
+        self,
+        node_id: str,
+        source: str,
+        fmt: str,
+        content: Dict[str, Any],
+    ) -> None:
+        version = self._config_versions.get(node_id, 0) + 1
+        self._config_versions[node_id] = version
+        payload = {
+            "node_id": node_id,
+            "version": version,
+            "source": source,
+            "format": fmt,
+            "content": deepcopy(content),
+        }
+        self._storage.record_config_version(payload)
+
+    def _persist_node_config(
+        self,
+        *,
+        node_id: str,
+        mode: EngineMode,
+        config: Dict[str, Any],
+        metadata: Dict[str, Any],
+    ) -> None:
+        source = metadata.get("source") or "gateway"
+        fmt = metadata.get("format") or "json"
+        try:
+            path = self._engine_service.store_node_config(
+                node_id=node_id,
+                mode=mode,
+                config=config,
+                source=source,
+                fmt=fmt,
+                metadata=metadata,
+            )
+        except EngineConfigError as exc:
+            self._append_log(
+                node_id,
+                "warning",
+                f"Failed to persist configuration: {exc}",
+                source="gateway",
+            )
+        else:
+            self._append_log(
+                node_id,
+                "debug",
+                f"Configuration persisted to {path.name}",
+                source="gateway",
+            )
+        finally:
+            self._record_config_version(node_id, source, fmt, config)
 
     def _persist_order(self, order: OrderRecord) -> None:
         self._storage.record_order(asdict(order))
@@ -2337,13 +2398,19 @@ class MockNautilusService:
 
     def start_backtest(
         self,
-        symbol: str = "BTCUSDT",
+        payload: Union[Dict[str, Any], str] = "BTCUSDT",
+        *,
         venue: str = "BINANCE",
         bar: str = "1m",
         detail: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
         config_metadata: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
     ) -> NodeHandle:
+        if isinstance(payload, dict):
+            return self._start_backtest_from_payload(payload, user_id=user_id)
+
+        symbol = payload
         config_data: Dict[str, Any] = config or {
             "type": "backtest",
             "strategy": {
@@ -2378,39 +2445,20 @@ class MockNautilusService:
 
         config_data.setdefault("id", node_id)
 
-        meta_payload: Dict[str, Any] = {}
+        meta_payload: Dict[str, Any] = {"source": "generated", "format": "json"}
         if handle.detail:
             meta_payload["detail"] = handle.detail
         if config_metadata:
             meta_payload.update(
                 {key: value for key, value in config_metadata.items() if value is not None}
             )
-        else:
-            meta_payload.update({"source": "generated", "format": "json"})
 
-        try:
-            path = self._engine_service.store_node_config(
-                node_id=node_id,
-                mode=engine_mode,
-                config=config_data,
-                source=meta_payload.get("source"),
-                fmt=meta_payload.get("format"),
-                metadata=meta_payload,
-            )
-        except EngineConfigError as exc:
-            self._append_log(
-                node_id,
-                "warning",
-                f"Failed to persist configuration: {exc}",
-                source="gateway",
-            )
-        else:
-            self._append_log(
-                node_id,
-                "debug",
-                f"Configuration persisted to {path.name}",
-                source="gateway",
-            )
+        self._persist_node_config(
+            node_id=node_id,
+            mode=engine_mode,
+            config=config_data,
+            metadata=meta_payload,
+        )
 
         if not self._engine_service.ensure_package():
             return self._mark_node_error(
@@ -2423,6 +2471,7 @@ class MockNautilusService:
             engine_handle = self._engine_service.launch_trading_node(
                 mode=engine_mode,
                 config=config_data,
+                user_id=user_id,
                 node_id=node_id,
             )
         except Exception as exc:
@@ -2448,6 +2497,163 @@ class MockNautilusService:
             )
 
         return handle
+
+    def _start_backtest_from_payload(
+        self,
+        payload: Dict[str, Any],
+        *,
+        user_id: Optional[str] = None,
+    ) -> NodeHandle:
+        engine_mode = EngineMode.BACKTEST
+        config_data, config_metadata, detail = self._build_backtest_config(payload)
+
+        handle = self._create_node(
+            mode=engine_mode.value,
+            detail=detail,
+            config=config_data,
+            config_metadata=config_metadata,
+        )
+        node_id = handle.id
+
+        config_data.setdefault("id", node_id)
+        config_metadata = dict(config_metadata or {})
+        config_metadata.setdefault("detail", handle.detail)
+
+        self._persist_node_config(
+            node_id=node_id,
+            mode=engine_mode,
+            config=config_data,
+            metadata=config_metadata,
+        )
+
+        if not self._engine_service.ensure_package():
+            return self._mark_node_error(
+                node_id,
+                "Nautilus core not available. Install package into backend venv.",
+                source="system",
+            )
+
+        try:
+            engine_handle = self._engine_service.launch_trading_node(
+                mode=engine_mode,
+                config=config_data,
+                user_id=user_id or payload.get("userId"),
+                node_id=node_id,
+            )
+        except Exception as exc:
+            return self._mark_node_error(
+                node_id,
+                f"Failed to start Nautilus {engine_mode.value} node: {exc}",
+                source="engine",
+            )
+
+        state = self._require_node(node_id)
+        state.engine_handle = engine_handle
+
+        running_message = f"Nautilus {engine_mode.value} engine running"
+        handle = self._mark_node_running(node_id, running_message)
+
+        if detail:
+            self._append_log(
+                node_id,
+                "info",
+                f"Backtest '{detail}' launched",
+                source="gateway",
+            )
+
+        strategy_name = config_data.get("strategy", {}).get("name")
+        if strategy_name:
+            self._append_log(
+                node_id,
+                "debug",
+                f"Configuration loaded: {strategy_name}",
+                source="engine",
+            )
+
+        return handle
+
+    def _build_backtest_config(
+        self, payload: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], str]:
+        strategy_payload = payload.get("strategy") or {}
+        dataset_payload = payload.get("dataset") or {}
+        date_range_payload = payload.get("dateRange") or {}
+        engine_payload = payload.get("engine") or {}
+
+        name = str(payload.get("name") or "").strip()
+        strategy_id = str(strategy_payload.get("id") or "ui_backtest")
+        strategy_name = str(strategy_payload.get("name") or name or "Backtest strategy")
+        parameters_raw = strategy_payload.get("parameters") or []
+        parameters: List[Dict[str, str]] = []
+        for item in parameters_raw:
+            key = str(item.get("key") or "").strip()
+            if not key:
+                continue
+            value = str(item.get("value") or "")
+            parameters.append({"key": key, "value": value})
+
+        venue = str(dataset_payload.get("venue") or "").upper() or None
+        dataset_id = dataset_payload.get("id") or None
+        dataset_label = dataset_payload.get("name") or dataset_id or "historical-dataset"
+        bar_interval = dataset_payload.get("barInterval")
+        dataset_description = dataset_payload.get("description")
+
+        date_start = date_range_payload.get("start")
+        date_end = date_range_payload.get("end")
+
+        data_source: Dict[str, Any] = {
+            "id": dataset_id or f"{(venue or 'dataset').lower()}-{uuid.uuid4().hex[:6]}",
+            "label": dataset_label,
+            "type": "historical",
+            "mode": "read",
+            "parameters": {
+                "venue": venue,
+                "barInterval": bar_interval,
+                "dateRange": {"start": date_start, "end": date_end},
+            },
+        }
+        if dataset_description:
+            data_source["description"] = dataset_description
+
+        config: Dict[str, Any] = {
+            "type": "backtest",
+            "name": name or dataset_label,
+            "strategy": {
+                "id": strategy_id,
+                "name": strategy_name,
+                "parameters": parameters,
+            },
+            "dataSources": [data_source],
+            "keyReferences": [],
+            "constraints": {
+                "autoStopOnError": True,
+            },
+            "engine": engine_payload,
+            "dateRange": data_source["parameters"]["dateRange"],
+        }
+
+        metadata: Dict[str, Any] = {
+            "source": "ui",
+            "format": "json",
+            "name": name or dataset_label,
+            "dataset": dataset_id,
+            "venue": venue,
+            "barInterval": bar_interval,
+            "submitted_at": _utcnow_iso(),
+        }
+        if dataset_description:
+            metadata["dataset_description"] = dataset_description
+
+        detail_parts: List[str] = []
+        if name:
+            detail_parts.append(name)
+        if venue and dataset_label:
+            detail_parts.append(f"{venue} {dataset_label}")
+        if date_start and date_end:
+            detail_parts.append(f"{date_start} → {date_end}")
+        detail = " | ".join(detail_parts) or dataset_label
+
+        return config, metadata, detail
 
     def start_live(
         self,
@@ -2490,39 +2696,20 @@ class MockNautilusService:
 
         config_data.setdefault("id", node_id)
 
-        meta_payload: Dict[str, Any] = {}
+        meta_payload: Dict[str, Any] = {"source": "generated", "format": "json"}
         if handle.detail:
             meta_payload["detail"] = handle.detail
         if config_metadata:
             meta_payload.update(
                 {key: value for key, value in config_metadata.items() if value is not None}
             )
-        else:
-            meta_payload.update({"source": "generated", "format": "json"})
 
-        try:
-            path = self._engine_service.store_node_config(
-                node_id=node_id,
-                mode=engine_mode,
-                config=config_data,
-                source=meta_payload.get("source"),
-                fmt=meta_payload.get("format"),
-                metadata=meta_payload,
-            )
-        except EngineConfigError as exc:
-            self._append_log(
-                node_id,
-                "warning",
-                f"Failed to persist configuration: {exc}",
-                source="gateway",
-            )
-        else:
-            self._append_log(
-                node_id,
-                "debug",
-                f"Configuration persisted to {path.name}",
-                source="gateway",
-            )
+        self._persist_node_config(
+            node_id=node_id,
+            mode=engine_mode,
+            config=config_data,
+            metadata=meta_payload,
+        )
 
         if not self._engine_service.ensure_package():
             return self._mark_node_error(
@@ -2600,39 +2787,20 @@ class MockNautilusService:
 
         config_data.setdefault("id", node_id)
 
-        meta_payload: Dict[str, Any] = {}
+        meta_payload: Dict[str, Any] = {"source": "generated", "format": "json"}
         if handle.detail:
             meta_payload["detail"] = handle.detail
         if config_metadata:
             meta_payload.update(
                 {key: value for key, value in config_metadata.items() if value is not None}
             )
-        else:
-            meta_payload.update({"source": "generated", "format": "json"})
 
-        try:
-            path = self._engine_service.store_node_config(
-                node_id=node_id,
-                mode=engine_mode,
-                config=config_data,
-                source=meta_payload.get("source"),
-                fmt=meta_payload.get("format"),
-                metadata=meta_payload,
-            )
-        except EngineConfigError as exc:
-            self._append_log(
-                node_id,
-                "warning",
-                f"Failed to persist configuration: {exc}",
-                source="gateway",
-            )
-        else:
-            self._append_log(
-                node_id,
-                "debug",
-                f"Configuration persisted to {path.name}",
-                source="gateway",
-            )
+        self._persist_node_config(
+            node_id=node_id,
+            mode=engine_mode,
+            config=config_data,
+            metadata=meta_payload,
+        )
 
         if not self._engine_service.ensure_package():
             return self._mark_node_error(
@@ -2747,6 +2915,7 @@ class MockNautilusService:
         handle = NodeHandle(id=node_id, mode=mode, status="created", detail=detail)
         state = NodeState(handle=handle, config=config, lifecycle=[], logs=[], metrics=[])
         self._nodes[node_id] = state
+        self._config_versions[node_id] = 0
         self._record_lifecycle(node_id, "created", "Node registered")
         self._ensure_metrics_seeded(node_id)
         self._publish(
@@ -3022,6 +3191,7 @@ class NautilusService:
             cache_ttl=settings.data.cache_ttl_seconds,
         )
         self._engine_orders: Dict[str, Dict[str, Any]] = {}
+        self._config_versions: Dict[str, int] = {}
 
     def __getattr__(self, item: str):  # pragma: no cover - delegation helper
         return getattr(self._mock, item)
