@@ -26,6 +26,7 @@ from .nautilus_service import (
 from .nautilus_engine_service import EngineConfigError, EngineMode
 from .logging import bind_contextvars, clear_contextvars, get_logger
 from .routes.keys import router as keys_router
+from .routes.users import router as users_router
 
 
 logger = get_logger("gateway.api")
@@ -228,6 +229,7 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
 
 app = FastAPI(title="Amadeus Gateway")
 app.include_router(keys_router, prefix="/api")
+app.include_router(users_router, prefix="/api")
 
 
 @app.on_event("startup")
