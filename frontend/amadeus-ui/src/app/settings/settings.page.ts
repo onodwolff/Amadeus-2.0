@@ -302,6 +302,9 @@ export class SettingsPage implements OnInit {
   }
 
   maskSecret(key: ApiKey): string {
+    if (key.api_key_masked) {
+      return key.api_key_masked;
+    }
     if (key.fingerprint) {
       const suffix = key.fingerprint.slice(-4).padStart(4, '•');
       return `•••• ${suffix}`;
