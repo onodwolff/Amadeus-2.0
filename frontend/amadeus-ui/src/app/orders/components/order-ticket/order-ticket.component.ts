@@ -99,7 +99,7 @@ export class OrderTicketComponent implements OnInit {
     }
     const raw = this.form.getRawValue();
     const price = raw.price != null ? Number(raw.price) : null;
-    const offset = raw.limit_offset != null ? Number(raw.limit_offset) : null;
+    const offset = this.parseLimitOffset(raw.limit_offset);
     if (!Number.isFinite(price) || price == null || price <= 0) {
       return null;
     }
@@ -229,9 +229,7 @@ export class OrderTicketComponent implements OnInit {
     const nodeId = (raw.node_id ?? '').trim();
     const clientOrderId = (raw.client_order_id ?? '').trim();
     const expireRaw = (raw.expire_time ?? '').trim();
-    const limitOffsetRaw = raw.limit_offset != null ? Number(raw.limit_offset) : null;
-    const limitOffset =
-      limitOffsetRaw != null && !Number.isNaN(limitOffsetRaw) ? limitOffsetRaw : null;
+    const limitOffset = this.parseLimitOffset(raw.limit_offset);
     const contingency = (raw.contingency_type ?? '').toUpperCase();
     const orderListId = (raw.order_list_id ?? '').trim();
     const parentOrderId = (raw.parent_order_id ?? '').trim();
@@ -319,12 +317,6 @@ export class OrderTicketComponent implements OnInit {
     const type = (value.type ?? 'market').toLowerCase() as OrderType;
     const quantity = Number(value.quantity);
     const price = value.price != null ? Number(value.price) : null;
-    const limitOffsetRaw = value.limit_offset;
-    const limitOffset =
-      limitOffsetRaw == null ||
-      (typeof limitOffsetRaw === 'string' && limitOffsetRaw.trim() === '')
-        ? null
-        : Number(limitOffsetRaw);
     const tif = (value.time_in_force ?? '').trim().toUpperCase();
     const expireTime = (value.expire_time ?? '').trim();
     const contingency = (value.contingency_type ?? '').toUpperCase();
@@ -510,12 +502,6 @@ export class OrderTicketComponent implements OnInit {
       return null;
     }
     const price = raw.price != null ? Number(raw.price) : null;
-    const limitOffsetRaw = raw.limit_offset;
-    const limitOffset =
-      limitOffsetRaw == null ||
-      (typeof limitOffsetRaw === 'string' && limitOffsetRaw.trim() === '')
-        ? null
-        : Number(limitOffsetRaw);
     const symbol = (raw.symbol ?? '').trim().toUpperCase();
     const venue = (raw.venue ?? '').trim().toUpperCase();
     const type = (raw.type ?? 'market').toLowerCase() as OrderType;
@@ -542,4 +528,23 @@ export class OrderTicketComponent implements OnInit {
     }
     return this.availablePositionQuantity(symbol, venue);
   });
+
+  private parseLimitOffset(raw: unknown): number | null {
+    if (raw == null) {
+      return null;
+    }
+    if (typeof raw === 'number') {
+      return Number.isFinite(raw) ? raw : null;
+    }
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (trimmed === '') {
+        return null;
+      }
+      const coerced = Number(trimmed);
+      return Number.isNaN(coerced) ? null : coerced;
+    }
+    const coerced = Number(raw);
+    return Number.isNaN(coerced) ? null : coerced;
+  }
 }
