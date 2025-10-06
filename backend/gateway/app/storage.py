@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Callable, Optional, Awaitable, Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import sessionmaker
+
+from gateway.db.base import Base
 
 try:  # pragma: no cover - optional dependency
     import redis.asyncio as redis
@@ -18,9 +20,6 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 LOGGER = logging.getLogger("gateway.storage")
-
-
-Base = declarative_base()
 
 
 class DatabaseNotAvailable(RuntimeError):
