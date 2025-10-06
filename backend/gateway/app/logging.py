@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
 from typing import Any
 
-import structlog
+from gateway.config import settings
 
-from backend.gateway.config import settings
+StructlogModule = Any
+
+_structlog_spec = importlib.util.find_spec("structlog")
+if _structlog_spec is not None:
+    structlog: StructlogModule = importlib.import_module("structlog")
+else:  # pragma: no cover - executed only when structlog is missing at runtime
+    structlog = None
 
 
 def _resolve_log_level(level: str | int | None) -> int:
@@ -30,6 +37,12 @@ def setup_logging(*, level: str | int | None = None) -> None:
         level=resolved_level,
         force=True,
     )
+
+    if structlog is None:
+        logging.getLogger(__name__).warning(
+            "structlog is not installed; falling back to standard logging output."
+        )
+        return
 
     processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
