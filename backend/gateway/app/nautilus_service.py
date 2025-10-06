@@ -14,6 +14,7 @@ import uuid
 from typing import Any, Coroutine, Dict, List, Optional, Tuple, Literal
 
 from .nautilus_engine_service import (
+    EngineConfigError,
     EngineEventBus,
     EngineMode,
     NautilusEngineService,
@@ -2166,6 +2167,7 @@ class MockNautilusService:
         bar: str = "1m",
         detail: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        config_metadata: Optional[Dict[str, Any]] = None,
     ) -> NodeHandle:
         config_data: Dict[str, Any] = config or {
             "type": "backtest",
@@ -2194,6 +2196,7 @@ class MockNautilusService:
             detail=detail
             or f"Backtest node prepared (symbol={symbol}, venue={venue}, bar={bar})",
             config=config_data,
+            config_metadata=config_metadata,
         )
 
     def start_live(
@@ -2201,6 +2204,7 @@ class MockNautilusService:
         venue: str = "BINANCE",
         detail: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        config_metadata: Optional[Dict[str, Any]] = None,
     ) -> NodeHandle:
         config_data: Dict[str, Any] = config or {
             "type": "live",
@@ -2229,6 +2233,7 @@ class MockNautilusService:
             mode="live",
             detail=detail or f"Live node prepared (venue={venue}). Configure adapters to proceed.",
             config=config_data,
+            config_metadata=config_metadata,
         )
 
     def stop_node(self, node_id: str) -> NodeHandle:
@@ -2292,7 +2297,13 @@ class MockNautilusService:
     def as_dict(self, handle: NodeHandle) -> dict:
         return asdict(handle)
 
-    def _create_node(self, mode: str, detail: Optional[str], config: Dict[str, Any]) -> NodeHandle:
+    def _create_node(
+        self,
+        mode: str,
+        detail: Optional[str],
+        config: Dict[str, Any],
+        config_metadata: Optional[Dict[str, Any]] = None,
+    ) -> NodeHandle:
         prefix = "bt" if mode == "backtest" else "lv"
         node_id = f"{prefix}-{uuid.uuid4().hex[:8]}"
         handle = NodeHandle(id=node_id, mode=mode, status="created", detail=detail)
@@ -2304,6 +2315,39 @@ class MockNautilusService:
             "engine.nodes",
             {"event": "created", "node": self.as_dict(handle)},
         )
+
+        try:
+            engine_mode = EngineMode(mode)
+        except ValueError:
+            engine_mode = None
+
+        if engine_mode is not None:
+            metadata: Dict[str, Any] = {}
+            if detail:
+                metadata["detail"] = detail
+            if config_metadata:
+                metadata.update(
+                    {key: value for key, value in config_metadata.items() if value is not None}
+                )
+            else:
+                metadata.update({"source": "generated", "format": "json"})
+
+            try:
+                self._engine_service.store_node_config(
+                    node_id=node_id,
+                    mode=engine_mode,
+                    config=config,
+                    source=metadata.get("source"),
+                    fmt=metadata.get("format"),
+                    metadata=metadata,
+                )
+            except EngineConfigError as exc:
+                self._append_log(
+                    node_id,
+                    "warning",
+                    f"Failed to persist configuration: {exc}",
+                    source="gateway",
+                )
 
         if nt is None:
             handle.status = "error"
