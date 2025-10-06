@@ -99,7 +99,7 @@ export class OrderTicketComponent implements OnInit {
     }
     const raw = this.form.getRawValue();
     const price = raw.price != null ? Number(raw.price) : null;
-    const offset = raw.limit_offset != null ? Number(raw.limit_offset) : null;
+    const offset = this.parseLimitOffset(raw.limit_offset);
     if (!Number.isFinite(price) || price == null || price <= 0) {
       return null;
     }
@@ -229,9 +229,7 @@ export class OrderTicketComponent implements OnInit {
     const nodeId = (raw.node_id ?? '').trim();
     const clientOrderId = (raw.client_order_id ?? '').trim();
     const expireRaw = (raw.expire_time ?? '').trim();
-    const limitOffsetRaw = raw.limit_offset != null ? Number(raw.limit_offset) : null;
-    const limitOffset =
-      limitOffsetRaw != null && !Number.isNaN(limitOffsetRaw) ? limitOffsetRaw : null;
+    const limitOffset = this.parseLimitOffset(raw.limit_offset);
     const contingency = (raw.contingency_type ?? '').toUpperCase();
     const orderListId = (raw.order_list_id ?? '').trim();
     const parentOrderId = (raw.parent_order_id ?? '').trim();
