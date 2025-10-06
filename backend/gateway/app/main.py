@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio, json
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
@@ -16,6 +16,7 @@ from .nautilus_service import (
     UserValidationError,
     svc,
 )
+from .nautilus_engine_service import EngineConfigError, EngineMode
 
 
 class NodeLaunchStrategyParameter(BaseModel):
@@ -50,12 +51,19 @@ class NodeLaunchConstraints(BaseModel):
     concurrencyLimit: int | None = None
 
 
+class NodeLaunchEngineConfig(BaseModel):
+    source: Optional[str] = Field(default=None, min_length=1)
+    format: Optional[Literal["json", "yaml", "yml"]] = None
+    content: Any
+
+
 class NodeLaunchPayload(BaseModel):
     type: str
     strategy: NodeLaunchStrategy
     dataSources: List[NodeLaunchDataSource] = Field(default_factory=list)
     keyReferences: List[NodeLaunchKeyReference] = Field(default_factory=list)
     constraints: NodeLaunchConstraints = Field(default_factory=NodeLaunchConstraints)
+    engineConfig: Optional[NodeLaunchEngineConfig] = None
 
 
 class OrderCreatePayload(BaseModel):
@@ -166,12 +174,56 @@ def start_live():
 @app.post("/nodes/launch")
 def launch_node(payload: NodeLaunchPayload):
     node_type = payload.type.lower()
+    try:
+        engine_mode = EngineMode(node_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unsupported node type '{payload.type}'")
+
     detail = build_launch_detail(payload)
-    config = payload.dict()
+    config_metadata: Optional[Dict[str, Any]] = None
+
+    if payload.engineConfig is not None:
+        config_input = payload.engineConfig
+        config_metadata = {
+            "source": config_input.source or "api",
+            "format": (config_input.format or "json"),
+        }
+        try:
+            config = svc.engine.prepare_config(
+                config_input.content,
+                fmt=config_input.format,
+                mode=engine_mode,
+            )
+        except EngineConfigError as exc:
+            detail_payload: Dict[str, Any] = {"message": str(exc)}
+            if exc.errors:
+                detail_payload["errors"] = exc.errors
+            raise HTTPException(status_code=400, detail=detail_payload)
+    else:
+        try:
+            config = svc.engine.validate_config(
+                payload.dict(exclude={"engineConfig"}),
+                mode=engine_mode,
+            )
+        except EngineConfigError as exc:
+            detail_payload = {"message": str(exc)}
+            if exc.errors:
+                detail_payload["errors"] = exc.errors
+            raise HTTPException(status_code=400, detail=detail_payload)
+        config_metadata = {"source": "payload", "format": "json"}
+
     if node_type == "backtest":
-        node = svc.start_backtest(detail=detail, config=config)
+        node = svc.start_backtest(
+            detail=detail,
+            config=config,
+            config_metadata=config_metadata,
+        )
     elif node_type == "live":
-        node = svc.start_live(detail=detail, config=config)
+        node = svc.start_live(
+            detail=detail,
+            config=config,
+            config_metadata=config_metadata,
+        )
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported node type '{payload.type}'")
     return {"node": svc.as_dict(node)}
