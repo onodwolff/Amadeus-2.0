@@ -21,6 +21,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
+import uuid
 import threading
 from typing import Any, AsyncIterator, Callable, Dict, Iterable, Optional, Tuple
 
@@ -471,40 +472,145 @@ class NautilusEngineService:
             )
             return
 
+        subscribe = getattr(dispatcher, "subscribe", None)
         subscribe_all = getattr(dispatcher, "subscribe_all", None)
-        if not callable(subscribe_all):
+        if not callable(subscribe) and not callable(subscribe_all):
             self._logger.debug(
-                "Nautilus dispatcher for node %s has no subscribe_all method.", node_id
+                "Nautilus dispatcher for node %s exposes no subscribe helpers.", node_id
             )
             return
 
-        def forward(event: Any) -> None:
+        def emit_positions_snapshot() -> None:
+            portfolio = getattr(node, "portfolio", None)
+            if portfolio is None:
+                return
+            positions_source = getattr(portfolio, "positions", None)
+            try:
+                positions = positions_source() if callable(positions_source) else positions_source
+            except Exception:
+                return
+            if not positions:
+                return
+            payload: Dict[str, Any] = {
+                "event": "snapshot",
+                "node_id": node_id,
+                "positions": self._serialise_positions(positions),
+            }
+            self.publish("engine.portfolio", payload)
+
+        def maybe_snapshot_positions(event: Any) -> None:
+            event_name = getattr(event, "__class__", type(event)).__name__.lower()
+            if any(keyword in event_name for keyword in ("fill", "position", "portfolio")):
+                emit_positions_snapshot()
+
+        def publish_event(topic: str, field: str, event: Any) -> None:
             event_name = getattr(event, "__class__", type(event)).__name__
-            topic, field = self._map_event_to_topic(event_name)
-            payload = {
+            serialised = self._serialise_event(event)
+            payload: Dict[str, Any] = {
                 "event": event_name,
                 "node_id": node_id,
             }
-            serialised = self._serialise_event(event)
-            if isinstance(serialised, dict):
-                payload[field] = serialised
+            if topic == "engine.risk.alerts":
+                payload[field] = self._build_risk_alert(event, node_id, serialised)
             else:
-                payload[field] = {"repr": repr(serialised)}
+                payload[field] = serialised if isinstance(serialised, dict) else {"repr": repr(serialised)}
             self.publish(topic, payload)
 
-        try:
-            subscribe_all(forward)
-        except TypeError:
+        def handle_order(event: Any) -> None:
+            publish_event("engine.orders", "order", event)
+            maybe_snapshot_positions(event)
+
+        def handle_execution(event: Any) -> None:
+            publish_event("engine.executions", "execution", event)
+            maybe_snapshot_positions(event)
+
+        def handle_risk(event: Any) -> None:
+            publish_event("engine.risk.alerts", "alert", event)
+
+        def handle_generic(event: Any) -> None:
+            topic, field = self._map_event_to_topic(
+                getattr(event, "__class__", type(event)).__name__
+            )
+            publish_event(topic, field, event)
+            maybe_snapshot_positions(event)
+
+        event_handlers: list[tuple[Any, Callable[[Any], None]]] = []
+        order_event = self._resolve_nt_type("model", "events", "order", "OrderEvent")
+        order_filled = self._resolve_nt_type("model", "events", "order", "OrderFilled")
+        risk_limit = self._resolve_nt_type("risk", "events", "RiskLimitEvent")
+        margin_call = self._resolve_nt_type("risk", "events", "MarginCallEvent")
+
+        if order_event is not None:
+            event_handlers.append((order_event, handle_order))
+        if order_filled is not None:
+            event_handlers.append((order_filled, handle_execution))
+        if risk_limit is not None:
+            event_handlers.append((risk_limit, handle_risk))
+        if margin_call is not None and margin_call is not risk_limit:
+            event_handlers.append((margin_call, handle_risk))
+
+        subscribed_specific = False
+        if callable(subscribe):
+            for event_cls, handler in event_handlers:
+                if event_cls is None:
+                    continue
+                try:
+                    subscribe(event_cls, handler)
+                    subscribed_specific = True
+                except TypeError:
+                    try:
+                        subscribe(event_cls, callback=handler)  # type: ignore[arg-type]
+                        subscribed_specific = True
+                    except Exception as exc:  # pragma: no cover - optional API shapes
+                        self._logger.debug(
+                            "Unable to subscribe to %s for node %s: %s",
+                            getattr(event_cls, "__name__", str(event_cls)),
+                            node_id,
+                            exc,
+                        )
+                except Exception as exc:  # pragma: no cover - optional API shapes
+                    self._logger.debug(
+                        "Unable to subscribe to %s for node %s: %s",
+                        getattr(event_cls, "__name__", str(event_cls)),
+                        node_id,
+                        exc,
+                    )
+
+        if not subscribed_specific and callable(subscribe_all):
             try:
-                subscribe_all(callback=forward)
+                subscribe_all(handle_generic)
+            except TypeError:
+                try:
+                    subscribe_all(callback=handle_generic)
+                except Exception as exc:  # pragma: no cover - optional API shapes
+                    self._logger.debug(
+                        "Unable to subscribe to Nautilus events for node %s: %s",
+                        node_id,
+                        exc,
+                    )
             except Exception as exc:  # pragma: no cover - optional API shapes
                 self._logger.debug(
                     "Unable to subscribe to Nautilus events for node %s: %s", node_id, exc
                 )
-        except Exception as exc:  # pragma: no cover - optional API shapes
-            self._logger.debug(
-                "Unable to subscribe to Nautilus events for node %s: %s", node_id, exc
-            )
+
+        def lifecycle_stopped(*_: Any) -> None:
+            payload = {
+                "event": "stopped",
+                "node_id": node_id,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+            self.publish("engine.nodes", payload)
+            self.publish(f"engine.nodes.{node_id}.lifecycle", payload)
+
+        for attribute in ("add_stop_listener", "register_stop_handler", "on_stop"):
+            hook = getattr(node, attribute, None)
+            if not callable(hook):
+                continue
+            try:
+                hook(lifecycle_stopped)
+                break
+            except Exception:  # pragma: no cover - optional API shapes
+                continue
 
     def submit_order(self, instructions: Dict[str, Any]) -> None:
         """Forward order instructions to a running Nautilus trading node if available."""
@@ -543,6 +649,44 @@ class NautilusEngineService:
                 )
 
         self._logger.warning("Unable to submit order via Nautilus – no compatible node")
+
+    def cancel_order(self, instructions: Dict[str, Any]) -> None:
+        """Forward an order cancel request to a running Nautilus node."""
+
+        if not self._nodes_running:
+            self._logger.debug("No Nautilus nodes active – skipping cancel request.")
+            return
+
+        target_id = instructions.get("node_id")
+        candidates: Iterable[Tuple[str, Dict[str, Any]]]
+        if isinstance(target_id, str) and target_id in self._nodes_running:
+            candidates = [(target_id, self._nodes_running[target_id])]
+        else:
+            candidates = list(self._nodes_running.items())
+
+        payload = {key: value for key, value in instructions.items() if key != "node_id"}
+
+        for node_key, entry in candidates:
+            node_obj = entry.get("node")
+            if node_obj is None:
+                continue
+            cancel = (
+                getattr(node_obj, "cancel_order", None)
+                or getattr(node_obj, "cancel_orders", None)
+                or getattr(node_obj, "cancel", None)
+            )
+            if not callable(cancel):
+                continue
+            try:
+                self._call_with_signature(cancel, payload)
+                self._logger.debug("Submitted cancel via node %s", node_key)
+                return
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.debug(
+                    "Nautilus node %s rejected cancel request: %s", node_key, exc
+                )
+
+        self._logger.warning("Unable to cancel order via Nautilus – no compatible node")
 
     def get_historical_bars(
         self,
@@ -685,6 +829,65 @@ class NautilusEngineService:
         if any(keyword in lowered for keyword in ("lifecycle", "status", "stop", "start")):
             return "engine.nodes", "lifecycle"
         return "engine.nautilus.events", "payload"
+
+    def _resolve_nt_type(self, *path: str) -> Any:
+        module = self._nt
+        if module is None:
+            return None
+        for name in path[:-1]:
+            module = getattr(module, name, None)
+            if module is None:
+                return None
+        return getattr(module, path[-1], None)
+
+    def _serialise_positions(self, positions: Any) -> Any:
+        if isinstance(positions, dict):
+            return {
+                str(key): self._serialise_event(value)
+                for key, value in positions.items()
+            }
+        if isinstance(positions, (list, tuple, set)):
+            return [self._serialise_event(item) for item in positions]
+        return self._serialise_event(positions)
+
+    def _build_risk_alert(
+        self,
+        event: Any,
+        node_id: str,
+        serialised: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        event_name = getattr(event, "__class__", type(event)).__name__
+        lowered = event_name.lower()
+        category = "limit_breach"
+        severity = "high"
+        if "margin" in lowered:
+            category = "margin_call"
+            severity = "critical"
+        elif "limit" in lowered:
+            category = "limit_breach"
+            severity = "medium"
+        elif "risk" in lowered:
+            category = "limit_breach"
+
+        title = getattr(event, "title", None) or event_name.replace("_", " ")
+        message = (
+            getattr(event, "message", None)
+            or serialised.get("message")
+            or serialised.get("detail")
+            or title
+        )
+
+        alert_payload: Dict[str, Any] = {
+            "alert_id": uuid.uuid4().hex,
+            "category": category,
+            "title": title,
+            "message": message,
+            "severity": severity,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "context": serialised,
+            "node_id": node_id,
+        }
+        return alert_payload
 
     def _serialise_event(self, event: Any) -> Dict[str, Any]:
         if event is None:
