@@ -322,7 +322,7 @@ export class SettingsPage implements OnInit {
 
     const adapter = this
       .assignmentsView()
-      .flatMap((node) => node.adapters)
+      .flatMap((node) => node.adapters ?? [])
       .find((item) => item.selectionKey === selectionKey);
 
     if (!adapter) {

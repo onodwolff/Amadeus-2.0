@@ -45,11 +45,21 @@
     </div>
     <div class="meta-card" *ngIf="healthInfo() as health">
       <span class="meta-card__label">Gateway health</span>
-      <span class="meta-card__value">{{ health.status || (health | json) }}</span>
+      <span class="meta-card__value" [class.meta-card__value--warn]="health.status !== 'ok'">
+        {{ (health.status || 'unknown') | titlecase }}
+        <ng-container *ngIf="health.adapters">
+          • {{ health.adapters.connected }}/{{ health.adapters.total }} adapters
+        </ng-container>
+      </span>
     </div>
     <div class="meta-card" *ngIf="coreInfo() as core">
       <span class="meta-card__label">Nautilus core</span>
-      <span class="meta-card__value">{{ core.available ? 'online' : 'offline' }}</span>
+      <span class="meta-card__value" [class.meta-card__value--warn]="!core.available">
+        {{ core.available ? 'Online' : 'Offline' }}
+        <ng-container *ngIf="core.adapters">
+          • {{ core.adapters.connected }}/{{ core.adapters.total }} adapters
+        </ng-container>
+      </span>
       <span class="meta-card__hint" *ngIf="core.nautilus_version">v{{ core.nautilus_version }}</span>
     </div>
   </div>

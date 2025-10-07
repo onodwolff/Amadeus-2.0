@@ -8,7 +8,14 @@ import uuid
 from functools import wraps
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -60,7 +67,11 @@ def log_websocket(func):
     async def wrapper(*args, **kwargs):
         bound = signature.bind_partial(*args, **kwargs)
         websocket = next(
-            (value for value in bound.arguments.values() if isinstance(value, WebSocket)),
+            (
+                value
+                for value in bound.arguments.values()
+                if isinstance(value, WebSocket)
+            ),
             None,
         )
         if websocket is None:
@@ -198,12 +209,16 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
     parts: List[str] = []
     strategy_summary = f"Strategy {payload.strategy.name} ({payload.strategy.id})"
     if payload.strategy.parameters:
-        params = ", ".join(f"{param.key}={param.value}" for param in payload.strategy.parameters)
+        params = ", ".join(
+            f"{param.key}={param.value}" for param in payload.strategy.parameters
+        )
         strategy_summary += f" [{params}]"
     parts.append(strategy_summary)
 
     if payload.dataSources:
-        sources = ", ".join(f"{source.label or source.id}" for source in payload.dataSources)
+        sources = ", ".join(
+            f"{source.label or source.id}" for source in payload.dataSources
+        )
         parts.append(f"Data: {sources}")
 
     if payload.keyReferences:
@@ -226,6 +241,7 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
     node_type = payload.type.capitalize()
     parts.insert(0, f"{node_type} node")
     return " | ".join(parts)
+
 
 app = FastAPI(title="Amadeus Gateway")
 app.include_router(keys_router, prefix="/api")
@@ -313,6 +329,7 @@ async def log_requests(request: Request, call_next):
     clear_contextvars()
     return response
 
+
 # 👇 Разрешаем localhost и 127.0.0.1 (Angular dev)
 app.add_middleware(
     CORSMiddleware,
@@ -322,22 +339,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "env": settings.env}
+    return svc.health_status()
+
 
 @app.get("/core/info")
 def core_info():
     return svc.core_info()
 
+
 @app.get("/nodes")
 def list_nodes():
     return {"nodes": [svc.as_dict(n) for n in svc.list_nodes()]}
+
 
 @app.post("/nodes/backtest/start")
 def start_backtest():
     node: NodeHandle = svc.start_backtest()
     return {"node": svc.as_dict(node)}
+
 
 @app.post("/nodes/live/start")
 def start_live():
@@ -357,7 +379,9 @@ def launch_node(payload: NodeLaunchPayload):
     try:
         engine_mode = EngineMode(node_type)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unsupported node type '{payload.type}'")
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported node type '{payload.type}'"
+        )
 
     detail = build_launch_detail(payload)
     config_metadata: Optional[Dict[str, Any]] = None
@@ -405,8 +429,11 @@ def launch_node(payload: NodeLaunchPayload):
             config_metadata=config_metadata,
         )
     else:
-        raise HTTPException(status_code=400, detail=f"Unsupported node type '{payload.type}'")
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported node type '{payload.type}'"
+        )
     return {"node": svc.as_dict(node)}
+
 
 @app.post("/nodes/{node_id}/stop")
 def stop_node(node_id: str):

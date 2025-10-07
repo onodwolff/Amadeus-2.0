@@ -12,11 +12,13 @@ mock/simulated implementations available for tests.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import hashlib
 import inspect
 import os
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import json
 import logging
@@ -32,10 +34,34 @@ try:  # pragma: no cover - optional dependency during unit tests
 except Exception:  # pragma: no cover - optional dependency during unit tests
     nt = None
 
+try:  # pragma: no cover - optional dependency for async database access
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+        create_async_engine,
+    )
+except Exception:  # pragma: no cover - optional dependency during unit tests
+    AsyncSession = None  # type: ignore[assignment]
+    async_sessionmaker = None  # type: ignore[assignment]
+    create_async_engine = None  # type: ignore[assignment]
+    select = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency for ORM models
+    from gateway.db.models import ApiKey
+except Exception:  # pragma: no cover - optional dependency during unit tests
+    ApiKey = None  # type: ignore[assignment]
+
 try:  # pragma: no cover - optional dependency for YAML parsing
     import yaml
 except Exception:  # pragma: no cover - optional dependency during unit tests
     yaml = None
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+from .crypto import decrypt
 
 
 def retrieve_key(key_id: str, key_type: str) -> Optional[str]:
@@ -113,6 +139,7 @@ class EngineNodeHandle:
     user_id: Optional[str]
     started_at: datetime
     config_version: int
+    adapters: List[Dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> Dict[str, Any]:
         """Return a serialisable snapshot describing the running node."""
@@ -125,6 +152,22 @@ class EngineNodeHandle:
             "alive": self.thread.is_alive(),
             "config_version": self.config_version,
         }
+
+
+@dataclass
+class AdapterPlanEntry:
+    """Container describing adapter setup for a Nautilus trading node."""
+
+    name: str
+    identifier: str
+    mode: str
+    sandbox: bool
+    data_factory: Optional[Any] = None
+    exec_factory: Optional[Any] = None
+    data_config: Optional[Any] = None
+    exec_config: Optional[Any] = None
+    detail: Dict[str, Any] = field(default_factory=dict)
+    sources: List[str] = field(default_factory=list)
 
 
 class EngineEventBus:
@@ -248,6 +291,9 @@ class NautilusEngineService:
         self,
         bus: Optional[EngineEventBus] = None,
         storage_root: Optional[Path] = None,
+        *,
+        database_url: Optional[str] = None,
+        encryption_key: Optional[bytes] = None,
     ) -> None:
         self._bus = bus or EngineEventBus()
         self._nt = nt
@@ -255,6 +301,12 @@ class NautilusEngineService:
         self._logger = logging.getLogger(__name__)
         self._nodes_running: Dict[str, EngineNodeHandle] = {}
         self._config_versions: Dict[str, int] = {}
+        self._database_url = database_url
+        self._encryption_key = encryption_key
+        self._api_engine = None
+        self._api_session_factory = None
+        self._node_configs: Dict[str, Dict[str, Any]] = {}
+        self._adapter_status: Dict[str, List[Dict[str, Any]]] = {}
 
     @property
     def bus(self) -> EngineEventBus:
@@ -324,8 +376,12 @@ class NautilusEngineService:
         meta_path = version_dir / f"{mode.value}.v{version}.meta.json"
 
         try:
-            version_path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            meta_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            version_path.write_text(
+                json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            meta_path.write_text(
+                json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
         except OSError as exc:  # pragma: no cover - filesystem issues
             self._logger.debug(
                 "Unable to persist config version for node %s: %s",
@@ -402,7 +458,9 @@ class NautilusEngineService:
 
         config_type = config.get("type")
         if not isinstance(config_type, str):
-            errors.append("Field 'type' must be a string with value 'backtest' or 'live'.")
+            errors.append(
+                "Field 'type' must be a string with value 'backtest' or 'live'."
+            )
         else:
             lowered = config_type.lower()
             if lowered not in {member.value for member in EngineMode}:
@@ -507,13 +565,6 @@ class NautilusEngineService:
                 "nautilus_trader package is not available – unable to start engine nodes."
             )
 
-        try:
-            from nautilus_trader.trading.node import TradingNode  # type: ignore
-        except Exception as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "nautilus_trader.trading.node.TradingNode could not be imported"
-            ) from exc
-
         safe_config = deepcopy(config)
         resolved_node_id = (
             node_id
@@ -525,10 +576,26 @@ class NautilusEngineService:
         if resolved_node_id in self._nodes_running:
             raise RuntimeError(f"Node '{resolved_node_id}' is already running")
 
-        node = TradingNode(config=safe_config)
+        self._node_configs[resolved_node_id] = deepcopy(safe_config)
+
+        plan = self._plan_adapters(mode, safe_config, resolved_node_id)
+
+        try:
+            from nautilus_trader.trading.node import TradingNode  # type: ignore
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "nautilus_trader.trading.node.TradingNode could not be imported"
+            ) from exc
+
+        trading_config = self._build_trading_config(mode, plan)
+        node = TradingNode(config=trading_config)
+
+        status_snapshot = self._build_adapter_status(resolved_node_id, plan)
+        if status_snapshot:
+            self._adapter_status[resolved_node_id] = status_snapshot
 
         self._configure_node_logging(node, resolved_node_id, mode)
-        self._configure_adapters(node, mode, safe_config, resolved_node_id)
+        self._register_adapter_factories(node, plan, resolved_node_id)
 
         version = self._config_versions.get(resolved_node_id, 0) + 1
         self._config_versions[resolved_node_id] = version
@@ -545,7 +612,9 @@ class NautilusEngineService:
                 node.start()
             except Exception as exc:  # pragma: no cover - defensive guard
                 self._logger.exception(
-                    "Nautilus node %s terminated unexpectedly: %s", resolved_node_id, exc
+                    "Nautilus node %s terminated unexpectedly: %s",
+                    resolved_node_id,
+                    exc,
                 )
 
         thread = threading.Thread(
@@ -555,6 +624,9 @@ class NautilusEngineService:
         )
         thread.start()
 
+        if status_snapshot:
+            self._set_adapter_state(resolved_node_id, "connected")
+
         handle = EngineNodeHandle(
             id=resolved_node_id,
             mode=mode,
@@ -563,6 +635,7 @@ class NautilusEngineService:
             user_id=user_id,
             started_at=datetime.now(tz=timezone.utc),
             config_version=version,
+            adapters=deepcopy(self._adapter_status.get(resolved_node_id, [])),
         )
 
         self._nodes_running[resolved_node_id] = handle
@@ -577,6 +650,109 @@ class NautilusEngineService:
             )
 
         return handle
+
+    def get_node_handle(self, node_id: str) -> Optional[EngineNodeHandle]:
+        """Return the active :class:`EngineNodeHandle` for ``node_id`` if running."""
+
+        return self._nodes_running.get(node_id)
+
+    def get_node_config(self, node_id: str) -> Optional[Dict[str, Any]]:
+        """Return the last stored configuration for ``node_id`` if available."""
+
+        config = self._node_configs.get(node_id)
+        return deepcopy(config) if config is not None else None
+
+    def stop_trading_node(
+        self,
+        node_id: str,
+        *,
+        wait: bool = True,
+        timeout: float = 10.0,
+    ) -> EngineNodeHandle:
+        """Stop a running trading node and update internal bookkeeping."""
+
+        handle = self._nodes_running.get(node_id)
+        if handle is None:
+            raise KeyError(f"Node '{node_id}' is not running")
+
+        self._set_adapter_state(node_id, "stopping")
+
+        node = handle.node
+        thread = handle.thread
+
+        if node is not None:
+            stop = getattr(node, "stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    self._logger.debug(
+                        "Nautilus node %s stop request failed: %s", node_id, exc
+                    )
+            dispose = getattr(node, "dispose", None)
+            if callable(dispose):
+                try:
+                    dispose()
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    self._logger.debug(
+                        "Nautilus node %s dispose request failed: %s", node_id, exc
+                    )
+
+        if wait and thread is not None and thread.is_alive():
+            try:
+                thread.join(timeout)
+            except Exception:  # pragma: no cover - best effort join
+                pass
+
+        handle.node = None
+
+        self._nodes_running.pop(node_id, None)
+
+        self._set_adapter_state(node_id, "stopped")
+        handle.adapters = deepcopy(self._adapter_status.get(node_id, []))
+
+        return handle
+
+    def restart_trading_node(
+        self,
+        node_id: str,
+        *,
+        user_id: Optional[str] = None,
+    ) -> EngineNodeHandle:
+        """Restart a trading node using the last stored configuration."""
+
+        config = self._node_configs.get(node_id)
+        if config is None:
+            raise KeyError(f"No configuration stored for node '{node_id}'")
+
+        existing = self._nodes_running.get(node_id)
+        preserved_user = user_id or (existing.user_id if existing else None)
+
+        if existing is not None:
+            try:
+                self.stop_trading_node(node_id)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.debug(
+                    "Failed to stop node %s prior to restart: %s", node_id, exc
+                )
+
+        config_copy = deepcopy(config)
+        config_copy.setdefault("id", node_id)
+
+        config_mode = str(
+            config_copy.get("type") or config_copy.get("mode") or ""
+        ).lower()
+        try:
+            engine_mode = EngineMode(config_mode)
+        except ValueError:
+            engine_mode = existing.mode if existing is not None else EngineMode.LIVE
+
+        return self.launch_trading_node(
+            engine_mode,
+            config_copy,
+            preserved_user,
+            node_id=node_id,
+        )
 
     def attach_bus_listeners(self, node: Any, node_id: str) -> None:
         """Bridge Nautilus event callbacks to the gateway event bus."""
@@ -602,7 +778,11 @@ class NautilusEngineService:
                 return
             positions_source = getattr(portfolio, "positions", None)
             try:
-                positions = positions_source() if callable(positions_source) else positions_source
+                positions = (
+                    positions_source()
+                    if callable(positions_source)
+                    else positions_source
+                )
             except Exception:
                 return
             if not positions:
@@ -616,7 +796,9 @@ class NautilusEngineService:
 
         def maybe_snapshot_positions(event: Any) -> None:
             event_name = getattr(event, "__class__", type(event)).__name__.lower()
-            if any(keyword in event_name for keyword in ("fill", "position", "portfolio")):
+            if any(
+                keyword in event_name for keyword in ("fill", "position", "portfolio")
+            ):
                 emit_positions_snapshot()
 
         def publish_event(topic: str, field: str, event: Any) -> None:
@@ -629,7 +811,11 @@ class NautilusEngineService:
             if topic == "engine.risk.alerts":
                 payload[field] = self._build_risk_alert(event, node_id, serialised)
             else:
-                payload[field] = serialised if isinstance(serialised, dict) else {"repr": repr(serialised)}
+                payload[field] = (
+                    serialised
+                    if isinstance(serialised, dict)
+                    else {"repr": repr(serialised)}
+                )
             self.publish(topic, payload)
 
         def handle_order(event: Any) -> None:
@@ -706,10 +892,13 @@ class NautilusEngineService:
                     )
             except Exception as exc:  # pragma: no cover - optional API shapes
                 self._logger.debug(
-                    "Unable to subscribe to Nautilus events for node %s: %s", node_id, exc
+                    "Unable to subscribe to Nautilus events for node %s: %s",
+                    node_id,
+                    exc,
                 )
 
         def lifecycle_stopped(*_: Any) -> None:
+            self._set_adapter_state(node_id, "stopped")
             payload = {
                 "event": "stopped",
                 "node_id": node_id,
@@ -742,7 +931,9 @@ class NautilusEngineService:
         else:
             candidates = list(self._nodes_running.items())
 
-        payload = {key: value for key, value in instructions.items() if key != "node_id"}
+        payload = {
+            key: value for key, value in instructions.items() if key != "node_id"
+        }
 
         for node_key, entry in candidates:
             node_obj = entry.node
@@ -780,7 +971,9 @@ class NautilusEngineService:
         else:
             candidates = list(self._nodes_running.items())
 
-        payload = {key: value for key, value in instructions.items() if key != "node_id"}
+        payload = {
+            key: value for key, value in instructions.items() if key != "node_id"
+        }
 
         for node_key, entry in candidates:
             node_obj = entry.node
@@ -967,15 +1160,14 @@ class NautilusEngineService:
             if isinstance(bars_raw, list):
                 bars = [
                     bar
-                    for bar in (
-                        self._serialise_bar(entry)
-                        for entry in bars_raw
-                    )
+                    for bar in (self._serialise_bar(entry) for entry in bars_raw)
                     if bar is not None
                 ]
             else:
                 bars = []
-            bars = self._filter_bars(bars, start_dt=start_dt, end_dt=end_dt, limit=limit)
+            bars = self._filter_bars(
+                bars, start_dt=start_dt, end_dt=end_dt, limit=limit
+            )
             payload["bars"] = bars
             payload.setdefault("instrument_id", instrument_id)
             payload.setdefault("granularity", granularity)
@@ -1093,12 +1285,8 @@ class NautilusEngineService:
         open_price = self._normalise_bar_value(
             raw.get("open") or raw.get("open_price") or raw.get("open_px")
         )
-        high_price = self._normalise_bar_value(
-            raw.get("high") or raw.get("high_price")
-        )
-        low_price = self._normalise_bar_value(
-            raw.get("low") or raw.get("low_price")
-        )
+        high_price = self._normalise_bar_value(raw.get("high") or raw.get("high_price"))
+        low_price = self._normalise_bar_value(raw.get("low") or raw.get("low_price"))
         close_price = self._normalise_bar_value(
             raw.get("close") or raw.get("close_price")
         )
@@ -1280,44 +1468,40 @@ class NautilusEngineService:
                 "Unable to configure Nautilus logging for node %s: %s", node_id, exc
             )
 
-    def _configure_adapters(
-        self,
-        node: Any,
-        mode: EngineMode,
-        config: Dict[str, Any],
-        node_id: str,
-    ) -> None:
+    def _plan_adapters(
+        self, mode: EngineMode, config: Dict[str, Any], node_id: str
+    ) -> List[AdapterPlanEntry]:
         data_sources = config.get("dataSources")
         if not isinstance(data_sources, list):
-            return
+            return []
 
-        key_refs = [ref for ref in config.get("keyReferences", []) if isinstance(ref, dict)]
+        key_refs = [
+            ref for ref in config.get("keyReferences", []) if isinstance(ref, dict)
+        ]
 
+        plan_by_name: Dict[str, AdapterPlanEntry] = {}
         for source in data_sources:
             if not isinstance(source, dict):
                 continue
             identifier = str(source.get("id") or "").strip()
             adapter_type = str(source.get("type") or "").lower()
-            adapter_mode = str(source.get("mode") or "").lower()
-            if not identifier:
+            adapter_mode = str(source.get("mode") or "").lower() or "read"
+            if not identifier or adapter_type != "live":
                 continue
 
-            if adapter_type != "live":
-                self._logger.debug(
-                    "Node %s skipping adapter %s – unsupported type '%s'", 
-                    node_id,
-                    identifier,
-                    adapter_type or "unknown",
+            entry: Optional[AdapterPlanEntry]
+            kind = identifier.lower()
+            if kind.startswith("binance"):
+                entry = self._plan_binance_adapter(
+                    mode, source, key_refs, node_id, identifier
                 )
-                continue
-
-            if identifier.lower().startswith("binance"):
-                self._configure_binance_adapter(
-                    node,
-                    identifier,
-                    adapter_mode,
-                    node_id,
-                    key_refs,
+            elif kind.startswith("bybit"):
+                entry = self._plan_bybit_adapter(
+                    mode, source, key_refs, node_id, identifier
+                )
+            elif kind.startswith("ib") or "interactive" in kind:
+                entry = self._plan_ib_adapter(
+                    mode, source, key_refs, node_id, identifier
                 )
             else:
                 self._logger.debug(
@@ -1327,85 +1511,670 @@ class NautilusEngineService:
                     adapter_type or "unknown",
                     adapter_mode or "unknown",
                 )
+                entry = None
 
-    def _configure_binance_adapter(
-        self,
-        node: Any,
-        identifier: str,
-        adapter_mode: str,
-        node_id: str,
-        key_refs: Iterable[Dict[str, Any]],
+            if entry is None:
+                continue
+
+            entry.mode = adapter_mode or entry.mode
+            entry.identifier = identifier
+            if identifier not in entry.sources:
+                entry.sources.append(identifier)
+
+            existing = plan_by_name.get(entry.name)
+            if existing:
+                if (
+                    entry.data_factory
+                    and entry.data_config
+                    and not existing.data_config
+                ):
+                    existing.data_factory = entry.data_factory
+                    existing.data_config = entry.data_config
+                if (
+                    entry.exec_factory
+                    and entry.exec_config
+                    and not existing.exec_config
+                ):
+                    existing.exec_factory = entry.exec_factory
+                    existing.exec_config = entry.exec_config
+                existing.mode = self._merge_modes(existing.mode, entry.mode)
+                existing.sandbox = existing.sandbox or entry.sandbox
+                existing.detail.update(entry.detail)
+                existing.sources.extend(
+                    src for src in entry.sources if src not in existing.sources
+                )
+            else:
+                plan_by_name[entry.name] = entry
+
+        return list(plan_by_name.values())
+
+    def _build_trading_config(
+        self, mode: EngineMode, plan: List[AdapterPlanEntry]
+    ) -> Any:
+        try:
+            from nautilus_trader.common import Environment  # type: ignore
+            from nautilus_trader.config import TradingNodeConfig  # type: ignore
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "Unable to import Nautilus trading configuration"
+            ) from exc
+
+        data_clients: Dict[str, Any] = {}
+        exec_clients: Dict[str, Any] = {}
+        for entry in plan:
+            if entry.data_config is not None:
+                data_clients[entry.name] = entry.data_config
+            if entry.exec_config is not None:
+                exec_clients[entry.name] = entry.exec_config
+
+        environment = {
+            EngineMode.LIVE: Environment.LIVE,
+            EngineMode.SANDBOX: Environment.SANDBOX,
+            EngineMode.BACKTEST: Environment.BACKTEST,
+        }.get(mode, Environment.LIVE)
+
+        if not data_clients and not exec_clients:
+            return TradingNodeConfig(environment=environment)
+
+        return TradingNodeConfig(
+            environment=environment,
+            data_clients=data_clients,
+            exec_clients=exec_clients,
+        )
+
+    def _register_adapter_factories(
+        self, node: Any, plan: List[AdapterPlanEntry], node_id: str
     ) -> None:
+        for entry in plan:
+            if entry.data_factory is not None:
+                add_data_factory = getattr(node, "add_data_client_factory", None)
+                if callable(add_data_factory):
+                    try:
+                        add_data_factory(entry.name, entry.data_factory)
+                    except TypeError:
+                        add_data_factory(entry.data_factory)  # type: ignore[misc]
+                    except Exception as exc:
+                        self._logger.debug(
+                            "Unable to register data factory %s for node %s: %s",
+                            entry.name,
+                            node_id,
+                            exc,
+                        )
+                else:
+                    self._logger.debug(
+                        "Node %s exposes no data factory hook – %s skipped",
+                        node_id,
+                        entry.name,
+                    )
+            if entry.exec_factory is not None:
+                add_exec_factory = getattr(node, "add_execution_client_factory", None)
+                if callable(add_exec_factory):
+                    try:
+                        add_exec_factory(entry.name, entry.exec_factory)
+                    except TypeError:
+                        add_exec_factory(entry.exec_factory)  # type: ignore[misc]
+                    except Exception as exc:
+                        self._logger.debug(
+                            "Unable to register execution factory %s for node %s: %s",
+                            entry.name,
+                            node_id,
+                            exc,
+                        )
+                else:
+                    self._logger.debug(
+                        "Node %s exposes no execution factory hook – %s skipped",
+                        node_id,
+                        entry.name,
+                    )
+
+    def _build_adapter_status(
+        self, node_id: str, plan: List[AdapterPlanEntry]
+    ) -> List[Dict[str, Any]]:
+        status: List[Dict[str, Any]] = []
+        for entry in plan:
+            status.append(
+                {
+                    "name": entry.name,
+                    "identifier": entry.identifier,
+                    "mode": entry.mode,
+                    "sandbox": entry.sandbox,
+                    "sources": list(entry.sources),
+                    "state": "starting",
+                }
+            )
+        return status
+
+    def _set_adapter_state(
+        self, node_id: str, state: str, *, name: Optional[str] = None
+    ) -> None:
+        entries = self._adapter_status.get(node_id)
+        if not entries:
+            return
+        for entry in entries:
+            if name is not None and entry.get("name") != name:
+                continue
+            entry["state"] = state
+
+        running = self._nodes_running.get(node_id)
+        if running is not None:
+            running.adapters = deepcopy(entries)
+
+    def _plan_binance_adapter(
+        self,
+        mode: EngineMode,
+        source: Dict[str, Any],
+        key_refs: Iterable[Dict[str, Any]],
+        node_id: str,
+        identifier: str,
+    ) -> Optional[AdapterPlanEntry]:
         try:
             from nautilus_trader.adapters.binance import (
+                BINANCE,
+                BinanceAccountType,
+                BinanceDataClientConfig,
+                BinanceExecClientConfig,
+                BinanceKeyType,
                 BinanceLiveDataClientFactory,
                 BinanceLiveExecClientFactory,
             )  # type: ignore
         except Exception as exc:  # pragma: no cover - optional dependency
             self._logger.warning(
-                "Node %s unable to import Binance adapters: %s",
+                "Node %s unable to import Binance adapters: %s", node_id, exc
+            )
+            return None
+
+        options = self._extract_options(source)
+        sandbox_flag = self._determine_testnet(options, mode)
+
+        credentials = self._resolve_credentials_for_alias("binance", key_refs)
+
+        account_type = self._parse_enum(
+            BinanceAccountType, options.get("accountType"), BinanceAccountType.SPOT
+        )
+        key_type = self._parse_enum(
+            BinanceKeyType, options.get("keyType"), BinanceKeyType.HMAC
+        )
+
+        data_config = BinanceDataClientConfig(
+            api_key=credentials.get("api_key"),
+            api_secret=credentials.get("api_secret"),
+            account_type=account_type,
+            key_type=key_type,
+            testnet=sandbox_flag,
+            us=self._is_truthy(options.get("us")),
+            base_url_http=options.get("httpEndpoint") or options.get("baseUrlHttp"),
+            base_url_ws=options.get("wsEndpoint") or options.get("baseUrlWs"),
+        )
+
+        exec_config = None
+        exec_factory = None
+        mode_lower = str(source.get("mode") or "").lower()
+        if mode_lower != "read":
+            exec_config = BinanceExecClientConfig(
+                api_key=credentials.get("api_key"),
+                api_secret=credentials.get("api_secret"),
+                account_type=account_type,
+                key_type=key_type,
+                testnet=sandbox_flag,
+                us=self._is_truthy(options.get("us")),
+                base_url_http=options.get("httpEndpoint") or options.get("baseUrlHttp"),
+                base_url_ws=options.get("execWsEndpoint") or options.get("baseUrlWs"),
+            )
+            exec_factory = BinanceLiveExecClientFactory
+
+        entry = AdapterPlanEntry(
+            name=BINANCE,
+            identifier=identifier,
+            mode=mode_lower or "read",
+            sandbox=sandbox_flag,
+            data_factory=BinanceLiveDataClientFactory,
+            exec_factory=exec_factory,
+            data_config=data_config,
+            exec_config=exec_config,
+            detail={
+                "account_type": getattr(
+                    account_type, "value", str(account_type)
+                ).lower(),
+                "testnet": sandbox_flag,
+            },
+            sources=[identifier],
+        )
+        return entry
+
+    def _plan_bybit_adapter(
+        self,
+        mode: EngineMode,
+        source: Dict[str, Any],
+        key_refs: Iterable[Dict[str, Any]],
+        node_id: str,
+        identifier: str,
+    ) -> Optional[AdapterPlanEntry]:
+        try:
+            from nautilus_trader.adapters.bybit import (
+                BYBIT,
+                BybitDataClientConfig,
+                BybitExecClientConfig,
+                BybitLiveDataClientFactory,
+                BybitLiveExecClientFactory,
+                BybitProductType,
+            )  # type: ignore
+        except Exception as exc:  # pragma: no cover - optional dependency
+            self._logger.warning(
+                "Node %s unable to import Bybit adapters: %s", node_id, exc
+            )
+            return None
+
+        options = self._extract_options(source)
+        sandbox_flag = self._determine_testnet(options, mode)
+
+        credentials = self._resolve_credentials_for_alias("bybit", key_refs)
+
+        product_types = self._parse_product_types(
+            options.get("productTypes") or options.get("product_types"),
+            BybitProductType,
+        )
+
+        data_config = BybitDataClientConfig(
+            api_key=credentials.get("api_key"),
+            api_secret=credentials.get("api_secret"),
+            product_types=product_types,
+            base_url_http=options.get("httpEndpoint") or options.get("baseUrlHttp"),
+            demo=self._is_truthy(options.get("demo")),
+            testnet=sandbox_flag,
+            recv_window_ms=self._coerce_positive_int(options.get("recvWindowMs")),
+        )
+
+        exec_config = None
+        exec_factory = None
+        mode_lower = str(source.get("mode") or "").lower()
+        if mode_lower != "read":
+            exec_config = BybitExecClientConfig(
+                api_key=credentials.get("api_key"),
+                api_secret=credentials.get("api_secret"),
+                product_types=product_types,
+                base_url_http=options.get("httpEndpoint") or options.get("baseUrlHttp"),
+                demo=self._is_truthy(options.get("demo")),
+                testnet=sandbox_flag,
+                recv_window_ms=self._coerce_positive_int(options.get("recvWindowMs")),
+            )
+            exec_factory = BybitLiveExecClientFactory
+
+        entry = AdapterPlanEntry(
+            name=BYBIT,
+            identifier=identifier,
+            mode=mode_lower or "read",
+            sandbox=sandbox_flag,
+            data_factory=BybitLiveDataClientFactory,
+            exec_factory=exec_factory,
+            data_config=data_config,
+            exec_config=exec_config,
+            detail={
+                "product_types": (
+                    [getattr(pt, "value", str(pt)).lower() for pt in product_types]
+                    if product_types
+                    else []
+                ),
+                "testnet": sandbox_flag,
+            },
+            sources=[identifier],
+        )
+        return entry
+
+    def _plan_ib_adapter(
+        self,
+        mode: EngineMode,
+        source: Dict[str, Any],
+        key_refs: Iterable[Dict[str, Any]],
+        node_id: str,
+        identifier: str,
+    ) -> Optional[AdapterPlanEntry]:
+        try:
+            from nautilus_trader.adapters.interactive_brokers.common import IB
+            from nautilus_trader.adapters.interactive_brokers.config import (
+                IBMarketDataTypeEnum,
+                InteractiveBrokersDataClientConfig,
+                InteractiveBrokersExecClientConfig,
+            )  # type: ignore
+            from nautilus_trader.adapters.interactive_brokers.factories import (
+                InteractiveBrokersLiveDataClientFactory,
+                InteractiveBrokersLiveExecClientFactory,
+            )  # type: ignore
+        except Exception as exc:  # pragma: no cover - optional dependency
+            self._logger.warning(
+                "Node %s unable to import Interactive Brokers adapters: %s",
                 node_id,
                 exc,
             )
-            return
+            return None
 
-        add_data_factory = getattr(node, "add_data_client_factory", None)
-        add_exec_factory = getattr(node, "add_execution_client_factory", None)
+        options = self._extract_options(source)
+        sandbox_flag = self._determine_testnet(options, mode) or self._is_truthy(
+            options.get("paper")
+        )
 
-        if callable(add_data_factory):
-            data_factory = BinanceLiveDataClientFactory(client_id=identifier)
-            self._maybe_configure_binance_keys(node_id, key_refs)
-            add_data_factory(data_factory)
-            self._logger.debug(
-                "Node %s registered Binance live data factory for %s", node_id, identifier
-            )
-        else:
-            self._logger.debug(
-                "Node %s exposes no data factory hook – Binance data skipped", node_id
-            )
+        credentials = self._resolve_credentials_for_alias("interactive", key_refs)
 
-        if adapter_mode != "read" and callable(add_exec_factory):
-            exec_factory = BinanceLiveExecClientFactory(client_id=identifier)
-            add_exec_factory(exec_factory)
-            self._logger.debug(
-                "Node %s registered Binance execution factory for %s", node_id, identifier
-            )
-        elif adapter_mode != "read":
-            self._logger.debug(
-                "Node %s exposes no execution factory hook – Binance exec skipped", node_id
-            )
+        ibg_host = str(options.get("host") or options.get("ibgHost") or "127.0.0.1")
+        port_candidate = options.get("port") or options.get("ibgPort")
+        ibg_port = self._coerce_positive_int(port_candidate)
+        if ibg_port is None:
+            ibg_port = 4002 if sandbox_flag else 4001
 
-    def _maybe_configure_binance_keys(
-        self, node_id: str, key_refs: Iterable[Dict[str, Any]]
-    ) -> None:
-        key_ref = self._find_key_reference("binance", key_refs)
-        if not key_ref:
-            self._logger.debug(
-                "Node %s has no Binance key reference – expecting env variables", node_id
-            )
-            return
+        client_id_value = options.get("clientId") or options.get("ibgClientId")
+        ibg_client_id = self._coerce_positive_int(client_id_value) or 1
 
-        key_id = str(key_ref.get("keyId") or "").strip()
+        market_data_type_value = options.get("marketDataType") or options.get(
+            "market_data_type"
+        )
+        market_data_type = self._parse_enum(
+            IBMarketDataTypeEnum,
+            market_data_type_value,
+            getattr(
+                InteractiveBrokersDataClientConfig,
+                "market_data_type",
+                IBMarketDataTypeEnum.REALTIME,
+            ),
+        )
+
+        data_config = InteractiveBrokersDataClientConfig(
+            ibg_host=ibg_host,
+            ibg_port=ibg_port,
+            ibg_client_id=ibg_client_id,
+            market_data_type=market_data_type,
+        )
+
+        account_id = credentials.get("api_key") or options.get("accountId")
+
+        exec_config = None
+        exec_factory = None
+        mode_lower = str(source.get("mode") or "").lower()
+        if mode_lower != "read":
+            exec_config = InteractiveBrokersExecClientConfig(
+                ibg_host=ibg_host,
+                ibg_port=ibg_port,
+                ibg_client_id=ibg_client_id,
+                account_id=account_id,
+            )
+            exec_factory = InteractiveBrokersLiveExecClientFactory
+
+        entry = AdapterPlanEntry(
+            name=IB,
+            identifier=identifier,
+            mode=mode_lower or "read",
+            sandbox=sandbox_flag,
+            data_factory=InteractiveBrokersLiveDataClientFactory,
+            exec_factory=exec_factory,
+            data_config=data_config,
+            exec_config=exec_config,
+            detail={
+                "host": ibg_host,
+                "port": ibg_port,
+                "client_id": ibg_client_id,
+                "paper_trading": sandbox_flag,
+                "market_data_type": getattr(
+                    market_data_type, "name", str(market_data_type)
+                ).lower(),
+                "account_id": account_id,
+            },
+            sources=[identifier],
+        )
+        return entry
+
+    def _merge_modes(self, first: str, second: str) -> str:
+        first = (first or "").strip().lower()
+        second = (second or "").strip().lower()
+        if first == second:
+            return first or "read"
+        combined = {first, second}
+        if "both" in combined:
+            return "both"
+        if combined == {"read", "write"}:
+            return "both"
+        if "write" in combined:
+            return "write"
+        return "read"
+
+    def _extract_options(self, source: Dict[str, Any]) -> Dict[str, Any]:
+        options = source.get("options")
+        if isinstance(options, dict):
+            return dict(options)
+        return {}
+
+    def _determine_testnet(self, options: Dict[str, Any], mode: EngineMode) -> bool:
+        if mode == EngineMode.SANDBOX:
+            return True
+        for key in ("testnet", "sandbox", "paper", "demo"):
+            if self._is_truthy(options.get(key)):
+                return True
+        environment = str(options.get("environment") or "").lower()
+        return environment in {"sandbox", "paper", "testnet", "demo"}
+
+    def _parse_enum(self, enum_cls: Any, value: Any, default: Any) -> Any:
+        if isinstance(value, enum_cls):
+            return value
+        if value is None:
+            return default
+        text = str(value).strip()
+        if not text:
+            return default
+        candidate = text.replace("-", "_").replace(" ", "_").upper()
+        try:
+            return enum_cls[candidate]
+        except KeyError:
+            for member in enum_cls:
+                if str(getattr(member, "value", "")).upper() == candidate:
+                    return member
+        return default
+
+    def _parse_product_types(self, values: Any, enum_cls: Any) -> Optional[List[Any]]:
+        if values is None:
+            return None
+        if isinstance(values, (str, enum_cls)):
+            values = [values]
+        result: List[Any] = []
+        for item in values:
+            member = self._parse_enum(enum_cls, item, None)
+            if member is not None and member not in result:
+                result.append(member)
+        return result or None
+
+    def _is_truthy(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            return lowered in {
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+                "sandbox",
+                "paper",
+                "test",
+                "testnet",
+                "demo",
+            }
+        return False
+
+    def _resolve_credentials_for_alias(
+        self, alias: str, key_refs: Iterable[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        credentials: Dict[str, Any] = {}
+        reference = self._find_key_reference(alias, key_refs)
+        if not reference:
+            return credentials
+
+        key_id = str(reference.get("keyId") or "").strip()
         if not key_id:
+            return credentials
+
+        payload = self._load_api_key_credentials(key_id)
+        if payload:
+            credentials.update(payload)
+
+        env_api_key = retrieve_key(key_id, "api_key")
+        env_api_secret = retrieve_key(key_id, "api_secret")
+        env_passphrase = retrieve_key(key_id, "passphrase")
+
+        if env_api_key:
+            credentials.setdefault("api_key", env_api_key)
+        if env_api_secret:
+            credentials.setdefault("api_secret", env_api_secret)
+        if env_passphrase:
+            credentials.setdefault("passphrase", env_passphrase)
+
+        credentials["key_id"] = key_id
+
+        secret_value = credentials.get("api_secret")
+        if isinstance(secret_value, dict):
+            passphrase = credentials.get("passphrase")
+            if not passphrase:
+                env_pass = retrieve_key(key_id, "passphrase")
+                if env_pass:
+                    credentials["passphrase"] = env_pass
+                    passphrase = env_pass
+            if isinstance(passphrase, str) and passphrase:
+                expected_hash = credentials.get("passphrase_hash")
+                if isinstance(expected_hash, str):
+                    try:
+                        hashed = self._hash_passphrase(passphrase)
+                        if hashed.lower() != expected_hash.lower():
+                            self._logger.warning(
+                                "Passphrase verification failed for credential key %s",
+                                key_id,
+                            )
+                    except Exception:
+                        pass
+                decrypted = self._decrypt_secret_payload(
+                    secret_value, passphrase, key_id
+                )
+                if decrypted is not None:
+                    credentials["api_secret"] = decrypted
+                else:
+                    credentials.pop("api_secret", None)
+            else:
+                self._logger.warning(
+                    "Credential key %s requires passphrase to decrypt secret", key_id
+                )
+                credentials.pop("api_secret", None)
+
+        return credentials
+
+    def _load_api_key_credentials(self, key_id: str) -> Optional[Dict[str, Any]]:
+        if (
+            not key_id
+            or self._database_url is None
+            or create_async_engine is None
+            or async_sessionmaker is None
+            or select is None
+            or ApiKey is None
+        ):
+            return None
+
+        async def _execute() -> Optional[Dict[str, Any]]:
+            if self._api_session_factory is None:
+                try:
+                    engine = create_async_engine(self._database_url, future=True)
+                except Exception as exc:  # pragma: no cover - optional dependency
+                    self._logger.debug(
+                        "Unable to initialise database engine for credentials: %s",
+                        exc,
+                    )
+                    return None
+                self._api_engine = engine
+                self._api_session_factory = async_sessionmaker(
+                    engine, expire_on_commit=False
+                )
+
+            assert self._api_session_factory is not None
+
+            async with self._api_session_factory() as session:  # type: ignore[misc]
+                stmt = select(ApiKey).where(ApiKey.key_id == key_id)
+                result = await session.execute(stmt)
+                record = result.scalars().first()
+                if record is None:
+                    return None
+                payload = self._decode_secret_payload(record.secret_enc)
+                if payload is None:
+                    return None
+                return {
+                    "api_key": payload.get("api_key"),
+                    "api_secret": payload.get("api_secret"),
+                    "passphrase_hash": payload.get("passphrase_hash"),
+                    "passphrase_hint": payload.get("passphrase_hint"),
+                }
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_execute())
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._logger.debug("Failed to load credentials for key %s: %s", key_id, exc)
+            return None
+        finally:
+            loop.close()
+
+    def _decode_secret_payload(self, secret_enc: bytes) -> Optional[Dict[str, Any]]:
+        if not secret_enc or self._encryption_key is None:
+            return None
+        try:
+            plaintext = decrypt(secret_enc, key=self._encryption_key)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._logger.warning("Failed to decrypt credential payload: %s", exc)
+            return None
+        try:
+            data = json.loads(plaintext.decode("utf-8"))
+        except ValueError:
+            self._logger.warning("Credential payload for stored secret is malformed")
+            return None
+        if not isinstance(data, dict):
+            return None
+        return data
+
+    def _decrypt_secret_payload(
+        self, payload: Dict[str, Any], passphrase: str, key_id: str
+    ) -> Optional[str]:
+        try:
+            salt = base64.b64decode(payload.get("salt", ""))
+            iv = base64.b64decode(payload.get("iv", ""))
+            ciphertext = base64.b64decode(payload.get("ciphertext", ""))
+        except Exception as exc:
             self._logger.debug(
-                "Node %s Binance key reference missing keyId – expecting env variables", node_id
+                "Credential secret decoding failed for key %s: %s", key_id, exc
             )
-            return
+            return None
 
-        api_key = retrieve_key(key_id, "api_key")
-        api_secret = retrieve_key(key_id, "api_secret")
+        iterations = payload.get("iterations") or 100_000
+        try:
+            iterations = int(iterations)
+        except (TypeError, ValueError):
+            iterations = 100_000
+        iterations = max(iterations, 1)
 
-        if api_key and "BINANCE_API_KEY" not in os.environ:
-            os.environ["BINANCE_API_KEY"] = api_key
-        if api_secret and "BINANCE_API_SECRET" not in os.environ:
-            os.environ["BINANCE_API_SECRET"] = api_secret
-
-        if not api_key or not api_secret:
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=iterations,
+        )
+        key = kdf.derive(passphrase.encode("utf-8"))
+        cipher = AESGCM(key)
+        try:
+            plaintext = cipher.decrypt(iv, ciphertext, None)
+        except Exception as exc:
             self._logger.warning(
-                "Node %s Binance credentials not fully resolved for key '%s' – set BINANCE_API_KEY/BINANCE_API_SECRET",
-                node_id,
-                key_id,
+                "Unable to decrypt API secret for key %s: %s", key_id, exc
             )
+            return None
+        try:
+            return plaintext.decode("utf-8")
+        except UnicodeDecodeError:
+            return plaintext.decode("utf-8", "ignore")
+
+    def _hash_passphrase(self, value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def _find_key_reference(
         self, prefix: str, key_refs: Iterable[Dict[str, Any]]
@@ -1415,7 +2184,31 @@ class NautilusEngineService:
             alias = str(ref.get("alias") or "").lower()
             if alias.startswith(lowered_prefix):
                 return ref
+        for ref in key_refs:
+            key_id = str(ref.get("keyId") or "").lower()
+            if key_id.startswith(lowered_prefix):
+                return ref
         return None
+
+    def list_adapter_status(self) -> List[Dict[str, Any]]:
+        snapshot: List[Dict[str, Any]] = []
+        for node_id, entries in self._adapter_status.items():
+            for entry in entries:
+                snapshot.append(
+                    {
+                        "node_id": node_id,
+                        "name": entry.get("name"),
+                        "identifier": entry.get("identifier"),
+                        "mode": entry.get("mode"),
+                        "state": entry.get("state"),
+                        "sandbox": entry.get("sandbox", False),
+                        "sources": entry.get("sources", []),
+                    }
+                )
+        return snapshot
+
+    def get_node_adapter_status(self, node_id: str) -> List[Dict[str, Any]]:
+        return deepcopy(self._adapter_status.get(node_id, []))
 
     def _map_event_to_topic(self, event_name: str) -> Tuple[str, str]:
         lowered = event_name.lower()
@@ -1427,7 +2220,9 @@ class NautilusEngineService:
             return "engine.portfolio", "position"
         if any(keyword in lowered for keyword in ("risk", "margin", "limit")):
             return "engine.risk.alerts", "alert"
-        if any(keyword in lowered for keyword in ("lifecycle", "status", "stop", "start")):
+        if any(
+            keyword in lowered for keyword in ("lifecycle", "status", "stop", "start")
+        ):
             return "engine.nodes", "lifecycle"
         return "engine.nautilus.events", "payload"
 
@@ -1615,4 +2410,3 @@ def build_engine_service(bus: Optional[EngineEventBus] = None) -> NautilusEngine
     """Factory helper used across the gateway to construct the engine wrapper."""
 
     return NautilusEngineService(bus=bus)
-

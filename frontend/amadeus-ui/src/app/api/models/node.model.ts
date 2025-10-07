@@ -10,6 +10,16 @@ export interface NodeMetrics {
   memory_mb?: number;
 }
 
+export interface AdapterStatus {
+  node_id?: string;
+  name?: string;
+  identifier?: string;
+  mode?: string;
+  state?: string;
+  sandbox?: boolean;
+  sources?: string[];
+}
+
 export interface NodeMetricPoint {
   timestamp: string;
   value: number;
@@ -36,6 +46,7 @@ export interface NodeHandle {
   metrics?: NodeMetrics;
   created_at?: string;
   updated_at?: string;
+  adapters?: AdapterStatus[];
 }
 
 export interface NodesListResponse {
