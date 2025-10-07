@@ -9,7 +9,7 @@ export class RiskApi {
   private readonly http = inject(HttpClient);
 
   getRisk(): Observable<RiskResponse> {
-    return this.http.get<RiskResponse>(buildApiUrl('/risk'));
+    return this.http.get<RiskResponse>(buildApiUrl('/api/risk'));
   }
 
   getRiskLimits(nodeId?: string): Observable<RiskLimitsResponse> {
@@ -17,7 +17,7 @@ export class RiskApi {
     if (nodeId) {
       params = params.set('nodeId', nodeId);
     }
-    return this.http.get<RiskLimitsResponse>(buildApiUrl('/risk/limits'), { params });
+    return this.http.get<RiskLimitsResponse>(buildApiUrl('/api/risk/limits'), { params });
   }
 
   updateRiskLimits(payload: RiskLimits, nodeId?: string): Observable<RiskLimitsResponse> {
@@ -25,23 +25,26 @@ export class RiskApi {
     if (nodeId) {
       params = params.set('nodeId', nodeId);
     }
-    return this.http.put<RiskLimitsResponse>(buildApiUrl('/risk/limits'), payload, { params });
+    return this.http.put<RiskLimitsResponse>(buildApiUrl('/api/risk/limits'), payload, { params });
   }
 
   acknowledgeAlert(alertId: string): Observable<{ alert: RiskAlert }> {
-    return this.http.post<{ alert: RiskAlert }>(buildApiUrl(`/risk/alerts/${encodeURIComponent(alertId)}/ack`), {});
+    return this.http.post<{ alert: RiskAlert }>(
+      buildApiUrl(`/api/risk/alerts/${encodeURIComponent(alertId)}/ack`),
+      {},
+    );
   }
 
   unlockCircuitBreaker(alertId: string): Observable<{ alert: RiskAlert }> {
     return this.http.post<{ alert: RiskAlert }>(
-      buildApiUrl(`/risk/alerts/${encodeURIComponent(alertId)}/unlock`),
+      buildApiUrl(`/api/risk/alerts/${encodeURIComponent(alertId)}/unlock`),
       {},
     );
   }
 
   escalateMarginCall(alertId: string): Observable<{ alert: RiskAlert }> {
     return this.http.post<{ alert: RiskAlert }>(
-      buildApiUrl(`/risk/alerts/${encodeURIComponent(alertId)}/escalate`),
+      buildApiUrl(`/api/risk/alerts/${encodeURIComponent(alertId)}/escalate`),
       {},
     );
   }
