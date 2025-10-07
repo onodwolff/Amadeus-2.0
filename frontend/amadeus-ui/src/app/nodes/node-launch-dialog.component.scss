@@ -390,6 +390,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 16px 28px;
   border-top: 1px solid rgba(148, 163, 184, 0.08);
@@ -407,7 +408,19 @@
 @media (max-width: 500px) {
   .launch-dialog__footer {
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .launch-dialog__footer-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .launch-dialog__footer-actions .btn,
+  .launch-dialog__footer button {
+    width: 100%;
+    justify-content: center;
   }
 }
 
@@ -456,5 +469,11 @@
 @media (max-height: 720px) {
   .launch-dialog {
     align-items: flex-start;
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .launch-dialog__panel {
+    max-height: calc(100vh - 32px);
   }
 }

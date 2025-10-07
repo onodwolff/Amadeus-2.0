@@ -13,6 +13,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    status,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -24,6 +25,7 @@ from sqlalchemy import text
 from gateway.config import settings
 from gateway.db.base import create_engine as create_db_engine, dispose_engine
 from .nautilus_service import (
+    EngineUnavailableError,
     NodeHandle,
     UserConflictError,
     UserNotFoundError,
@@ -58,6 +60,21 @@ def _resolve_node_id(request: Request) -> str | None:
         return query_node
 
     return None
+
+
+def _ensure_engine_available() -> None:
+    """Raise an HTTP error when Nautilus is unavailable and mocks are disabled."""
+
+    try:
+        svc.require_engine()
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or set AMAD_USE_MOCK=true.",
+            },
+        ) from exc
 
 
 def log_websocket(func):
@@ -361,18 +378,21 @@ def list_nodes():
 
 @app.post("/nodes/backtest/start")
 def start_backtest():
+    _ensure_engine_available()
     node: NodeHandle = svc.start_backtest()
     return {"node": svc.as_dict(node)}
 
 
 @app.post("/nodes/live/start")
 def start_live():
+    _ensure_engine_available()
     node: NodeHandle = svc.start_live()
     return {"node": svc.as_dict(node)}
 
 
 @app.post("/nodes/sandbox/start")
 def start_sandbox():
+    _ensure_engine_available()
     node: NodeHandle = svc.start_sandbox()
     return {"node": svc.as_dict(node)}
 
@@ -380,6 +400,7 @@ def start_sandbox():
 @app.post("/nodes/launch")
 def launch_node(payload: NodeLaunchPayload):
     node_type = payload.type.lower()
+    _ensure_engine_available()
     try:
         engine_mode = EngineMode(node_type)
     except ValueError:
@@ -441,6 +462,7 @@ def launch_node(payload: NodeLaunchPayload):
 
 @app.post("/nodes/{node_id}/stop")
 def stop_node(node_id: str):
+    _ensure_engine_available()
     try:
         node = svc.stop_node(node_id)
         return {"node": svc.as_dict(node)}
@@ -450,6 +472,7 @@ def stop_node(node_id: str):
 
 @app.post("/nodes/{node_id}/restart")
 def restart_node(node_id: str):
+    _ensure_engine_available()
     try:
         node = svc.restart_node(node_id)
         return {"node": svc.as_dict(node)}
@@ -459,6 +482,7 @@ def restart_node(node_id: str):
 
 @app.get("/nodes/{node_id}")
 def get_node(node_id: str):
+    _ensure_engine_available()
     try:
         return svc.node_detail(node_id)
     except ValueError as e:
@@ -467,6 +491,7 @@ def get_node(node_id: str):
 
 @app.get("/nodes/{node_id}/logs")
 def download_node_logs(node_id: str):
+    _ensure_engine_available()
     try:
         path = svc.node_log_file(node_id)
     except ValueError as e:
@@ -490,6 +515,7 @@ def download_node_logs(node_id: str):
 
 @app.get("/nodes/{node_id}/logs/entries")
 def get_node_logs(node_id: str):
+    _ensure_engine_available()
     try:
         return svc.node_logs(node_id)
     except ValueError as e:
@@ -498,6 +524,7 @@ def get_node_logs(node_id: str):
 
 @app.get("/nodes/{node_id}/logs/export")
 def export_node_logs(node_id: str):
+    _ensure_engine_available()
     try:
         payload = svc.export_logs(node_id)
     except ValueError as e:
@@ -507,11 +534,13 @@ def export_node_logs(node_id: str):
 
 @app.get("/portfolio")
 def get_portfolio():
+    _ensure_engine_available()
     return svc.portfolio_snapshot()
 
 
 @app.get("/market/instruments")
 def list_instruments(venue: Optional[str] = Query(default=None)):
+    _ensure_engine_available()
     try:
         return svc.list_instruments(venue=venue)
     except ValueError as exc:  # pragma: no cover - fastapi exception adapter
@@ -520,11 +549,13 @@ def list_instruments(venue: Optional[str] = Query(default=None)):
 
 @app.get("/market/watchlist")
 def get_watchlist():
+    _ensure_engine_available()
     return svc.get_watchlist()
 
 
 @app.put("/market/watchlist")
 def update_watchlist(payload: WatchlistUpdatePayload):
+    _ensure_engine_available()
     return svc.update_watchlist(payload.favorites)
 
 
@@ -626,16 +657,19 @@ def escalate_margin_call(alert_id: str):
 
 @app.get("/orders")
 def get_orders():
+    _ensure_engine_available()
     return svc.orders_snapshot()
 
 
 @app.post("/orders")
 def create_order(payload: OrderCreatePayload):
+    _ensure_engine_available()
     return svc.create_order(payload.dict())
 
 
 @app.post("/orders/{order_id}/cancel")
 def cancel_order(order_id: str):
+    _ensure_engine_available()
     try:
         return svc.cancel_order(order_id)
     except ValueError as exc:
@@ -644,6 +678,7 @@ def cancel_order(order_id: str):
 
 @app.post("/orders/{order_id}/duplicate")
 def duplicate_order(order_id: str):
+    _ensure_engine_available()
     try:
         return svc.duplicate_order(order_id)
     except ValueError as exc:

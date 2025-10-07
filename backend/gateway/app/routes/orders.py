@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.db.base import create_session
 
-from ..nautilus_service import svc
+from ..nautilus_service import EngineUnavailableError, svc
 from ..state_sync import EngineExecution, EngineOrder
 
 LOGGER = logging.getLogger("gateway.api.orders")
@@ -414,6 +414,16 @@ async def _upsert_engine_order(session: AsyncSession, payload: Dict[str, Any]) -
 @router.get("/", response_model=OrdersResponse)
 async def list_orders(session: AsyncSession = Depends(get_session)) -> OrdersResponse:
     try:
+        svc.require_engine()
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
+    try:
         orders = await _load_orders(session)
         executions = await _load_executions(session)
         return OrdersResponse(orders=orders, executions=executions)
@@ -471,10 +481,19 @@ async def get_order(order_id: str, session: AsyncSession = Depends(get_session))
 async def create_order(payload: OrderCreateRequest, session: AsyncSession = Depends(get_session)) -> OrderResponse:
     engine_payload = payload.to_engine_payload()
     try:
+        svc.require_engine()
         response = svc.create_order(engine_payload)
     except ValueError as exc:
         LOGGER.debug("order_submission_rejected", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
     except Exception as exc:  # pragma: no cover - defensive guard
         LOGGER.exception("order_submission_failed")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Order submission failed") from exc
@@ -530,9 +549,27 @@ async def create_order(payload: OrderCreateRequest, session: AsyncSession = Depe
 @router.delete("/{order_id}", response_model=OrderResponse)
 async def cancel_order(order_id: str, session: AsyncSession = Depends(get_session)) -> OrderResponse:
     try:
+        svc.require_engine()
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
+    try:
         response = svc.cancel_order(order_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
     except Exception as exc:  # pragma: no cover - defensive guard
         LOGGER.exception("order_cancel_failed")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Order cancel failed") from exc
@@ -555,6 +592,89 @@ async def cancel_order(order_id: str, session: AsyncSession = Depends(get_sessio
     )
     if orders:
         return OrderResponse(order=orders[0])
+    fallback = OrderResource(
+        order_id=normalised.get("order_id"),
+        client_order_id=normalised.get("client_order_id"),
+        venue_order_id=normalised.get("venue_order_id"),
+        symbol=normalised.get("symbol"),
+        venue=normalised.get("venue"),
+        side=normalised.get("side"),
+        type=normalised.get("type"),
+        quantity=_coerce_float(normalised.get("quantity")),
+        filled_quantity=_coerce_float(normalised.get("filled_quantity")),
+        price=_coerce_float(normalised.get("price")),
+        average_price=_coerce_float(normalised.get("average_price")),
+        status=normalised.get("status"),
+        time_in_force=normalised.get("time_in_force"),
+        expire_time=normalised.get("expire_time"),
+        post_only=normalised.get("post_only"),
+        reduce_only=normalised.get("reduce_only"),
+        limit_offset=_coerce_float(normalised.get("limit_offset")),
+        contingency_type=normalised.get("contingency_type"),
+        order_list_id=normalised.get("order_list_id"),
+        linked_order_ids=list(normalised.get("linked_order_ids") or []),
+        parent_order_id=normalised.get("parent_order_id"),
+        node_id=normalised.get("node_id"),
+        instructions=normalised.get("instructions"),
+        created_at=_parse_timestamp(normalised.get("created_at")),
+        updated_at=_parse_timestamp(normalised.get("updated_at")),
+    )
+    return OrderResponse(order=fallback)
+
+
+@router.post(
+    "/{order_id}/duplicate",
+    response_model=OrderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_order(order_id: str, session: AsyncSession = Depends(get_session)) -> OrderResponse:
+    try:
+        svc.require_engine()
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
+
+    try:
+        response = svc.duplicate_order(order_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive guard
+        LOGGER.exception("order_duplicate_failed")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Order duplicate failed") from exc
+
+    summary = response.get("order")
+    if not isinstance(summary, dict):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Gateway returned no order summary")
+
+    normalised = _normalise_order_summary(summary)
+
+    try:
+        await _upsert_engine_order(session, normalised)
+        await session.commit()
+    except Exception:  # pragma: no cover - defensive guard
+        await session.rollback()
+        LOGGER.exception("order_duplicate_persistence_failed")
+
+    orders = await _load_orders(
+        session,
+        select(EngineOrder).where(EngineOrder.order_id == normalised.get("order_id")).limit(1),
+    )
+    if orders:
+        return OrderResponse(order=orders[0])
+
     fallback = OrderResource(
         order_id=normalised.get("order_id"),
         client_order_id=normalised.get("client_order_id"),

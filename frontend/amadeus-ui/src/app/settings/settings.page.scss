@@ -486,6 +486,8 @@
 .dialog__footer {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 16px 24px 24px;
   border-top: 1px solid rgba(148, 163, 184, 0.16);
@@ -758,5 +760,40 @@
   .credentials-table th,
   .credentials-table td {
     padding: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .dialog {
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .dialog__panel {
+    max-height: calc(100vh - 32px);
+    width: 100%;
+  }
+
+  .dialog__footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .dialog__footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-height: 640px) {
+  .dialog {
+    align-items: flex-start;
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .dialog__panel {
+    max-height: calc(100vh - 32px);
   }
 }
