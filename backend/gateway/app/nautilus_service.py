@@ -51,6 +51,7 @@ def _hash_password(password: str) -> str:
 def _import_nautilus():
     try:
         import nautilus_trader as nt  # установлен в текущем venv
+
         return nt
     except Exception:
         # Fallback: импорт из vendor/nautilus_trader (если пакет не установлен)
@@ -81,6 +82,7 @@ class NodeHandle:
     created_at: str = field(default_factory=_utcnow_iso)
     updated_at: str = field(default_factory=_utcnow_iso)
     metrics: Dict[str, float] = field(default_factory=dict)
+    adapters: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -286,7 +288,8 @@ class MockNautilusService:
             self._instrument_price_seed,
         ) = self._seed_instrument_catalog()
         self._instrument_index: Dict[str, Dict[str, Any]] = {
-            instrument["instrument_id"]: instrument for instrument in self._instrument_catalog
+            instrument["instrument_id"]: instrument
+            for instrument in self._instrument_catalog
         }
         self._historical_bar_cache: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         self._watchlist_lock = threading.RLock()
@@ -328,6 +331,14 @@ class MockNautilusService:
     def _publish(self, topic: str, payload: Dict[str, Any]) -> None:
         self._engine_service.publish(topic, payload)
 
+    def _sync_node_adapters(self, node_id: str) -> None:
+        state = self._require_node(node_id)
+        try:
+            adapters = self._engine_service.get_node_adapter_status(node_id)
+        except Exception:
+            adapters = []
+        state.handle.adapters = adapters
+
     def _persist_node_handle(self, handle: NodeHandle) -> None:
         try:
             mode = EngineMode(handle.mode)
@@ -340,6 +351,7 @@ class MockNautilusService:
                 "status": handle.status,
                 "detail": handle.detail,
                 "metrics": handle.metrics,
+                "adapters": handle.adapters,
                 "created_at": handle.created_at,
                 "updated_at": handle.updated_at,
                 "summary": {
@@ -670,7 +682,9 @@ class MockNautilusService:
     def _persist_watchlist(self, favorites: List[str]) -> None:
         payload = {"favorites": favorites, "updated_at": _utcnow_iso()}
         try:
-            self._watchlist_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            self._watchlist_path.write_text(
+                json.dumps(payload, indent=2), encoding="utf-8"
+            )
         except OSError:
             pass
 
@@ -744,7 +758,9 @@ class MockNautilusService:
                 if instrument.get("venue", "").upper() == venue_key
             ]
         else:
-            instruments = [deepcopy(instrument) for instrument in self._instrument_catalog]
+            instruments = [
+                deepcopy(instrument) for instrument in self._instrument_catalog
+            ]
         return {"instruments": instruments}
 
     def get_watchlist(self) -> dict:
@@ -769,8 +785,16 @@ class MockNautilusService:
     def _seed_users(self) -> None:
         defaults = [
             {"name": "Operator", "email": "operator@example.com", "role": "admin"},
-            {"name": "Risk Analyst", "email": "risk.analyst@example.com", "role": "risk"},
-            {"name": "Execution Trader", "email": "trader@example.com", "role": "trader"},
+            {
+                "name": "Risk Analyst",
+                "email": "risk.analyst@example.com",
+                "role": "risk",
+            },
+            {
+                "name": "Execution Trader",
+                "email": "trader@example.com",
+                "role": "trader",
+            },
         ]
         for entry in defaults:
             timestamp = _utcnow_iso()
@@ -811,15 +835,21 @@ class MockNautilusService:
         user = self._require_user(user_id)
         return {"user": self._user_to_dict(user)}
 
-    def _ensure_unique_email(self, email: str, *, exclude_user_id: Optional[str] = None) -> None:
+    def _ensure_unique_email(
+        self, email: str, *, exclude_user_id: Optional[str] = None
+    ) -> None:
         normalized = self._normalize_email(email)
         for existing in self._users.values():
             if exclude_user_id and existing.user_id == exclude_user_id:
                 continue
             if existing.email == normalized:
-                raise UserConflictError(f"User with email '{normalized}' already exists")
+                raise UserConflictError(
+                    f"User with email '{normalized}' already exists"
+                )
 
-    def _ensure_unique_username(self, username: str, *, exclude_user_id: Optional[str] = None) -> None:
+    def _ensure_unique_username(
+        self, username: str, *, exclude_user_id: Optional[str] = None
+    ) -> None:
         normalized = username.strip().lower()
         for existing in self._users.values():
             if exclude_user_id and existing.user_id == exclude_user_id:
@@ -1022,13 +1052,17 @@ class MockNautilusService:
 
         count = limit or 200
         if start_dt:
-            max_count = int(((end_dt - start_dt).total_seconds() // delta.total_seconds())) + 1
+            max_count = (
+                int(((end_dt - start_dt).total_seconds() // delta.total_seconds())) + 1
+            )
             count = min(count, max(1, max_count))
         if count <= 0:
             raise ValueError("Requested bar count must be positive")
 
         end_aligned = end_dt.replace(microsecond=0)
-        cache_key = f"bars:{instrument_id}:{granularity}:{count}:{end_aligned.isoformat()}"
+        cache_key = (
+            f"bars:{instrument_id}:{granularity}:{count}:{end_aligned.isoformat()}"
+        )
         if self._cache:
             cached = self._cache.get(cache_key)
             if cached:
@@ -1042,7 +1076,9 @@ class MockNautilusService:
         memory_key = (instrument_id, granularity)
         bars = self._historical_bar_cache.get(memory_key)
         if not bars or len(bars) < count:
-            bars = self._generate_historical_series(instrument_id, granularity, count, end_aligned)
+            bars = self._generate_historical_series(
+                instrument_id, granularity, count, end_aligned
+            )
             self._historical_bar_cache[memory_key] = bars
         else:
             bars = bars[-count:]
@@ -1223,7 +1259,9 @@ class MockNautilusService:
             quantity = position.quantity or 0.0
             exposure = quantity * mark
             asset_class = self._infer_asset_class(position.symbol)
-            breakdown[asset_class] = round(breakdown.get(asset_class, 0.0) + exposure, 2)
+            breakdown[asset_class] = round(
+                breakdown.get(asset_class, 0.0) + exposure, 2
+            )
         return breakdown
 
     def _capture_portfolio_sample(self) -> None:
@@ -1234,7 +1272,8 @@ class MockNautilusService:
                 sum(position.realized_pnl for position in self._portfolio_positions), 2
             ),
             "unrealized": round(
-                sum(position.unrealized_pnl for position in self._portfolio_positions), 2
+                sum(position.unrealized_pnl for position in self._portfolio_positions),
+                2,
             ),
             "exposures": self._calculate_exposure_breakdown(),
         }
@@ -1275,7 +1314,62 @@ class MockNautilusService:
         self._portfolio_history = history + self._portfolio_history
 
     def core_info(self) -> dict:
-        return {"nautilus_version": NT_VERSION, "available": nt is not None}
+        try:
+            adapter_entries = self._engine.list_adapter_status()
+        except Exception:
+            adapter_entries = []
+
+        connected = sum(
+            1
+            for entry in adapter_entries
+            if str(entry.get("state", "")).lower() == "connected"
+        )
+        total = len(adapter_entries)
+
+        try:
+            available = nt is not None and self._engine.ensure_package()
+        except Exception:
+            available = nt is not None
+
+        return {
+            "nautilus_version": NT_VERSION,
+            "available": available,
+            "adapters": {
+                "total": total,
+                "connected": connected,
+                "items": adapter_entries,
+            },
+        }
+
+    def health_status(self) -> dict:
+        try:
+            adapter_entries = self._engine.list_adapter_status()
+        except Exception:
+            adapter_entries = []
+
+        connected = sum(
+            1
+            for entry in adapter_entries
+            if str(entry.get("state", "")).lower() == "connected"
+        )
+        total = len(adapter_entries)
+
+        try:
+            available = self._engine.ensure_package()
+        except Exception:
+            available = False
+
+        status = "ok"
+        if not available:
+            status = "offline"
+        elif total and connected < total:
+            status = "degraded"
+
+        return {
+            "status": status,
+            "env": settings.env,
+            "adapters": {"connected": connected, "total": total},
+        }
 
     def _recompute_portfolio_totals(self) -> None:
         self._portfolio_equity = round(
@@ -1296,7 +1390,14 @@ class MockNautilusService:
             k=1,
         )[0]
         magnitude = random.uniform(400.0, 4_000.0)
-        amount = round(magnitude if movement_type in {"deposit", "trade_pnl", "adjustment"} else -magnitude, 2)
+        amount = round(
+            (
+                magnitude
+                if movement_type in {"deposit", "trade_pnl", "adjustment"}
+                else -magnitude
+            ),
+            2,
+        )
         descriptions = {
             "deposit": "External funding received",
             "withdrawal": "Capital withdrawn to treasury",
@@ -1319,8 +1420,13 @@ class MockNautilusService:
 
     def _apply_movement_to_balances(self, movement: CashMovement) -> None:
         for balance in self._portfolio_balances:
-            if balance.account_id == movement.account_id and balance.currency == movement.currency:
-                balance.available = round(max(0.0, balance.available + movement.amount), 2)
+            if (
+                balance.account_id == movement.account_id
+                and balance.currency == movement.currency
+            ):
+                balance.available = round(
+                    max(0.0, balance.available + movement.amount), 2
+                )
                 balance.total = round(max(0.0, balance.total + movement.amount), 2)
                 break
 
@@ -1334,7 +1440,9 @@ class MockNautilusService:
                 (position.mark_price - position.average_price) * position.quantity, 2
             )
             if random.random() < 0.12:
-                realized_delta = random.gauss(0, max(50.0, abs(position.unrealized_pnl) * 0.15))
+                realized_delta = random.gauss(
+                    0, max(50.0, abs(position.unrealized_pnl) * 0.15)
+                )
                 position.realized_pnl = round(position.realized_pnl + realized_delta, 2)
             notional = abs(position.quantity * position.mark_price)
             position.margin_used = round(notional * 0.08, 2)
@@ -1359,8 +1467,12 @@ class MockNautilusService:
         return {
             "portfolio": {
                 "balances": [asdict(balance) for balance in self._portfolio_balances],
-                "positions": [asdict(position) for position in self._portfolio_positions],
-                "cash_movements": [asdict(movement) for movement in self._cash_movements[-60:]],
+                "positions": [
+                    asdict(position) for position in self._portfolio_positions
+                ],
+                "cash_movements": [
+                    asdict(movement) for movement in self._cash_movements[-60:]
+                ],
                 "equity_value": self._portfolio_equity,
                 "margin_value": self._portfolio_margin,
                 "timestamp": self._portfolio_timestamp,
@@ -1389,7 +1501,9 @@ class MockNautilusService:
         if random.random() < 0.5:
             self._simulate_portfolio_tick()
         return {
-            "cash_movements": [asdict(movement) for movement in self._cash_movements[-60:]],
+            "cash_movements": [
+                asdict(movement) for movement in self._cash_movements[-60:]
+            ],
             "equity_value": self._portfolio_equity,
             "margin_value": self._portfolio_margin,
             "timestamp": self._portfolio_timestamp,
@@ -1440,7 +1554,9 @@ class MockNautilusService:
 
             expire_time: Optional[str] = None
             if tif == "GTD":
-                expire_time = _isoformat(created + timedelta(hours=random.randint(1, 48)))
+                expire_time = _isoformat(
+                    created + timedelta(hours=random.randint(1, 48))
+                )
             elif tif == "DAY":
                 expire_time = _isoformat(created.replace(hour=23, minute=59))
 
@@ -1454,9 +1570,13 @@ class MockNautilusService:
             parent_order_id = None
             if contingency_type == "OCO":
                 order_list_id = f"OCO-{random.randint(1000, 9999)}"
-                linked_order_ids = [f"ORD-{random.randint(1, index+1):06d}"] if index else None
+                linked_order_ids = (
+                    [f"ORD-{random.randint(1, index+1):06d}"] if index else None
+                )
             elif contingency_type == "OTO":
-                parent_order_id = f"ORD-{random.randint(1, index+1):06d}" if index else None
+                parent_order_id = (
+                    f"ORD-{random.randint(1, index+1):06d}" if index else None
+                )
 
             post_only = order_type in {"limit", "stop_limit"} and random.random() < 0.5
             reduce_only = random.random() < 0.3
@@ -1464,18 +1584,30 @@ class MockNautilusService:
             filled_quantity = 0.0
             average_price: Optional[float] = None
             if status in {"filled", "cancelled"}:
-                filled_quantity = quantity if status == "filled" else round(quantity * random.uniform(0.25, 0.85), 4)
+                filled_quantity = (
+                    quantity
+                    if status == "filled"
+                    else round(quantity * random.uniform(0.25, 0.85), 4)
+                )
                 average_price = round(price * random.uniform(0.98, 1.02), 2)
             elif status == "working":
                 filled_quantity = round(quantity * random.uniform(0.1, 0.6), 4)
-                average_price = round(price * random.uniform(0.98, 1.02), 2) if filled_quantity > 0 else None
+                average_price = (
+                    round(price * random.uniform(0.98, 1.02), 2)
+                    if filled_quantity > 0
+                    else None
+                )
             elif status == "rejected":
                 updated = created + timedelta(minutes=random.randint(1, 8))
 
             order = OrderRecord(
                 order_id=self._next_order_id(),
                 client_order_id=f"CL-{1000 + index}",
-                venue_order_id=(f"VN-{random.randint(100000, 999999)}" if status != "pending" else None),
+                venue_order_id=(
+                    f"VN-{random.randint(100000, 999999)}"
+                    if status != "pending"
+                    else None
+                ),
                 symbol=random.choice(symbols),
                 venue=random.choice(venues),
                 side=side,
@@ -1525,7 +1657,11 @@ class MockNautilusService:
             return
 
         remaining = executed
-        slices = 1 if executed < 0.01 else random.randint(1, min(3, int(max(1, round(executed)))))
+        slices = (
+            1
+            if executed < 0.01
+            else random.randint(1, min(3, int(max(1, round(executed)))))
+        )
         total_cost = 0.0
         fills: List[ExecutionRecord] = []
         for slice_index in range(slices):
@@ -1536,7 +1672,11 @@ class MockNautilusService:
             else:
                 qty = round(remaining * random.uniform(0.35, 0.7), 4)
                 qty = max(0.0001, min(qty, remaining))
-            price = order.average_price or order.price or round(random.uniform(25.0, 48000.0), 2)
+            price = (
+                order.average_price
+                or order.price
+                or round(random.uniform(25.0, 48000.0), 2)
+            )
             timestamp = order.updated_at
             record = ExecutionRecord(
                 execution_id=str(uuid.uuid4()),
@@ -1589,7 +1729,9 @@ class MockNautilusService:
         if tif == "GTD":
             expire_time = _isoformat(now + timedelta(hours=random.randint(1, 48)))
         elif tif == "DAY":
-            expire_time = _isoformat(now.replace(hour=23, minute=59, second=0, microsecond=0))
+            expire_time = _isoformat(
+                now.replace(hour=23, minute=59, second=0, microsecond=0)
+            )
 
         limit_offset: Optional[float] = None
         if order_type == "stop_limit":
@@ -1602,13 +1744,17 @@ class MockNautilusService:
         if contingency_type == "OCO":
             order_list_id = f"OCO-{random.randint(1000, 9999)}"
         elif contingency_type == "OTO":
-            parent_order_id = f"ORD-{random.randint(1, max(1, self._order_counter)):06d}"
+            parent_order_id = (
+                f"ORD-{random.randint(1, max(1, self._order_counter)):06d}"
+            )
 
         order = OrderRecord(
             order_id=self._next_order_id(),
             client_order_id=f"CL-{1000 + self._order_counter}",
             venue_order_id=None,
-            symbol=random.choice(["BTCUSDT", "ETHUSDT", "SOLUSDT", "ADAUSDT", "AAPL.XNAS", "MSFT.XNAS"]),
+            symbol=random.choice(
+                ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ADAUSDT", "AAPL.XNAS", "MSFT.XNAS"]
+            ),
             venue=random.choice(["BINANCE", "COINBASE", "NASDAQ", "FTX"]),
             side=random.choice(["buy", "sell"]),
             type=order_type,
@@ -1642,7 +1788,11 @@ class MockNautilusService:
             return
 
         partial = remaining > 0.05 and random.random() < 0.6
-        fill_qty = remaining if not partial else round(remaining * random.uniform(0.25, 0.75), 4)
+        fill_qty = (
+            remaining
+            if not partial
+            else round(remaining * random.uniform(0.25, 0.75), 4)
+        )
         fill_qty = max(0.0001, min(fill_qty, remaining))
 
         prev_qty = order.filled_quantity
@@ -1655,9 +1805,15 @@ class MockNautilusService:
         if order.filled_quantity > 0:
             order.average_price = round(total_cost / order.filled_quantity, 2)
 
-        order.status = "filled" if abs(order.quantity - order.filled_quantity) < 1e-6 else "working"
+        order.status = (
+            "filled"
+            if abs(order.quantity - order.filled_quantity) < 1e-6
+            else "working"
+        )
         order.updated_at = timestamp
-        order.venue_order_id = order.venue_order_id or f"VN-{random.randint(100000, 999999)}"
+        order.venue_order_id = (
+            order.venue_order_id or f"VN-{random.randint(100000, 999999)}"
+        )
 
         record = ExecutionRecord(
             execution_id=str(uuid.uuid4()),
@@ -1983,7 +2139,9 @@ class MockNautilusService:
         now = _utcnow_iso()
         duplicate = OrderRecord(
             order_id=self._next_order_id(),
-            client_order_id=(f"{original.client_order_id}-COPY" if original.client_order_id else None),
+            client_order_id=(
+                f"{original.client_order_id}-COPY" if original.client_order_id else None
+            ),
             venue_order_id=None,
             symbol=original.symbol,
             venue=original.venue,
@@ -2001,7 +2159,11 @@ class MockNautilusService:
             limit_offset=original.limit_offset,
             contingency_type=original.contingency_type,
             order_list_id=original.order_list_id,
-            linked_order_ids=deepcopy(original.linked_order_ids) if original.linked_order_ids else None,
+            linked_order_ids=(
+                deepcopy(original.linked_order_ids)
+                if original.linked_order_ids
+                else None
+            ),
             parent_order_id=original.parent_order_id,
             instructions=deepcopy(original.instructions),
             node_id=original.node_id,
@@ -2094,7 +2256,12 @@ class MockNautilusService:
                 "enabled": True,
                 "status": "up_to_date",
                 "locks": [
-                    {"venue": "BINANCE", "node": "lv-00112233", "locked": False, "reason": None},
+                    {
+                        "venue": "BINANCE",
+                        "node": "lv-00112233",
+                        "locked": False,
+                        "reason": None,
+                    },
                     {
                         "venue": "COINBASE",
                         "node": "bt-00ffaacc",
@@ -2114,8 +2281,9 @@ class MockNautilusService:
         limit_entry = next(
             (
                 item
-                for item in self._risk_limits.get("position_limits", {})
-                .get("limits", [])
+                for item in self._risk_limits.get("position_limits", {}).get(
+                    "limits", []
+                )
                 if item.get("venue") == position.venue
             ),
             None,
@@ -2213,7 +2381,10 @@ class MockNautilusService:
         return payload
 
     def _risk_alerts_stream_payload(self, category: RiskAlertCategory) -> dict:
-        events = [self._risk_alert_to_dict(alert) for alert in self._risk_alerts.get(category, [])]
+        events = [
+            self._risk_alert_to_dict(alert)
+            for alert in self._risk_alerts.get(category, [])
+        ]
         events.sort(key=lambda item: item.get("timestamp", ""))
         return {"events": events, "timestamp": _utcnow_iso()}
 
@@ -2227,8 +2398,9 @@ class MockNautilusService:
         limit_entry = next(
             (
                 item
-                for item in self._risk_limits.get("position_limits", {})
-                .get("limits", [])
+                for item in self._risk_limits.get("position_limits", {}).get(
+                    "limits", []
+                )
                 if item.get("venue") == position.venue
             ),
             None,
@@ -2246,7 +2418,10 @@ class MockNautilusService:
             severity = "medium"
 
         reasons = [
-            "Volatility spike", "Order flow imbalance", "Position accumulation", "Hedging delay"
+            "Volatility spike",
+            "Order flow imbalance",
+            "Position accumulation",
+            "Hedging delay",
         ]
         reason = random.choice(reasons)
 
@@ -2280,10 +2455,13 @@ class MockNautilusService:
             "Manual safety trigger",
         ]
         reason = random.choice(reasons)
-        severity = random.choices([
-            "high",
-            "critical",
-        ], weights=[0.6, 0.4])[0]
+        severity = random.choices(
+            [
+                "high",
+                "critical",
+            ],
+            weights=[0.6, 0.4],
+        )[0]
 
         alert = self._add_risk_alert(
             category="circuit_breaker",
@@ -2450,7 +2628,11 @@ class MockNautilusService:
             meta_payload["detail"] = handle.detail
         if config_metadata:
             meta_payload.update(
-                {key: value for key, value in config_metadata.items() if value is not None}
+                {
+                    key: value
+                    for key, value in config_metadata.items()
+                    if value is not None
+                }
             )
 
         self._persist_node_config(
@@ -2483,6 +2665,7 @@ class MockNautilusService:
 
         state = self._require_node(node_id)
         state.engine_handle = engine_handle
+        self._sync_node_adapters(node_id)
 
         LOGGER.debug(
             "nautilus_node_launched",
@@ -2559,6 +2742,7 @@ class MockNautilusService:
 
         state = self._require_node(node_id)
         state.engine_handle = engine_handle
+        self._sync_node_adapters(node_id)
 
         LOGGER.debug(
             "nautilus_node_launched",
@@ -2614,7 +2798,9 @@ class MockNautilusService:
 
         venue = str(dataset_payload.get("venue") or "").upper() or None
         dataset_id = dataset_payload.get("id") or None
-        dataset_label = dataset_payload.get("name") or dataset_id or "historical-dataset"
+        dataset_label = (
+            dataset_payload.get("name") or dataset_id or "historical-dataset"
+        )
         bar_interval = dataset_payload.get("barInterval")
         dataset_description = dataset_payload.get("description")
 
@@ -2622,7 +2808,8 @@ class MockNautilusService:
         date_end = date_range_payload.get("end")
 
         data_source: Dict[str, Any] = {
-            "id": dataset_id or f"{(venue or 'dataset').lower()}-{uuid.uuid4().hex[:6]}",
+            "id": dataset_id
+            or f"{(venue or 'dataset').lower()}-{uuid.uuid4().hex[:6]}",
             "label": dataset_label,
             "type": "historical",
             "mode": "read",
@@ -2701,14 +2888,19 @@ class MockNautilusService:
                 }
             ],
             "keyReferences": [
-                {"alias": f"{venue} primary key", "keyId": f"{venue.lower()}-primary", "required": True}
+                {
+                    "alias": f"{venue} primary key",
+                    "keyId": f"{venue.lower()}-primary",
+                    "required": True,
+                }
             ],
             "constraints": {"autoStopOnError": True},
         }
         engine_mode = EngineMode.LIVE
         handle = self._create_node(
             mode="live",
-            detail=detail or f"Live node prepared (venue={venue}). Configure adapters to proceed.",
+            detail=detail
+            or f"Live node prepared (venue={venue}). Configure adapters to proceed.",
             config=config_data,
             config_metadata=config_metadata,
         )
@@ -2721,7 +2913,11 @@ class MockNautilusService:
             meta_payload["detail"] = handle.detail
         if config_metadata:
             meta_payload.update(
-                {key: value for key, value in config_metadata.items() if value is not None}
+                {
+                    key: value
+                    for key, value in config_metadata.items()
+                    if value is not None
+                }
             )
 
         self._persist_node_config(
@@ -2753,6 +2949,7 @@ class MockNautilusService:
 
         state = self._require_node(node_id)
         state.engine_handle = engine_handle
+        self._sync_node_adapters(node_id)
 
         running_message = f"Nautilus {engine_mode.value} engine running"
         handle = self._mark_node_running(node_id, running_message)
@@ -2799,7 +2996,8 @@ class MockNautilusService:
         engine_mode = EngineMode.SANDBOX
         handle = self._create_node(
             mode="sandbox",
-            detail=detail or f"Sandbox node prepared (venue={venue}). Configure adapters to proceed.",
+            detail=detail
+            or f"Sandbox node prepared (venue={venue}). Configure adapters to proceed.",
             config=config_data,
             config_metadata=config_metadata,
         )
@@ -2812,7 +3010,11 @@ class MockNautilusService:
             meta_payload["detail"] = handle.detail
         if config_metadata:
             meta_payload.update(
-                {key: value for key, value in config_metadata.items() if value is not None}
+                {
+                    key: value
+                    for key, value in config_metadata.items()
+                    if value is not None
+                }
             )
 
         self._persist_node_config(
@@ -2844,6 +3046,7 @@ class MockNautilusService:
 
         state = self._require_node(node_id)
         state.engine_handle = engine_handle
+        self._sync_node_adapters(node_id)
 
         running_message = f"Nautilus {engine_mode.value} engine running"
         handle = self._mark_node_running(node_id, running_message)
@@ -2862,30 +3065,78 @@ class MockNautilusService:
     def stop_node(self, node_id: str) -> NodeHandle:
         state = self._require_node(node_id)
         handle = state.handle
-        if handle.status == "stopped":
-            return handle
+        engine_handle = None
+        if self._engine_active():
+            try:
+                engine_handle = self._engine_service.stop_trading_node(node_id)
+            except KeyError:
+                engine_handle = None
+            except Exception as exc:  # pragma: no cover - defensive guard
+                LOGGER.warning(
+                    "engine_stop_failed",
+                    extra={"node_id": node_id, "error": str(exc)},
+                    exc_info=True,
+                )
+
+        state.engine_handle = None
+        if engine_handle is not None:
+            handle.adapters = deepcopy(engine_handle.adapters or [])
+        else:
+            self._sync_node_adapters(node_id)
+
         handle.status = "stopped"
+        handle.detail = handle.detail or "Node stopped by operator"
         handle.updated_at = _utcnow_iso()
         self._record_lifecycle(node_id, "stopped", "Node stopped by operator")
-        self._append_log(node_id, "info", "Node received stop signal", source="orchestrator")
+        self._append_log(
+            node_id, "info", "Node received stop signal", source="orchestrator"
+        )
         self._persist_node_handle(handle)
         return handle
 
     def restart_node(self, node_id: str) -> NodeHandle:
         state = self._require_node(node_id)
-        if nt is None:
-            raise ValueError("Nautilus core not available. Install package into backend venv.")
+        if not self._engine_service.ensure_package():
+            raise ValueError(
+                "Nautilus core not available. Install package into backend venv."
+            )
+
+        try:
+            engine_handle = self._engine_service.restart_trading_node(node_id)
+        except KeyError:
+            config = deepcopy(state.config)
+            config.setdefault("id", node_id)
+            config_type = str(config.get("type") or state.handle.mode).lower()
+            try:
+                engine_mode = EngineMode(config_type)
+            except ValueError:
+                engine_mode = EngineMode.LIVE
+            engine_handle = self._engine_service.launch_trading_node(
+                mode=engine_mode,
+                config=config,
+                node_id=node_id,
+            )
+
+        state.engine_handle = engine_handle
+        config_snapshot = self._engine_service.get_node_config(node_id)
+        if config_snapshot is not None:
+            state.config = config_snapshot
+        self._sync_node_adapters(node_id)
+
         handle = state.handle
         handle.status = "running"
         handle.detail = handle.detail or "Node restarted"
         handle.updated_at = _utcnow_iso()
         self._record_lifecycle(node_id, "running", "Node restarted")
-        self._append_log(node_id, "info", "Restart sequence completed", source="controller")
+        self._append_log(
+            node_id, "info", "Restart sequence completed", source="controller"
+        )
         self._persist_node_handle(handle)
         return handle
 
     def node_detail(self, node_id: str) -> dict:
         state = self._require_node(node_id)
+        self._sync_node_adapters(node_id)
         return {
             "node": self.as_dict(state.handle),
             "config": state.config,
@@ -2917,6 +3168,7 @@ class MockNautilusService:
         for node_id in list(self._nodes.keys()):
             self._ensure_metrics_seeded(node_id)
             self._update_handle_metrics(node_id)
+            self._sync_node_adapters(node_id)
         return [state.handle for state in self._nodes.values()]
 
     def as_dict(self, handle: NodeHandle) -> dict:
@@ -2933,7 +3185,9 @@ class MockNautilusService:
         prefix = prefix_map.get(mode, "nd")
         node_id = f"{prefix}-{uuid.uuid4().hex[:8]}"
         handle = NodeHandle(id=node_id, mode=mode, status="created", detail=detail)
-        state = NodeState(handle=handle, config=config, lifecycle=[], logs=[], metrics=[])
+        state = NodeState(
+            handle=handle, config=config, lifecycle=[], logs=[], metrics=[]
+        )
         self._nodes[node_id] = state
         self._config_versions[node_id] = 0
         self._record_lifecycle(node_id, "created", "Node registered")
@@ -2983,7 +3237,9 @@ class MockNautilusService:
 
     def _record_lifecycle(self, node_id: str, status: str, message: str) -> None:
         state = self._require_node(node_id)
-        event = NodeLifecycleEvent(timestamp=_utcnow_iso(), status=status, message=message)
+        event = NodeLifecycleEvent(
+            timestamp=_utcnow_iso(), status=status, message=message
+        )
         state.lifecycle.append(event)
         self._publish(
             f"engine.nodes.{node_id}.lifecycle",
@@ -3022,7 +3278,7 @@ class MockNautilusService:
                 "timestamp": entry.timestamp,
             }
         )
-        
+
     def _ensure_metrics_seeded(self, node_id: str) -> None:
         state = self._require_node(node_id)
         if state.metrics:
@@ -3267,7 +3523,9 @@ class NautilusService:
             linked_order_ids = None
 
         try:
-            limit_offset = float(limit_offset_raw) if limit_offset_raw is not None else None
+            limit_offset = (
+                float(limit_offset_raw) if limit_offset_raw is not None else None
+            )
         except (TypeError, ValueError):
             limit_offset = None
 
@@ -3285,7 +3543,8 @@ class NautilusService:
 
         summary: Dict[str, Any] = {
             "order_id": order_identifier,
-            "client_order_id": payload.get("client_order_id") or instructions.get("client_order_id"),
+            "client_order_id": payload.get("client_order_id")
+            or instructions.get("client_order_id"),
             "venue_order_id": None,
             "symbol": symbol,
             "venue": venue,

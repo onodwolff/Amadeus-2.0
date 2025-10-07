@@ -103,6 +103,26 @@
               </ul>
             </div>
 
+            <div class="node-detail__config-group" *ngIf="current.adapters?.length">
+              <h4>Adapter status</h4>
+              <ul class="node-detail__adapter-list">
+                <li *ngFor="let adapter of current.adapters">
+                  <span
+                    class="node-detail__pill"
+                    [class.node-detail__pill--warn]="(adapter.state || '').toLowerCase() !== 'connected'"
+                  >
+                    {{ (adapter.state || 'unknown') | titlecase }}
+                  </span>
+                  <span>{{ adapter.name || adapter.identifier || 'Adapter' }}</span>
+                  <span class="node-detail__hint" *ngIf="adapter.mode">({{ adapter.mode }})</span>
+                  <span class="node-detail__hint" *ngIf="adapter.sources?.length">
+                    sources: {{ adapter.sources?.join(', ') }}
+                  </span>
+                  <span class="node-detail__pill node-detail__pill--muted" *ngIf="adapter.sandbox">sandbox</span>
+                </li>
+              </ul>
+            </div>
+
             <div class="node-detail__config-group" *ngIf="config.constraints">
               <h4>Constraints</h4>
               <dl class="node-detail__definition">
