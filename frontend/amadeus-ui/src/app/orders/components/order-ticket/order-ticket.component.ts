@@ -1,4 +1,5 @@
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, EventEmitter, OnInit, Output, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -211,7 +212,13 @@ export class OrderTicketComponent implements OnInit {
         },
         error: (err) => {
           console.error('Order submission failed', err);
-          this.notifications.error('Failed to submit order. Please review gateway logs.');
+          const backendErrors = this.extractBackendErrors(err);
+          if (backendErrors.length > 0) {
+            this.formErrors.set(backendErrors);
+            this.notifications.error(backendErrors[0], 'Order rejected');
+          } else {
+            this.notifications.error('Failed to submit order. Please review gateway logs.');
+          }
         },
       });
   }
@@ -403,6 +410,41 @@ export class OrderTicketComponent implements OnInit {
     }
 
     return errors;
+  }
+
+  private extractBackendErrors(err: unknown): string[] {
+    if (err instanceof HttpErrorResponse) {
+      const detail = err.error?.detail ?? err.error;
+      if (Array.isArray(detail)) {
+        const messages = detail
+          .map((entry: any) => {
+            if (!entry) {
+              return null;
+            }
+            if (typeof entry === 'string') {
+              return entry;
+            }
+            if (typeof entry?.msg === 'string') {
+              return entry.msg;
+            }
+            if (typeof entry?.detail === 'string') {
+              return entry.detail;
+            }
+            return null;
+          })
+          .filter((message): message is string => typeof message === 'string' && message.trim().length > 0);
+        if (messages.length > 0) {
+          return messages;
+        }
+      }
+      if (typeof detail === 'string') {
+        const trimmed = detail.trim();
+        if (trimmed.length > 0) {
+          return [trimmed];
+        }
+      }
+    }
+    return [];
   }
 
   private estimateNotional(
