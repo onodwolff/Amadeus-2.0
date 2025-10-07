@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.db.base import create_session
 from gateway.db.models import Node, RiskLimit, User
 
-from ..nautilus_service import svc
+from ..nautilus_service import EngineUnavailableError, svc
 
 LOGGER = logging.getLogger("gateway.api.risk")
 router = APIRouter(prefix="/risk", tags=["risk"])
@@ -221,3 +221,47 @@ async def update_risk_limits(
             node_id=str(resolved_node_id) if resolved_node_id is not None else None,
         ),
     )
+
+
+def _require_engine() -> None:
+    try:
+        svc.require_engine()
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
+
+
+@router.post("/alerts/{alert_id}/ack", response_model=dict)
+def acknowledge_risk_alert(alert_id: str) -> Dict[str, Any]:
+    _require_engine()
+    try:
+        return svc.acknowledge_risk_alert(alert_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/alerts/{alert_id}/unlock", response_model=dict)
+def unlock_risk_alert(alert_id: str) -> Dict[str, Any]:
+    _require_engine()
+    try:
+        return svc.unlock_circuit_breaker(alert_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/alerts/{alert_id}/escalate", response_model=dict)
+def escalate_margin_call(alert_id: str) -> Dict[str, Any]:
+    _require_engine()
+    try:
+        return svc.escalate_margin_call(alert_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

@@ -73,6 +73,16 @@ except Exception:
     NT_VERSION = "unavailable"
 
 
+class EngineUnavailableError(RuntimeError):
+    """Raised when the Nautilus core package is not available."""
+
+
+ENGINE_UNAVAILABLE_MESSAGE = (
+    "Nautilus Trader engine is not installed. Install 'nautilus-trader' or set "
+    "AMAD_USE_MOCK=true to enable the mock integration."
+)
+
+
 @dataclass
 class NodeHandle:
     id: str
@@ -3580,6 +3590,7 @@ class NautilusService:
         storage: Optional[NullStorage] = None,
     ) -> None:
         self._engine = engine or build_engine_service()
+        self._allow_mock = settings.use_mock_services
         self._state_sync: Optional[EngineStateSync] = None
         try:
             self._state_sync = EngineStateSync(
@@ -3614,6 +3625,20 @@ class NautilusService:
     @property
     def engine(self) -> NautilusEngineService:
         return self._engine
+
+    def _engine_package_available(self) -> bool:
+        try:
+            return self._engine.ensure_package()
+        except Exception:
+            return False
+
+    def require_engine(self) -> None:
+        """Ensure the Nautilus core is available when mocks are disabled."""
+
+        if self._allow_mock:
+            return
+        if not self._engine_package_available():
+            raise EngineUnavailableError(ENGINE_UNAVAILABLE_MESSAGE)
 
     def _engine_active(self) -> bool:
         try:
@@ -3744,6 +3769,8 @@ class NautilusService:
 
     def create_order(self, payload: Dict[str, Any]) -> dict:
         if not self._engine_active():
+            if not self._engine_package_available():
+                self.require_engine()
             return self._mock.create_order(payload)
 
         self._mock.validate_order(payload)
@@ -3775,6 +3802,8 @@ class NautilusService:
 
     def cancel_order(self, order_id: str) -> dict:
         if not self._engine_active():
+            if not self._engine_package_available():
+                self.require_engine()
             return self._mock.cancel_order(order_id)
 
         entry = self._engine_orders.get(order_id)
@@ -3843,6 +3872,8 @@ class NautilusService:
                     return payload
             except Exception:
                 pass
+        if not self._engine_package_available():
+            self.require_engine()
         return self._mock.list_instruments(venue=venue)
 
     def get_watchlist(self) -> dict:
@@ -3874,6 +3905,8 @@ class NautilusService:
                     return payload
             except Exception:
                 pass
+        if not self._engine_package_available():
+            self.require_engine()
         return self._mock.get_historical_bars(
             instrument_id=instrument_id,
             granularity=granularity,
