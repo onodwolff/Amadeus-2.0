@@ -5,11 +5,15 @@ import inspect
 import json
 import time
 import uuid
+from copy import deepcopy
+from datetime import timezone
 from functools import wraps
-from typing import Any, Dict, List, Literal, Optional
+from pathlib import Path
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Tuple
 
 from fastapi import (
     FastAPI,
+    Depends,
     HTTPException,
     Query,
     Request,
@@ -19,11 +23,26 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import text
+from starlette.datastructures import UploadFile
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import settings
-from gateway.db.base import create_engine as create_db_engine, dispose_engine
+from gateway.db.base import (
+    create_engine as create_db_engine,
+    create_session,
+    dispose_engine,
+)
+from gateway.db.models import (
+    Config as DbConfig,
+    ConfigFormat,
+    ConfigSource,
+    Node as DbNode,
+    NodeMode as DbNodeMode,
+    NodeStatus as DbNodeStatus,
+    User as DbUser,
+)
 from .nautilus_service import (
     EngineUnavailableError,
     NodeHandle,
@@ -32,7 +51,7 @@ from .nautilus_service import (
     UserValidationError,
     svc,
 )
-from .nautilus_engine_service import EngineConfigError, EngineMode
+from .nautilus_engine_service import EngineConfigError, EngineMode, EngineNodeHandle
 from .logging import bind_contextvars, clear_contextvars, get_logger
 from .routes.keys import router as keys_router
 from .routes.orders import router as orders_router
@@ -41,6 +60,102 @@ from .routes.risk import router as risk_router
 
 
 logger = get_logger("gateway.api")
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    session = create_session()
+    try:
+        yield session
+    finally:  # pragma: no cover - cleanup
+        await session.close()
+
+
+async def _resolve_primary_user(session: AsyncSession) -> DbUser:
+    result = await session.execute(select(DbUser).order_by(DbUser.id.asc()).limit(1))
+    user = result.scalars().first()
+    if user is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="No user accounts available for launch"
+        )
+    return user
+
+
+def _normalise_config_source(value: Optional[str]) -> ConfigSource:
+    if value is None:
+        return ConfigSource.UI
+
+    candidate = value.strip().lower()
+    try:
+        return ConfigSource(candidate)
+    except ValueError:
+        if candidate in {"api", "payload", "json", "form"}:
+            return ConfigSource.UI
+        if candidate in {"upload", "file"}:
+            return ConfigSource.UPLOAD
+        return ConfigSource.UI
+
+
+def _normalise_config_format(value: Optional[str]) -> ConfigFormat:
+    if value is None:
+        return ConfigFormat.JSON
+
+    candidate = value.strip().lower()
+    if candidate == "yml":
+        candidate = "yaml"
+    try:
+        return ConfigFormat(candidate)
+    except ValueError:
+        return ConfigFormat.JSON
+
+
+def _persist_node_record(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    mode: EngineMode,
+    config: Dict[str, Any],
+    config_meta: Dict[str, Any],
+    detail: Optional[str],
+    status: DbNodeStatus,
+    handle: Optional[EngineNodeHandle] = None,
+    error: Optional[str] = None,
+) -> Tuple[DbNode, DbConfig]:
+    strategy = config.get("strategy") or {}
+    strategy_id = strategy.get("id")
+    summary: Dict[str, Any] = {
+        "external_id": handle.id if handle else None,
+        "mode": mode.value,
+        "detail": detail,
+        "status": status.value,
+        "config_version": handle.config_version if handle else 0,
+        "config_source": config_meta.get("source"),
+        "config_format": config_meta.get("format"),
+    }
+    if handle is not None:
+        summary["adapters"] = deepcopy(handle.adapters)
+        summary["started_at"] = handle.started_at.isoformat()
+    if error:
+        summary["error"] = error
+
+    node_record = DbNode(
+        user_id=user_id,
+        mode=DbNodeMode(mode.value),
+        strategy_id=strategy_id,
+        status=status,
+        started_at=(handle.started_at if handle else None),
+        summary=summary,
+    )
+    session.add(node_record)
+
+    config_record = DbConfig(
+        node=node_record,
+        version=(handle.config_version if handle else 1),
+        source=_normalise_config_source(config_meta.get("source")),
+        format=_normalise_config_format(config_meta.get("format")),
+        content=deepcopy(config),
+    )
+    session.add(config_record)
+    return node_record, config_record
 
 
 def _resolve_node_id(request: Request) -> str | None:
@@ -405,66 +520,229 @@ def start_sandbox():
 
 
 @app.post("/nodes/launch")
-def launch_node(payload: NodeLaunchPayload):
-    node_type = payload.type.lower()
+async def launch_node(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
     _ensure_engine_available()
+
+    content_type = request.headers.get("content-type", "")
+    config_metadata: Dict[str, Any] = {}
+    detail: Optional[str] = None
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        raw_mode = str(form.get("mode") or form.get("type") or "").strip().lower()
+        if not raw_mode:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail="Field 'mode' is required"
+            )
+        try:
+            engine_mode = EngineMode(raw_mode)
+        except ValueError:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported node mode '{raw_mode}'",
+            )
+
+        upload = form.get("config_file") or form.get("config") or form.get("file")
+        fmt_hint = str(form.get("format") or "").strip() or None
+        if fmt_hint:
+            config_metadata["format"] = fmt_hint
+
+        if isinstance(upload, UploadFile):
+            filename = upload.filename or "upload"
+            config_metadata.setdefault("source", "upload")
+            suffix = Path(filename).suffix.lstrip(".")
+            if suffix and "format" not in config_metadata:
+                config_metadata["format"] = suffix
+            try:
+                upload.file.seek(0)
+                config = svc.engine.load_config(upload.file, mode=engine_mode)
+            except EngineConfigError as exc:
+                detail_payload: Dict[str, Any] = {"message": str(exc)}
+                if exc.errors:
+                    detail_payload["errors"] = exc.errors
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail_payload)
+            finally:
+                await upload.close()
+        else:
+            raw_payload = form.get("config_json") or form.get("config")
+            if raw_payload is None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Configuration payload is required",
+                )
+            config_metadata.setdefault("source", "form")
+            try:
+                config = svc.engine.prepare_config(
+                    raw_payload, fmt=config_metadata.get("format"), mode=engine_mode
+                )
+            except EngineConfigError as exc:
+                detail_payload = {"message": str(exc)}
+                if exc.errors:
+                    detail_payload["errors"] = exc.errors
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail_payload)
+
+        strategy = config.get("strategy") or {}
+        strategy_name = strategy.get("name") or strategy.get("id") or "strategy"
+        detail = (
+            str(form.get("detail") or "").strip()
+            or f"{engine_mode.value.title()} node for {strategy_name}"
+        )
+    else:
+        try:
+            payload_dict = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON payload: {exc.msg}",
+            ) from exc
+
+        try:
+            payload = NodeLaunchPayload.model_validate(payload_dict)
+        except ValidationError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=json.loads(exc.json()),
+            ) from exc
+
+        node_type = payload.type.lower()
+        try:
+            engine_mode = EngineMode(node_type)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported node type '{payload.type}'",
+            ) from exc
+
+        detail = build_launch_detail(payload)
+
+        if payload.engineConfig is not None:
+            config_input = payload.engineConfig
+            config_metadata = {
+                "source": config_input.source or "api",
+                "format": (config_input.format or "json"),
+            }
+            try:
+                config = svc.engine.prepare_config(
+                    config_input.content,
+                    fmt=config_input.format,
+                    mode=engine_mode,
+                )
+            except EngineConfigError as exc:
+                detail_payload = {"message": str(exc)}
+                if exc.errors:
+                    detail_payload["errors"] = exc.errors
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail_payload)
+        else:
+            try:
+                config = svc.engine.validate_config(
+                    payload.model_dump(exclude={"engineConfig"}),
+                    mode=engine_mode,
+                )
+            except EngineConfigError as exc:
+                detail_payload = {"message": str(exc)}
+                if exc.errors:
+                    detail_payload["errors"] = exc.errors
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail_payload)
+            config_metadata = {"source": "payload", "format": "json"}
+
+    user = await _resolve_primary_user(session)
+
     try:
-        engine_mode = EngineMode(node_type)
-    except ValueError:
+        engine_handle = svc.engine.launch_node(config, engine_mode)
+    except EngineConfigError as exc:
+        detail_payload = {"message": str(exc)}
+        if exc.errors:
+            detail_payload["errors"] = exc.errors
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail_payload)
+    except Exception as exc:
+        logger.exception("node_launch_failed", mode=engine_mode.value)
+        try:
+            await _record_launch(
+                session,
+                user_id=user.id,
+                mode=engine_mode,
+                config=config,
+                config_metadata=config_metadata,
+                detail=detail,
+                status=DbNodeStatus.ERROR,
+                handle=None,
+                error=str(exc),
+            )
+        except Exception:
+            await session.rollback()
         raise HTTPException(
-            status_code=400, detail=f"Unsupported node type '{payload.type}'"
-        )
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"message": f"Failed to start node: {exc}"},
+        ) from exc
 
-    detail = build_launch_detail(payload)
-    config_metadata: Optional[Dict[str, Any]] = None
-
-    if payload.engineConfig is not None:
-        config_input = payload.engineConfig
-        config_metadata = {
-            "source": config_input.source or "api",
-            "format": (config_input.format or "json"),
-        }
-        try:
-            config = svc.engine.prepare_config(
-                config_input.content,
-                fmt=config_input.format,
-                mode=engine_mode,
-            )
-        except EngineConfigError as exc:
-            detail_payload: Dict[str, Any] = {"message": str(exc)}
-            if exc.errors:
-                detail_payload["errors"] = exc.errors
-            raise HTTPException(status_code=400, detail=detail_payload)
-    else:
-        try:
-            config = svc.engine.validate_config(
-                payload.dict(exclude={"engineConfig"}),
-                mode=engine_mode,
-            )
-        except EngineConfigError as exc:
-            detail_payload = {"message": str(exc)}
-            if exc.errors:
-                detail_payload["errors"] = exc.errors
-            raise HTTPException(status_code=400, detail=detail_payload)
-        config_metadata = {"source": "payload", "format": "json"}
-
-    if node_type == "backtest":
-        node = svc.start_backtest(
-            detail=detail,
+    try:
+        node_record = await _record_launch(
+            session,
+            user_id=user.id,
+            mode=engine_mode,
             config=config,
             config_metadata=config_metadata,
-        )
-    elif node_type == "live":
-        node = svc.start_live(
             detail=detail,
-            config=config,
-            config_metadata=config_metadata,
+            status=DbNodeStatus.RUNNING,
+            handle=engine_handle,
         )
-    else:
+    except Exception as exc:
+        await session.rollback()
         raise HTTPException(
-            status_code=400, detail=f"Unsupported node type '{payload.type}'"
-        )
-    return {"node": svc.as_dict(node)}
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"message": f"Failed to persist node launch: {exc}"},
+        ) from exc
+
+    started_at = engine_handle.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+
+    response_node = {
+        "id": engine_handle.id,
+        "mode": engine_mode.value,
+        "status": DbNodeStatus.RUNNING.value,
+        "detail": detail,
+        "started_at": started_at.isoformat().replace("+00:00", "Z"),
+        "config_version": engine_handle.config_version,
+        "adapters": deepcopy(engine_handle.adapters),
+        "db_id": node_record.id,
+        "summary": node_record.summary,
+    }
+    return {"node": response_node}
+
+
+async def _record_launch(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    mode: EngineMode,
+    config: Dict[str, Any],
+    config_metadata: Dict[str, Any],
+    detail: Optional[str],
+    status: DbNodeStatus,
+    handle: Optional[EngineNodeHandle],
+    error: Optional[str] = None,
+) -> DbNode:
+    node_record, _ = _persist_node_record(
+        session,
+        user_id=user_id,
+        mode=mode,
+        config=config,
+        config_meta=config_metadata,
+        detail=detail,
+        status=status,
+        handle=handle,
+        error=error,
+    )
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    return node_record
 
 
 @app.post("/nodes/{node_id}/stop")
