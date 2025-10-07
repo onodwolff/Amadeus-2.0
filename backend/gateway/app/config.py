@@ -54,13 +54,26 @@ class StorageSettings(BaseModel):
     """Relational and cache storage configuration."""
 
     database_url: str = Field(
-        default="postgresql+asyncpg://user:pass@localhost:5432/amadeus",
+        default="postgresql+asyncpg://amadeus:amadeus@localhost:5432/amadeus",
         validation_alias=AliasChoices("DATABASE_URL", "STORAGE__DATABASE_URL"),
     )
     redis_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("REDIS_URL", "STORAGE__REDIS_URL"),
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _ensure_database_url(cls, value: str | None) -> str:
+        """Ensure that a usable database URL is provided."""
+
+        if value is None:
+            raise ValueError("DATABASE_URL must be configured")
+
+        url = value.strip()
+        if not url:
+            raise ValueError("DATABASE_URL must be a non-empty string")
+        return url
 
 
 class SecuritySettings(BaseModel):
@@ -120,6 +133,10 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str | None:
         return self.storage.redis_url
+
+    @property
+    def default_engine_mode(self) -> str:
+        return self.engine.default_mode
 
     @property
     def encryption_key(self) -> bytes:
