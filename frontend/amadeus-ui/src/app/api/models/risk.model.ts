@@ -54,6 +54,16 @@ export interface RiskLimits {
   trade_locks: TradeLocksModule;
 }
 
+export interface RiskLimitScope {
+  user_id: string;
+  node_id?: string | null;
+}
+
+export interface RiskLimitsResponse {
+  limits: RiskLimits;
+  scope: RiskLimitScope;
+}
+
 export interface RiskMetrics {
   timestamp: string;
   total_var?: number;
