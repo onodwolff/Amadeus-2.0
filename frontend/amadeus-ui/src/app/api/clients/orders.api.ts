@@ -25,6 +25,7 @@ export class OrdersApi {
   }
 
   duplicateOrder(orderId: string): Observable<OrderResponse> {
-    return this.http.post<OrderResponse>(buildApiUrl(`/orders/${orderId}/duplicate`), {});
+    const path = `/api/orders/${encodeURIComponent(orderId)}/duplicate`;
+    return this.http.post<OrderResponse>(buildApiUrl(path), {});
   }
 }
