@@ -9,19 +9,19 @@ export class OrdersApi {
   private readonly http = inject(HttpClient);
 
   listOrders(): Observable<OrdersResponse> {
-    return this.http.get<OrdersResponse>(buildApiUrl('/orders'));
+    return this.http.get<OrdersResponse>(buildApiUrl('/api/orders'));
   }
 
   createOrder(payload: CreateOrderPayload): Observable<OrderResponse> {
-    return this.http.post<OrderResponse>(buildApiUrl('/orders'), payload);
+    return this.http.post<OrderResponse>(buildApiUrl('/api/orders'), payload);
   }
 
   getOrder(orderId: string): Observable<OrderResponse> {
-    return this.http.get<OrderResponse>(buildApiUrl(`/orders/${orderId}`));
+    return this.http.get<OrderResponse>(buildApiUrl(`/api/orders/${encodeURIComponent(orderId)}`));
   }
 
   cancelOrder(orderId: string): Observable<OrderResponse> {
-    return this.http.post<OrderResponse>(buildApiUrl(`/orders/${orderId}/cancel`), {});
+    return this.http.delete<OrderResponse>(buildApiUrl(`/api/orders/${encodeURIComponent(orderId)}`));
   }
 
   duplicateOrder(orderId: string): Observable<OrderResponse> {

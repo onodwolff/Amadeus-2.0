@@ -33,6 +33,7 @@ from .nautilus_service import (
 from .nautilus_engine_service import EngineConfigError, EngineMode
 from .logging import bind_contextvars, clear_contextvars, get_logger
 from .routes.keys import router as keys_router
+from .routes.orders import router as orders_router
 from .routes.users import router as users_router
 
 
@@ -245,6 +246,7 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
 
 app = FastAPI(title="Amadeus Gateway")
 app.include_router(keys_router, prefix="/api")
+app.include_router(orders_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 
 
@@ -810,9 +812,14 @@ async def ws_portfolio_movements(ws: WebSocket):
 async def ws_orders(ws: WebSocket):
     await ws.accept()
     try:
-        while True:
-            payload = svc.orders_stream_payload()
+        snapshot = svc.orders_snapshot()
+    except Exception:  # pragma: no cover - defensive guard
+        snapshot = {"orders": [], "executions": []}
+    if snapshot:
+        baseline = {"event": "snapshot", **snapshot}
+        await ws.send_text(json.dumps(baseline))
+    try:
+        async for payload in svc.orders_stream():
             await ws.send_text(json.dumps(payload))
-            await asyncio.sleep(1.2)
     except WebSocketDisconnect:
         return
