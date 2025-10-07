@@ -273,7 +273,14 @@ app.include_router(users_router, prefix="/api")
 async def startup_event() -> None:
     """Initialise shared resources when the application starts."""
 
-    engine = create_db_engine(settings.database_url, pool_pre_ping=True)
+    database_url = settings.database_url
+    if not database_url or not database_url.strip():
+        logger.error("database_url_missing")
+        raise RuntimeError("Database URL is not configured")
+
+    logger.info("database_configuration_loaded", database_url=database_url)
+
+    engine = create_db_engine(database_url, pool_pre_ping=True)
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
