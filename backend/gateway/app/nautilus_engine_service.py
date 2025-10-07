@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 import threading
-from typing import Any, AsyncIterator, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import IO, Any, AsyncIterator, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 try:  # pragma: no cover - optional dependency during unit tests
     import nautilus_trader as nt  # type: ignore
@@ -544,6 +544,45 @@ class NautilusEngineService:
         document = self.load_config_document(content, fmt=fmt)
         return self.validate_config(document, mode=mode)
 
+    def load_config(
+        self,
+        file: Union[str, os.PathLike[str], os.PathLike[bytes], IO[str], IO[bytes]],
+        *,
+        mode: Optional[EngineMode] = None,
+    ) -> Dict[str, Any]:
+        """Load and validate a configuration document from ``file``."""
+
+        fmt: Optional[str] = None
+        payload: Any
+
+        if isinstance(file, (str, os.PathLike)):
+            path = Path(file)
+            fmt = path.suffix.lstrip(".").lower() or None
+            try:
+                payload = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise EngineConfigError(
+                    f"Configuration file '{path}' could not be read.", errors=[str(exc)]
+                ) from exc
+        else:
+            name = getattr(file, "name", None)
+            if isinstance(name, str) and name:
+                fmt = Path(name).suffix.lstrip(".").lower() or None
+
+            reader = getattr(file, "read", None)
+            if not callable(reader):
+                raise EngineConfigError("Configuration input is not readable.")
+
+            try:
+                payload = reader()
+            except Exception as exc:  # pragma: no cover - defensive guard
+                raise EngineConfigError(
+                    "Configuration stream could not be read.", errors=[str(exc)]
+                ) from exc
+
+        document = self.load_config_document(payload, fmt=fmt)
+        return self.validate_config(document, mode=mode)
+
     def launch_trading_node(
         self,
         mode: EngineMode,
@@ -650,6 +689,22 @@ class NautilusEngineService:
             )
 
         return handle
+
+    def launch_node(
+        self,
+        config: Dict[str, Any],
+        mode: Union[str, EngineMode],
+        *,
+        user_id: Optional[str] = None,
+        node_id: Optional[str] = None,
+    ) -> EngineNodeHandle:
+        """Validate ``config`` and launch a Nautilus trading node."""
+
+        engine_mode = EngineMode(mode) if not isinstance(mode, EngineMode) else mode
+        validated = self.validate_config(config, mode=engine_mode)
+        return self.launch_trading_node(
+            engine_mode, validated, user_id, node_id=node_id
+        )
 
     def get_node_handle(self, node_id: str) -> Optional[EngineNodeHandle]:
         """Return the active :class:`EngineNodeHandle` for ``node_id`` if running."""
