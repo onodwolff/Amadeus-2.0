@@ -307,7 +307,6 @@ class MockNautilusService:
             "circuit_breaker": [],
             "margin_call": [],
         }
-        self._seed_risk_alerts()
         self._users: Dict[str, UserProfile] = {}
         self._seed_users()
         self._publish_portfolio()
@@ -2085,6 +2084,8 @@ class MockNautilusService:
             }
         )
 
+        self.validate_order(normalized_payload)
+
         engine_payload = self._translate_order_payload(normalized_payload)
         self._submit_to_engine(engine_payload)
 
@@ -2235,6 +2236,83 @@ class MockNautilusService:
         snapshot = self.risk_limits_snapshot()
         self._publish_risk_snapshot()
         return snapshot
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _enforce_trade_locks(self, node_id: str, venue: str) -> None:
+        module = self._risk_limits.get("trade_locks") or {}
+        if not module.get("enabled"):
+            return
+
+        locks = module.get("locks") or []
+        for entry in locks:
+            if not isinstance(entry, dict):
+                continue
+            if not bool(entry.get("locked")):
+                continue
+            entry_node = str(entry.get("node") or "").strip()
+            entry_venue = str(entry.get("venue") or "").upper()
+            if entry_node:
+                if not node_id or entry_node != node_id:
+                    continue
+            if entry_venue:
+                if not venue or entry_venue != venue:
+                    continue
+            reason = entry.get("reason") or "Trade lock active"
+            raise ValueError(reason)
+
+    def _enforce_position_limits(
+        self,
+        node_id: str,
+        venue: str,
+        quantity: float,
+        order_value: float,
+    ) -> None:
+        module = self._risk_limits.get("position_limits") or {}
+        if not module.get("enabled"):
+            return
+
+        limits = module.get("limits") or []
+        for entry in limits:
+            if not isinstance(entry, dict):
+                continue
+            limit_raw = entry.get("limit")
+            limit_value = self._coerce_float(limit_raw)
+            if limit_value is None or limit_value <= 0:
+                continue
+            entry_node = str(entry.get("node") or "").strip()
+            entry_venue = str(entry.get("venue") or "").upper()
+            if entry_node:
+                if not node_id or entry_node != node_id:
+                    continue
+            if entry_venue:
+                if not venue or entry_venue != venue:
+                    continue
+            effective = order_value if order_value > 0 else quantity
+            if effective > limit_value:
+                descriptor = entry_node or node_id or "account"
+                target = entry_venue or venue or "venue"
+                raise ValueError(
+                    f"Order size {effective:.4f} exceeds limit {limit_value:.4f} for {descriptor} at {target}."
+                )
+
+    def validate_order(self, payload: Dict[str, Any]) -> None:
+        node_value = payload.get("node_id") or payload.get("node")
+        node_id = str(node_value).strip() if node_value else ""
+        venue = str(payload.get("venue") or "").upper()
+        quantity = abs(self._coerce_float(payload.get("quantity")) or 0.0)
+        price = self._coerce_float(payload.get("price"))
+        notional = abs(quantity * price) if price is not None else quantity
+
+        self._enforce_trade_locks(node_id, venue)
+        self._enforce_position_limits(node_id, venue, quantity, notional)
 
     def _default_risk_limits(self) -> Dict[str, Any]:
         return {
@@ -3606,6 +3684,8 @@ class NautilusService:
     def create_order(self, payload: Dict[str, Any]) -> dict:
         if not self._engine_active():
             return self._mock.create_order(payload)
+
+        self._mock.validate_order(payload)
 
         engine_payload = self._mock._translate_order_payload(payload)
         client_order_id = payload.get("client_order_id")

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, String, Text, update
+from sqlalchemy import Boolean, DateTime, Float, String, Text, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -22,6 +22,11 @@ try:  # pragma: no cover - optional dependency
     import redis.asyncio as redis
 except Exception:  # pragma: no cover - optional dependency
     redis = None
+
+try:  # pragma: no cover - support running from backend/ directory
+    from gateway.db.models import Node as DbNode, RiskAlert as DbRiskAlert
+except ModuleNotFoundError:  # pragma: no cover - fallback import
+    from backend.gateway.db.models import Node as DbNode, RiskAlert as DbRiskAlert
 
 from .nautilus_engine_service import EngineEventBus
 
@@ -393,6 +398,7 @@ class EngineStateSync:
         async with self._session_factory() as session:
             try:
                 await self._upsert_risk_alert(session, alert)
+                await self._persist_gateway_risk_alert(session, alert)
                 await session.commit()
             except Exception:
                 await session.rollback()
@@ -546,6 +552,54 @@ class EngineStateSync:
                     "pnl": statement.excluded.pnl,
                     "raw": statement.excluded.raw,
                 },
+            )
+        )
+
+    async def _resolve_node_pk(
+        self, session: AsyncSession, identifier: Optional[str]
+    ) -> Optional[int]:
+        if not identifier:
+            return None
+        try:
+            candidate = int(identifier)
+        except (TypeError, ValueError):
+            candidate = None
+        if candidate is not None:
+            result = await session.execute(select(DbNode.id).where(DbNode.id == candidate))
+            resolved = result.scalar_one_or_none()
+            if resolved is not None:
+                return resolved
+        stmt = select(DbNode.id).where(DbNode.summary["external_id"].astext == identifier)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def _persist_gateway_risk_alert(
+        self, session: AsyncSession, alert: Dict[str, Any]
+    ) -> None:
+        category = _to_str(alert.get("category")) or "unknown"
+        severity = _to_str(alert.get("severity")) or "medium"
+        message = _to_str(alert.get("message")) or _to_str(alert.get("title")) or "Risk alert"
+        timestamp = _parse_timestamp(alert.get("timestamp"))
+        node_identifier = _to_str(alert.get("node_id"))
+        node_pk = await self._resolve_node_pk(session, node_identifier)
+
+        duplicate_stmt = (
+            select(DbRiskAlert.id)
+            .where(DbRiskAlert.ts == timestamp)
+            .where(DbRiskAlert.message == message)
+            .limit(1)
+        )
+        duplicate = await session.execute(duplicate_stmt)
+        if duplicate.scalar_one_or_none() is not None:
+            return
+
+        session.add(
+            DbRiskAlert(
+                node_id=node_pk,
+                category=category,
+                severity=severity,
+                message=message,
+                ts=timestamp,
             )
         )
 

@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
-import { RiskAlert, RiskLimits, RiskResponse } from '../models';
+import { RiskAlert, RiskLimits, RiskLimitsResponse, RiskResponse } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class RiskApi {
@@ -12,12 +12,20 @@ export class RiskApi {
     return this.http.get<RiskResponse>(buildApiUrl('/risk'));
   }
 
-  getRiskLimits(): Observable<{ limits: RiskLimits }> {
-    return this.http.get<{ limits: RiskLimits }>(buildApiUrl('/risk/limits'));
+  getRiskLimits(nodeId?: string): Observable<RiskLimitsResponse> {
+    let params = new HttpParams();
+    if (nodeId) {
+      params = params.set('nodeId', nodeId);
+    }
+    return this.http.get<RiskLimitsResponse>(buildApiUrl('/risk/limits'), { params });
   }
 
-  updateRiskLimits(payload: RiskLimits): Observable<{ limits: RiskLimits }> {
-    return this.http.post<{ limits: RiskLimits }>(buildApiUrl('/risk/limits'), payload);
+  updateRiskLimits(payload: RiskLimits, nodeId?: string): Observable<RiskLimitsResponse> {
+    let params = new HttpParams();
+    if (nodeId) {
+      params = params.set('nodeId', nodeId);
+    }
+    return this.http.put<RiskLimitsResponse>(buildApiUrl('/risk/limits'), payload, { params });
   }
 
   acknowledgeAlert(alertId: string): Observable<{ alert: RiskAlert }> {
