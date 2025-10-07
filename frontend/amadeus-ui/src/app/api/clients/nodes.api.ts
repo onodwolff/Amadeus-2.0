@@ -35,11 +35,11 @@ export class NodesApi {
   }
 
   getNodeLogs(nodeId: string): Observable<NodeLogsResponse> {
-    return this.http.get<NodeLogsResponse>(buildApiUrl(`/nodes/${nodeId}/logs`));
+    return this.http.get<NodeLogsResponse>(buildApiUrl(`/nodes/${nodeId}/logs/entries`));
   }
 
   downloadNodeLogs(nodeId: string): Observable<Blob> {
-    return this.http.get(buildApiUrl(`/nodes/${nodeId}/logs/export`), {
+    return this.http.get(buildApiUrl(`/nodes/${nodeId}/logs`), {
       responseType: 'blob',
     });
   }

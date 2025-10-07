@@ -19,11 +19,12 @@ import { WsConnectionState } from '../ws.service';
 import { NodeLaunchDialogComponent } from './node-launch-dialog.component';
 import { NodeDetailComponent } from './node-detail.component';
 import { Subscription } from 'rxjs';
+import { EquitySparklineComponent } from './components/equity-sparkline/equity-sparkline.component';
 
 @Component({
   standalone: true,
   selector: 'app-nodes-page',
-  imports: [CommonModule, NodeLaunchDialogComponent, NodeDetailComponent],
+  imports: [CommonModule, NodeLaunchDialogComponent, NodeDetailComponent, EquitySparklineComponent],
   templateUrl: './nodes.page.html',
   styleUrls: ['./nodes.page.scss'],
 })
@@ -194,7 +195,7 @@ export class NodesPage implements OnInit, OnDestroy {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${node.id}-logs.txt`;
+        link.download = `${node.id}.log`;
         link.click();
         URL.revokeObjectURL(url);
       },

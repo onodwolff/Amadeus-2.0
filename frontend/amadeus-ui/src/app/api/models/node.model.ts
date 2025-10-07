@@ -1,13 +1,15 @@
 export type NodeMode = 'backtest' | 'sandbox' | 'live' | string;
 export type NodeStatus = 'created' | 'running' | 'stopped' | 'error' | string;
 
-export type NodeMetricKey = 'pnl' | 'latency_ms' | 'cpu_percent' | 'memory_mb';
+export type NodeMetricKey = 'pnl' | 'equity' | 'latency_ms' | 'cpu_percent' | 'memory_mb';
 
 export interface NodeMetrics {
   pnl?: number;
+  equity?: number;
   latency_ms?: number;
   cpu_percent?: number;
   memory_mb?: number;
+  equity_history?: number[];
 }
 
 export interface AdapterStatus {
@@ -28,6 +30,7 @@ export interface NodeMetricPoint {
 export interface NodeMetricsSnapshot {
   timestamp: string;
   pnl: number;
+  equity: number;
   latency_ms: number;
   cpu_percent: number;
   memory_mb: number;

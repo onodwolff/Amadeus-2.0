@@ -187,6 +187,27 @@
   color: rgba(229, 231, 235, 0.72);
 }
 
+.equity {
+  min-width: 160px;
+}
+
+.equity-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.equity-cell__value {
+  font-weight: 600;
+  color: #facc15;
+  font-variant-numeric: tabular-nums;
+}
+
+.equity-cell__sparkline {
+  flex: 1;
+  max-width: 110px;
+}
+
 .actions {
   text-align: right;
 }

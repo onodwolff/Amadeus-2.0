@@ -123,6 +123,7 @@ export function observeNodeMetricsStream(
       return {
         series: {
           pnl: coerce('pnl'),
+          equity: coerce('equity'),
           latency_ms: coerce('latency_ms'),
           cpu_percent: coerce('cpu_percent'),
           memory_mb: coerce('memory_mb'),

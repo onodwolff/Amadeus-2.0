@@ -17,7 +17,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -466,6 +466,29 @@ def get_node(node_id: str):
 
 
 @app.get("/nodes/{node_id}/logs")
+def download_node_logs(node_id: str):
+    try:
+        path = svc.node_log_file(node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    if not path.exists():
+        try:
+            payload = svc.export_logs(node_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        return PlainTextResponse(payload, media_type="text/plain")
+
+    filename = f"{node_id}.log" if not str(node_id).endswith(".log") else str(node_id)
+    return FileResponse(
+        path,
+        media_type="text/plain",
+        filename=filename,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/nodes/{node_id}/logs/entries")
 def get_node_logs(node_id: str):
     try:
         return svc.node_logs(node_id)

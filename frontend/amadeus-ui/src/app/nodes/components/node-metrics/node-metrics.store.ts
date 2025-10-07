@@ -43,6 +43,7 @@ const PERIOD_OPTIONS: readonly PeriodOption[] = [
 
 const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   { key: 'pnl', label: 'Profit & Loss', shortLabel: 'PnL', unit: '$', color: '#38bdf8', digits: 2 },
+  { key: 'equity', label: 'Equity', shortLabel: 'Equity', unit: '$', color: '#facc15', digits: 0, changeDigits: 0 },
   { key: 'latency_ms', label: 'Latency', shortLabel: 'Latency', unit: 'ms', color: '#f97316', digits: 1 },
   { key: 'cpu_percent', label: 'CPU usage', shortLabel: 'CPU', unit: '%', color: '#a855f7', digits: 1 },
   { key: 'memory_mb', label: 'Memory', shortLabel: 'Memory', unit: 'MB', color: '#34d399', digits: 0, changeDigits: 0 },
@@ -101,6 +102,7 @@ function formatChange(value: number | null, metric: MetricDefinition): { label: 
 
 const EMPTY_SERIES: Record<NodeMetricKey, NodeMetricPoint[]> = {
   pnl: [],
+  equity: [],
   latency_ms: [],
   cpu_percent: [],
   memory_mb: [],
@@ -117,7 +119,7 @@ export class NodeMetricsStore implements OnDestroy {
   readonly streamState = signal<WsConnectionState>('connecting');
   readonly series = signal<Record<NodeMetricKey, NodeMetricPoint[]>>({ ...EMPTY_SERIES });
   readonly latest = signal<NodeMetricsSnapshot | null>(null);
-  readonly selectedMetrics = signal<readonly NodeMetricKey[]>(['pnl', 'latency_ms']);
+  readonly selectedMetrics = signal<readonly NodeMetricKey[]>(['pnl', 'equity']);
   readonly period = signal<NodeMetricsPeriod>('2h');
 
   readonly periodOptions = PERIOD_OPTIONS;
@@ -134,6 +136,7 @@ export class NodeMetricsStore implements OnDestroy {
     const source = this.series();
     const result: Record<NodeMetricKey, NodeMetricPoint[]> = {
       pnl: [],
+      equity: [],
       latency_ms: [],
       cpu_percent: [],
       memory_mb: [],
