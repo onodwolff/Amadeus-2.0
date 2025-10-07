@@ -81,7 +81,7 @@ class NodeHandle:
     detail: Optional[str] = None
     created_at: str = field(default_factory=_utcnow_iso)
     updated_at: str = field(default_factory=_utcnow_iso)
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: Dict[str, Any] = field(default_factory=dict)
     adapters: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -105,6 +105,7 @@ class NodeLogEntry:
 class NodeMetricsSample:
     timestamp: str
     pnl: float
+    equity: float
     latency_ms: float
     cpu_percent: float
     memory_mb: float
@@ -417,6 +418,49 @@ class MockNautilusService:
 
     def _persist_order(self, order: OrderRecord) -> None:
         self._storage.record_order(asdict(order))
+
+    def _node_storage_dir(self, node_id: str) -> Path:
+        root = self._engine_service.storage_root / "nodes" / node_id
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _node_log_path(self, node_id: str) -> Path:
+        return self._node_storage_dir(node_id) / "gateway.log"
+
+    def _format_log_entry(self, entry: NodeLogEntry) -> str:
+        message = (entry.message or "").replace("\r", " ").replace("\n", " ").strip()
+        source = (entry.source or "gateway").strip() or "gateway"
+        level = (entry.level or "info").upper()
+        return f"[{entry.timestamp}] {level:<7} {source}: {message}\n"
+
+    def _persist_node_log_file(self, node_id: str, state: NodeState) -> None:
+        if not state.logs:
+            return
+        path = self._node_log_path(node_id)
+        try:
+            if not path.exists():
+                payload = "".join(self._format_log_entry(entry) for entry in state.logs)
+                path.write_text(payload, encoding="utf-8")
+            else:
+                with path.open("a", encoding="utf-8") as handle:
+                    handle.write(self._format_log_entry(state.logs[-1]))
+        except OSError:
+            LOGGER.debug("node_log_file_write_failed", extra={"node_id": node_id})
+
+    def node_log_file(self, node_id: str) -> Path:
+        state = self._require_node(node_id)
+        path = self._node_log_path(node_id)
+        try:
+            if not path.exists():
+                if state.logs:
+                    payload = "".join(self._format_log_entry(entry) for entry in state.logs)
+                    path.write_text(payload, encoding="utf-8")
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+        except OSError:
+            LOGGER.debug("node_log_file_prepare_failed", extra={"node_id": node_id})
+        return path
 
     def _persist_execution(self, execution: ExecutionRecord) -> None:
         self._storage.record_execution(asdict(execution))
@@ -3226,11 +3270,15 @@ class MockNautilusService:
         return {"logs": [asdict(entry) for entry in state.logs]}
 
     def export_logs(self, node_id: str) -> str:
-        state = self._require_node(node_id)
-        return "\n".join(
-            f"[{entry.timestamp}] {entry.level.upper()} {entry.source}: {entry.message}"
-            for entry in state.logs
-        )
+        path = self.node_log_file(node_id)
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            state = self._require_node(node_id)
+            return "\n".join(
+                f"[{entry.timestamp}] {entry.level.upper()} {entry.source}: {entry.message}"
+                for entry in state.logs
+            )
 
     def stream_snapshot(self, node_id: str) -> dict:
         state = self._require_node(node_id)
@@ -3356,6 +3404,7 @@ class MockNautilusService:
                 "timestamp": entry.timestamp,
             }
         )
+        self._persist_node_log_file(node_id, state)
 
     def _ensure_metrics_seeded(self, node_id: str) -> None:
         state = self._require_node(node_id)
@@ -3364,12 +3413,14 @@ class MockNautilusService:
 
         base_time = datetime.utcnow() - timedelta(minutes=179)
         pnl = random.uniform(-25.0, 25.0)
+        equity = random.uniform(80_000.0, 120_000.0)
         latency = random.uniform(4.0, 16.0)
         cpu = random.uniform(20.0, 55.0)
         memory = random.uniform(480.0, 640.0)
 
         for step in range(180):
             pnl += random.gauss(0, 0.6)
+            equity = max(10_000.0, equity + random.gauss(0, max(350.0, equity * 0.0008)))
             latency = max(1.0, latency + random.uniform(-1.2, 1.2))
             cpu = max(3.0, min(97.0, cpu + random.uniform(-3.5, 3.5)))
             memory = max(256.0, memory + random.uniform(-6.0, 6.0))
@@ -3378,6 +3429,7 @@ class MockNautilusService:
                 NodeMetricsSample(
                     timestamp=timestamp,
                     pnl=round(pnl, 2),
+                    equity=round(equity, 2),
                     latency_ms=round(latency, 2),
                     cpu_percent=round(cpu, 2),
                     memory_mb=round(memory, 2),
@@ -3391,12 +3443,14 @@ class MockNautilusService:
         state = self._require_node(node_id)
         previous = state.metrics[-1]
         pnl = previous.pnl + random.gauss(0, 1.2)
+        equity = max(10_000.0, previous.equity + random.gauss(0, max(420.0, previous.equity * 0.0009)))
         latency = max(0.8, previous.latency_ms + random.uniform(-1.5, 1.5))
         cpu = max(2.5, min(98.0, previous.cpu_percent + random.uniform(-4.5, 4.5)))
         memory = max(240.0, previous.memory_mb + random.uniform(-9.0, 9.0))
         sample = NodeMetricsSample(
             timestamp=_utcnow_iso(),
             pnl=round(pnl, 2),
+            equity=round(equity, 2),
             latency_ms=round(latency, 2),
             cpu_percent=round(cpu, 2),
             memory_mb=round(memory, 2),
@@ -3410,6 +3464,7 @@ class MockNautilusService:
                 "node_id": node_id,
                 "timestamp": sample.timestamp,
                 "pnl": sample.pnl,
+                "equity": sample.equity,
                 "latency_ms": sample.latency_ms,
                 "cpu_percent": sample.cpu_percent,
                 "memory_mb": sample.memory_mb,
@@ -3424,11 +3479,14 @@ class MockNautilusService:
             return
 
         latest = state.metrics[-1]
+        history_window = state.metrics[-60:]
         state.handle.metrics = {
             "pnl": latest.pnl,
             "latency_ms": latest.latency_ms,
             "cpu_percent": latest.cpu_percent,
             "memory_mb": latest.memory_mb,
+            "equity": latest.equity,
+            "equity_history": [round(sample.equity, 2) for sample in history_window],
         }
         state.handle.updated_at = _utcnow_iso()
         self._publish(
@@ -3440,6 +3498,7 @@ class MockNautilusService:
                     "latency_ms": latest.latency_ms,
                     "cpu_percent": latest.cpu_percent,
                     "memory_mb": latest.memory_mb,
+                    "equity": latest.equity,
                 },
                 "timestamp": latest.timestamp,
             },
@@ -3461,6 +3520,7 @@ class MockNautilusService:
         return {
             "series": {
                 "pnl": build_series("pnl"),
+                "equity": build_series("equity"),
                 "latency_ms": build_series("latency_ms"),
                 "cpu_percent": build_series("cpu_percent"),
                 "memory_mb": build_series("memory_mb"),
@@ -3472,6 +3532,7 @@ class MockNautilusService:
         sample = self._advance_metrics(node_id)
         return {
             "pnl": sample.pnl,
+            "equity": sample.equity,
             "latency_ms": sample.latency_ms,
             "cpu_percent": sample.cpu_percent,
             "memory_mb": sample.memory_mb,

@@ -85,6 +85,7 @@
                 <th>Status</th>
                 <th>Detail</th>
                 <th>PnL</th>
+                <th>Equity</th>
                 <th>Latency</th>
                 <th></th>
               </tr>
@@ -107,6 +108,20 @@
                 </td>
                 <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
                 <td data-label="PnL">{{ node.metrics?.pnl ?? '—' }}</td>
+                <td data-label="Equity" class="equity">
+                  <ng-container *ngIf="node.metrics?.equity !== undefined && node.metrics?.equity !== null; else noEquity">
+                    <div class="equity-cell">
+                      <span class="equity-cell__value">${{ node.metrics?.equity | number: '1.0-0' }}</span>
+                      <app-equity-sparkline
+                        class="equity-cell__sparkline"
+                        [series]="node.metrics?.equity_history ?? []"
+                        [width]="96"
+                        [height]="28"
+                      ></app-equity-sparkline>
+                    </div>
+                  </ng-container>
+                  <ng-template #noEquity>—</ng-template>
+                </td>
                 <td data-label="Latency">{{ node.metrics?.latency_ms ? node.metrics?.latency_ms + ' ms' : '—' }}</td>
                 <td data-label="Actions" class="actions">
                   <button

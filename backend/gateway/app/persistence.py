@@ -196,6 +196,7 @@ class GatewayStorage(NullStorage):
                 node_id=payload["node_id"],
                 timestamp=_parse_timestamp(payload.get("timestamp")),
                 pnl=float(payload.get("pnl") or payload.get("metrics", {}).get("pnl", 0.0)),
+                equity=float(payload.get("equity") or payload.get("metrics", {}).get("equity", 0.0)),
                 latency_ms=float(payload.get("latency_ms") or payload.get("metrics", {}).get("latency_ms", 0.0)),
                 cpu_percent=float(payload.get("cpu_percent") or payload.get("metrics", {}).get("cpu_percent", 0.0)),
                 memory_mb=float(payload.get("memory_mb") or payload.get("metrics", {}).get("memory_mb", 0.0)),
