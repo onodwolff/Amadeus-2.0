@@ -34,17 +34,38 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def init_engine(database_url: str, **kwargs: Any) -> AsyncEngine:
+    """Create (if needed) and cache a global async SQLAlchemy engine."""
+
+    global _engine
+
+    if _engine is None:
+        _engine = create_async_engine(database_url, **kwargs)
+
+    return _engine
+
+
+def init_session_factory(*, expire_on_commit: bool = False) -> async_sessionmaker[AsyncSession]:
+    """Initialise the async session factory bound to the cached engine."""
+
+    global _session_factory
+
+    if _session_factory is None:
+        if _engine is None:  # pragma: no cover - defensive check
+            raise RuntimeError("Database engine has not been initialised")
+        _session_factory = async_sessionmaker(
+            _engine,
+            expire_on_commit=expire_on_commit,
+        )
+
+    return _session_factory
+
+
 def create_engine(database_url: str, **kwargs: Any) -> AsyncEngine:
-    """Create and cache a global async SQLAlchemy engine."""
+    """Backwards compatible helper that initialises engine and session factory."""
 
-    global _engine, _session_factory
-
-    if _engine is not None:
-        return _engine
-
-    engine = create_async_engine(database_url, **kwargs)
-    _engine = engine
-    _session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    engine = init_engine(database_url, **kwargs)
+    init_session_factory(expire_on_commit=False)
     return engine
 
 
@@ -91,5 +112,7 @@ __all__ = [
     "dispose_engine",
     "get_engine",
     "get_session_factory",
+    "init_engine",
+    "init_session_factory",
     "metadata",
 ]

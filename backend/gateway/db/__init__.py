@@ -11,6 +11,8 @@ from .base import (
     dispose_engine,
     get_engine,
     get_session_factory,
+    init_engine,
+    init_session_factory,
     metadata,
 )
 from .models import *  # noqa: F401,F403
@@ -26,5 +28,7 @@ __all__ = [
     "get_engine",
     "get_session",
     "get_session_factory",
+    "init_engine",
+    "init_session_factory",
     "metadata",
 ] + _models.__all__

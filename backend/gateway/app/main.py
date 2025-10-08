@@ -30,6 +30,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import settings
+from gateway.db.base import (
+    create_session,
+    dispose_engine,
+    init_engine,
+    init_session_factory,
+)
 from gateway.db.models import (
     ApiKey,
     Config as DbConfig,
@@ -41,8 +47,7 @@ from gateway.db.models import (
     User as DbUser,
     UserRole,
 )
-from gateway.db.base import create_session
-from .db import engine, get_session
+from .db import get_engine, get_session
 from .nautilus_service import (
     EngineUnavailableError,
     NodeHandle,
@@ -687,8 +692,13 @@ async def startup_event() -> None:
 
     logger.info("database_configuration_loaded", database_url=database_url)
 
+    init_engine(database_url, pool_pre_ping=True, future=True)
+    init_session_factory(expire_on_commit=False)
+
+    db_engine = get_engine()
+
     try:
-        async with engine.connect() as connection:
+        async with db_engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
     except Exception as exc:  # pragma: no cover - connectivity failures
         logger.exception("database_connectivity_failed")
@@ -702,7 +712,7 @@ async def startup_event() -> None:
 async def shutdown_event() -> None:
     """Dispose of shared resources when the application stops."""
 
-    await engine.dispose()
+    await dispose_engine()
 
 
 @app.middleware("http")
