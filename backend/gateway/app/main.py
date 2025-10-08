@@ -9,7 +9,7 @@ from copy import deepcopy
 from datetime import timezone
 from functools import wraps
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from fastapi import (
     FastAPI,
@@ -29,11 +29,6 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import settings
-from gateway.db.base import (
-    create_engine as create_db_engine,
-    create_session,
-    dispose_engine,
-)
 from gateway.db.models import (
     ApiKey,
     Config as DbConfig,
@@ -44,6 +39,7 @@ from gateway.db.models import (
     NodeStatus as DbNodeStatus,
     User as DbUser,
 )
+from .db import engine, get_session
 from .nautilus_service import (
     EngineUnavailableError,
     NodeHandle,
@@ -63,14 +59,6 @@ from .routes.risk import router as risk_router
 
 
 logger = get_logger("gateway.api")
-
-
-async def get_session() -> AsyncIterator[AsyncSession]:
-    session = create_session()
-    try:
-        yield session
-    finally:  # pragma: no cover - cleanup
-        await session.close()
 
 
 async def _resolve_primary_user(session: AsyncSession) -> DbUser:
@@ -638,7 +626,6 @@ async def startup_event() -> None:
 
     logger.info("database_configuration_loaded", database_url=database_url)
 
-    engine = create_db_engine(database_url, pool_pre_ping=True)
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
@@ -652,7 +639,7 @@ async def startup_event() -> None:
 async def shutdown_event() -> None:
     """Dispose of shared resources when the application stops."""
 
-    await dispose_engine()
+    await engine.dispose()
 
 
 @app.middleware("http")

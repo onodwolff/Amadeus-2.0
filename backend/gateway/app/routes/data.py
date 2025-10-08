@@ -15,7 +15,7 @@ from ..data_service import (
     data_service,
 )
 from gateway.db.models import HistoricalDataStatus
-from ..main import get_session
+from ..db import get_session
 
 router = APIRouter(prefix="/data", tags=["data"])
 
