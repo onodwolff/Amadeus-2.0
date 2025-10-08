@@ -47,29 +47,159 @@
     </div>
     <form [formGroup]="form" (ngSubmit)="submit()" class="request-form">
       <div class="form-grid">
-        <div class="field">
+        <div class="field" (keydown.escape)="closeHelp()">
           <label for="venue">Venue</label>
-          <input id="venue" type="text" formControlName="venue" />
+          <div class="field__control-wrapper">
+            <input id="venue" type="text" formControlName="venue" [attr.aria-describedby]="isHelpVisible('venue') ? 'field-help-venue' : null" />
+            <button
+              type="button"
+              class="field__help-button"
+              (click)="toggleHelp('venue')"
+              [attr.aria-expanded]="isHelpVisible('venue')"
+              [attr.aria-controls]="'field-help-venue'"
+              aria-label="Show help for the venue field"
+            >
+              ?
+            </button>
+          </div>
+          <div
+            class="field__help-tooltip"
+            *ngIf="isHelpVisible('venue')"
+            id="field-help-venue"
+            role="tooltip"
+          >
+            {{ fieldHelpText.venue }}
+          </div>
         </div>
-        <div class="field">
+        <div class="field" (keydown.escape)="closeHelp()">
           <label for="instrument">Instrument</label>
-          <input id="instrument" type="text" formControlName="instrument" />
+          <div class="field__control-wrapper">
+            <input
+              id="instrument"
+              type="text"
+              formControlName="instrument"
+              [attr.aria-describedby]="isHelpVisible('instrument') ? 'field-help-instrument' : null"
+            />
+            <button
+              type="button"
+              class="field__help-button"
+              (click)="toggleHelp('instrument')"
+              [attr.aria-expanded]="isHelpVisible('instrument')"
+              [attr.aria-controls]="'field-help-instrument'"
+              aria-label="Show help for the instrument field"
+            >
+              ?
+            </button>
+          </div>
+          <div
+            class="field__help-tooltip"
+            *ngIf="isHelpVisible('instrument')"
+            id="field-help-instrument"
+            role="tooltip"
+          >
+            {{ fieldHelpText.instrument }}
+          </div>
         </div>
-        <div class="field">
+        <div class="field" (keydown.escape)="closeHelp()">
           <label for="timeframe">Timeframe</label>
-          <input id="timeframe" type="text" formControlName="timeframe" />
+          <div class="field__control-wrapper">
+            <input
+              id="timeframe"
+              type="text"
+              formControlName="timeframe"
+              [attr.aria-describedby]="isHelpVisible('timeframe') ? 'field-help-timeframe' : null"
+            />
+            <button
+              type="button"
+              class="field__help-button"
+              (click)="toggleHelp('timeframe')"
+              [attr.aria-expanded]="isHelpVisible('timeframe')"
+              [attr.aria-controls]="'field-help-timeframe'"
+              aria-label="Show help for the timeframe field"
+            >
+              ?
+            </button>
+          </div>
+          <div
+            class="field__help-tooltip"
+            *ngIf="isHelpVisible('timeframe')"
+            id="field-help-timeframe"
+            role="tooltip"
+          >
+            {{ fieldHelpText.timeframe }}
+          </div>
         </div>
-        <div class="field">
+        <div class="field" (keydown.escape)="closeHelp()">
           <label for="start">Start</label>
-          <input id="start" type="datetime-local" formControlName="start" />
+          <div class="field__control-wrapper">
+            <input
+              id="start"
+              type="datetime-local"
+              formControlName="start"
+              [attr.aria-describedby]="isHelpVisible('start') ? 'field-help-start' : null"
+            />
+            <button
+              type="button"
+              class="field__help-button"
+              (click)="toggleHelp('start')"
+              [attr.aria-expanded]="isHelpVisible('start')"
+              [attr.aria-controls]="'field-help-start'"
+              aria-label="Show help for the start field"
+            >
+              ?
+            </button>
+          </div>
+          <div class="field__help-tooltip" *ngIf="isHelpVisible('start')" id="field-help-start" role="tooltip">
+            {{ fieldHelpText.start }}
+          </div>
         </div>
-        <div class="field">
+        <div class="field" (keydown.escape)="closeHelp()">
           <label for="end">End</label>
-          <input id="end" type="datetime-local" formControlName="end" />
+          <div class="field__control-wrapper">
+            <input
+              id="end"
+              type="datetime-local"
+              formControlName="end"
+              [attr.aria-describedby]="isHelpVisible('end') ? 'field-help-end' : null"
+            />
+            <button
+              type="button"
+              class="field__help-button"
+              (click)="toggleHelp('end')"
+              [attr.aria-expanded]="isHelpVisible('end')"
+              [attr.aria-controls]="'field-help-end'"
+              aria-label="Show help for the end field"
+            >
+              ?
+            </button>
+          </div>
+          <div class="field__help-tooltip" *ngIf="isHelpVisible('end')" id="field-help-end" role="tooltip">
+            {{ fieldHelpText.end }}
+          </div>
         </div>
-        <div class="field">
+        <div class="field" (keydown.escape)="closeHelp()">
           <label for="label">Label (optional)</label>
-          <input id="label" type="text" formControlName="label" />
+          <div class="field__control-wrapper">
+            <input
+              id="label"
+              type="text"
+              formControlName="label"
+              [attr.aria-describedby]="isHelpVisible('label') ? 'field-help-label' : null"
+            />
+            <button
+              type="button"
+              class="field__help-button"
+              (click)="toggleHelp('label')"
+              [attr.aria-expanded]="isHelpVisible('label')"
+              [attr.aria-controls]="'field-help-label'"
+              aria-label="Show help for the label field"
+            >
+              ?
+            </button>
+          </div>
+          <div class="field__help-tooltip" *ngIf="isHelpVisible('label')" id="field-help-label" role="tooltip">
+            {{ fieldHelpText.label }}
+          </div>
         </div>
       </div>
       <p class="form-status form-status--error" *ngIf="submissionError() as error">{{ error }}</p>

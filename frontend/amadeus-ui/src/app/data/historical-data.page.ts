@@ -5,6 +5,23 @@ import { finalize } from 'rxjs';
 import { DataApi } from '../api/clients';
 import { HistoricalDatasetDto } from '../api/models';
 
+const FIELD_HELP_TEXT = {
+  venue:
+    'Specify the exchange venue code (for example BINANCE). The dataset will be downloaded from this venue.',
+  instrument:
+    'Provide the instrument symbol in uppercase (for example BTCUSDT). Only trades for this pair will be included.',
+  timeframe:
+    'Choose the bar interval to aggregate the data. Use short codes such as 1m, 5m, 1h, or 1d.',
+  start:
+    'Select the UTC date and time where the dataset should start. The download task will include data from this moment onwards.',
+  end:
+    'Select the UTC date and time where the dataset should finish. Data after this moment will be excluded.',
+  label:
+    'Optionally add a descriptive name so you can recognise this dataset later. Leave blank to use the default identifier.',
+} as const;
+
+type FieldHelpKey = keyof typeof FIELD_HELP_TEXT;
+
 @Component({
   standalone: true,
   selector: 'app-historical-data-page',
@@ -32,6 +49,9 @@ export class HistoricalDataPage {
     end: this.fb.nonNullable.control<string>('', Validators.required),
     label: this.fb.control<string>(''),
   });
+
+  readonly fieldHelpText = FIELD_HELP_TEXT;
+  readonly activeHelpField = signal<FieldHelpKey | null>(null);
 
   constructor() {
     const now = new Date();
@@ -93,6 +113,18 @@ export class HistoricalDataPage {
 
   trackByDatasetId(_index: number, dataset: HistoricalDatasetDto): number {
     return dataset.id;
+  }
+
+  toggleHelp(field: FieldHelpKey): void {
+    this.activeHelpField.update(current => (current === field ? null : field));
+  }
+
+  isHelpVisible(field: FieldHelpKey): boolean {
+    return this.activeHelpField() === field;
+  }
+
+  closeHelp(): void {
+    this.activeHelpField.set(null);
   }
 
   private toLocalInput(date: Date): string {
