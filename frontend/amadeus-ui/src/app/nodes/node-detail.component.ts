@@ -43,11 +43,13 @@ export class NodeDetailComponent implements AfterViewInit, OnChanges {
   @Input() isRestarting = false;
   @Input() isStopping = false;
   @Input() isDownloadingLogs = false;
+  @Input() isDeleting = false;
 
   @Output() readonly closed = new EventEmitter<void>();
   @Output() readonly restartRequested = new EventEmitter<void>();
   @Output() readonly stopRequested = new EventEmitter<void>();
   @Output() readonly logsDownloadRequested = new EventEmitter<void>();
+  @Output() readonly deleteRequested = new EventEmitter<void>();
 
   @ViewChild('pnlChart') private pnlChart?: ElementRef<HTMLCanvasElement>;
 

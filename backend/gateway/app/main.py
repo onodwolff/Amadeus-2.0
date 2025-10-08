@@ -17,6 +17,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     status,
     WebSocket,
     WebSocketDisconnect,
@@ -1043,6 +1044,16 @@ def restart_node(node_id: str):
         return {"node": svc.as_dict(node)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_node(node_id: str):
+    _ensure_engine_available()
+    try:
+        svc.delete_node(node_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/nodes/{node_id}")

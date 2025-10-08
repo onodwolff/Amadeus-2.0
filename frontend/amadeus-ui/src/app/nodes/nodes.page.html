@@ -1,10 +1,10 @@
 <section class="nodes-page">
   <header class="nodes-page__header">
     <div>
-      <h1 class="nodes-page__title">Nodes</h1>
+      <h1 class="nodes-page__title">Dashboard</h1>
       <p class="nodes-page__subtitle">
-        Manage Nautilus Trader sessions. Launch new backtests, sandbox nodes, or live trading sessions and monitor their status in
-        real time.
+        Monitor trading bots across backtest, simulation, and live venues. Launch new bots and control existing ones in real
+        time.
       </p>
     </div>
     <div class="nodes-page__actions">
@@ -14,7 +14,7 @@
         (click)="openWizard(launchDialog, 'backtest')"
         [disabled]="isLaunching()"
       >
-        Launch backtest
+        Launch backtest bot
       </button>
       <button
         type="button"
@@ -22,7 +22,7 @@
         (click)="openWizard(launchDialog, 'sandbox')"
         [disabled]="isLaunching()"
       >
-        Launch sandbox
+        Launch sandbox bot
       </button>
       <button
         type="button"
@@ -30,15 +30,41 @@
         (click)="openWizard(launchDialog, 'live')"
         [disabled]="isLaunching()"
       >
-        Launch live
+        Launch live bot
       </button>
-      <button type="button" class="btn" (click)="refresh()" [disabled]="isLoading()">Refresh</button>
+      <button type="button" class="btn" (click)="refresh()" [disabled]="isLoading()">Refresh bots</button>
     </div>
   </header>
 
   <app-node-launch-dialog #launchDialog (launch)="onLaunchNode($event, launchDialog)"></app-node-launch-dialog>
 
   <div class="nodes-page__meta">
+    <div class="meta-card">
+      <span class="meta-card__label">Active bots</span>
+      <span class="meta-card__value">
+        {{ runningBots() }} / {{ totalBots() }}
+      </span>
+      <span class="meta-card__hint">Running / total</span>
+      <span class="meta-card__hint">Paused: {{ pausedBots() }}</span>
+    </div>
+    <div class="meta-card">
+      <span class="meta-card__label">Total PnL</span>
+      <span
+        class="meta-card__value"
+        [class.meta-card__value--warn]="totalPnl() < 0"
+        [class.meta-card__value--good]="totalPnl() > 0"
+      >
+        ${{ totalPnl() | number: '1.2-2' }}
+      </span>
+    </div>
+    <div class="meta-card">
+      <span class="meta-card__label">Total equity</span>
+      <span class="meta-card__value">${{ totalEquity() | number: '1.0-0' }}</span>
+    </div>
+    <div class="meta-card" *ngIf="averageLatencyMs() as latency">
+      <span class="meta-card__label">Avg latency</span>
+      <span class="meta-card__value">{{ latency | number: '1.0-0' }} ms</span>
+    </div>
     <div class="meta-card">
       <span class="meta-card__label">WebSocket</span>
       <span class="meta-card__value" [class.meta-card__value--warn]="wsState() !== 'connected'">{{ wsState() }}</span>
@@ -69,7 +95,7 @@
   <ng-container *ngIf="isLoading(); else nodesContent">
     <div class="nodes-page__loading" role="status" aria-live="polite">
       <span class="nodes-page__spinner" aria-hidden="true"></span>
-      <span>Loading nodes…</span>
+      <span>Loading bots…</span>
     </div>
   </ng-container>
 
@@ -80,15 +106,15 @@
           <table>
             <thead>
               <tr>
-                <th>ID</th>
+                <th>Bot ID</th>
                 <th>Mode</th>
                 <th>Strategy</th>
                 <th>Status</th>
-                <th>Detail</th>
+                <th>Description</th>
                 <th>PnL</th>
                 <th>Equity</th>
                 <th>Latency</th>
-                <th></th>
+                <th>Controls</th>
               </tr>
             </thead>
             <tbody>
@@ -97,7 +123,7 @@
                 (click)="openNodeDetail(node)"
                 [class.is-selected]="selectedNodeId() === node.id"
               >
-                <td data-label="ID"><code>{{ node.id }}</code></td>
+                <td data-label="Bot ID"><code>{{ node.id }}</code></td>
                 <td data-label="Mode"><span class="tag">{{ node.mode | titlecase }}</span></td>
                 <td data-label="Strategy" class="strategy">
                   <ng-container *ngIf="node.summary?.strategy as strategy; else noStrategy">
@@ -116,12 +142,15 @@
                     >{{ node.status | titlecase }}</span
                   >
                 </td>
-                <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
-                <td data-label="PnL">{{ node.metrics?.pnl ?? node.summary?.pnl ?? '—' }}</td>
+                <td data-label="Description" class="detail">{{ node.detail || '—' }}</td>
+                <td data-label="PnL">
+                  <ng-container *ngIf="metric(node, 'pnl') as pnl; else noPnl">
+                    ${{ pnl | number: '1.2-2' }}
+                  </ng-container>
+                </td>
+                <ng-template #noPnl>—</ng-template>
                 <td data-label="Equity" class="equity">
-                  <ng-container
-                    *ngIf="(node.metrics?.equity ?? node.summary?.equity) as equityValue; else noEquity"
-                  >
+                  <ng-container *ngIf="metric(node, 'equity') as equityValue; else noEquity">
                     <div class="equity-cell">
                       <span class="equity-cell__value">${{ equityValue | number: '1.0-0' }}</span>
                       <app-equity-sparkline
@@ -132,28 +161,48 @@
                       ></app-equity-sparkline>
                     </div>
                   </ng-container>
-                  <ng-template #noEquity>—</ng-template>
                 </td>
+                <ng-template #noEquity>—</ng-template>
                 <td data-label="Latency">
-                  <ng-container
-                    *ngIf="
-                      (node.metrics?.latency_ms ?? node.summary?.latency_ms) !== undefined &&
-                      (node.metrics?.latency_ms ?? node.summary?.latency_ms) !== null;
-                      else noLatency
-                    "
-                  >
-                    {{ (node.metrics?.latency_ms ?? node.summary?.latency_ms) | number: '1.0-0' }} ms
+                  <ng-container *ngIf="metric(node, 'latency_ms') as latency; else noLatency">
+                    {{ latency | number: '1.0-0' }} ms
                   </ng-container>
-                  <ng-template #noLatency>—</ng-template>
                 </td>
-                <td data-label="Actions" class="actions">
+                <ng-template #noLatency>—</ng-template>
+                <td data-label="Controls" class="actions">
                   <button
                     type="button"
                     class="btn btn--ghost"
-                    (click)="onStopClick($event, node)"
-                    [disabled]="node.status !== 'running' || isStopping()"
+                    *ngIf="node.status !== 'running'"
+                    (click)="onStartClick($event, node)"
+                    [disabled]="restartingNodeId() === node.id"
                   >
-                    Stop
+                    {{ restartingNodeId() === node.id ? 'Starting…' : 'Start' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn--ghost"
+                    *ngIf="node.status === 'running'"
+                    (click)="onStopClick($event, node)"
+                    [disabled]="stoppingNodeId() === node.id"
+                  >
+                    {{ stoppingNodeId() === node.id ? 'Stopping…' : 'Stop' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn--ghost"
+                    (click)="onRestartClick($event, node)"
+                    [disabled]="restartingNodeId() === node.id"
+                  >
+                    {{ restartingNodeId() === node.id ? 'Restarting…' : 'Restart' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn--ghost btn--danger"
+                    (click)="onDeleteClick($event, node)"
+                    [disabled]="deletingNodeId() === node.id"
+                  >
+                    {{ deletingNodeId() === node.id ? 'Deleting…' : 'Delete' }}
                   </button>
                 </td>
               </tr>
@@ -172,12 +221,14 @@
           [detailError]="detailError()"
           [logsError]="logsError()"
           [logStreamState]="logStreamState()"
-          [isRestarting]="isRestarting()"
-          [isStopping]="isStopping()"
+          [isRestarting]="restartingNodeId() === selected.id"
+          [isStopping]="stoppingNodeId() === selected.id"
+          [isDeleting]="deletingNodeId() === selected.id"
           [isDownloadingLogs]="isDownloadingLogs()"
           (closed)="closeDetail()"
           (restartRequested)="restart(selected)"
           (stopRequested)="stop(selected)"
+          (deleteRequested)="delete(selected)"
           (logsDownloadRequested)="downloadLogs(selected)"
         ></app-node-detail>
       </div>
@@ -186,8 +237,8 @@
 
   <ng-template #emptyState>
     <div class="empty-state">
-      <h2>No nodes yet</h2>
-      <p>Launch a backtest, sandbox, or live session to see it appear here.</p>
+      <h2>No bots yet</h2>
+      <p>Launch a backtest, sandbox, or live bot to see it appear here.</p>
     </div>
   </ng-template>
 </section>

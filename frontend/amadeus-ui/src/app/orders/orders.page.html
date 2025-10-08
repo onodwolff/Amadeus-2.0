@@ -3,7 +3,7 @@
     <div>
       <h1 class="orders-page__title">Orders &amp; fills</h1>
       <p class="orders-page__subtitle">
-        Monitor live and historical orders alongside execution reports streamed from Nautilus Trader nodes.
+        Monitor live and historical orders alongside execution reports streamed from Nautilus Trader bots.
       </p>
     </div>
     <div class="orders-page__meta">
@@ -46,10 +46,10 @@
       </select>
     </label>
     <label class="filter-field">
-      <span>Node</span>
+      <span>Bot</span>
       <select [ngModel]="nodeFilter()" (ngModelChange)="onNodeFilterChange($event)" name="node-filter">
         <option *ngFor="let node of nodeOptions()" [value]="node">
-          {{ node === 'all' ? 'All nodes' : node }}
+          {{ node === 'all' ? 'All bots' : node }}
         </option>
       </select>
     </label>
@@ -91,7 +91,7 @@
               <th>Instrument</th>
               <th>Qty / Filled</th>
               <th>Price</th>
-              <th>Node</th>
+              <th>Bot</th>
               <th>Updated</th>
               <th>Executions</th>
               <th></th>
@@ -151,7 +151,7 @@
                 <div class="cell-main">{{ order.price !== null ? (order.price | number: '1.2-2') : '—' }}</div>
                 <div class="cell-sub" *ngIf="order.average_price !== null">avg {{ order.average_price | number: '1.2-2' }}</div>
               </td>
-              <td data-label="Node">
+              <td data-label="Bot">
                 <div class="cell-main">{{ order.node_id || '—' }}</div>
               </td>
               <td data-label="Updated">
@@ -210,7 +210,7 @@
   <ng-template #emptyState>
     <div class="orders-page__empty">
       <h2>No orders yet</h2>
-      <p>Orders will appear here once your nodes begin trading or after importing historical activity.</p>
+      <p>Orders will appear here once your bots begin trading or after importing historical activity.</p>
     </div>
   </ng-template>
 </section>

@@ -78,17 +78,17 @@ export class NodeLaunchDialogComponent {
   readonly nodeTypeOptions: Array<{ value: NodeMode; label: string; description: string }> = [
     {
       value: 'backtest',
-      label: 'Backtest node',
+      label: 'Backtest bot',
       description: 'Launch a historical simulation with deterministic data replay.',
     },
     {
       value: 'sandbox',
-      label: 'Sandbox trading node',
+      label: 'Sandbox bot',
       description: 'Connect to simulated adapters for paper trading workflows.',
     },
     {
       value: 'live',
-      label: 'Live trading node',
+      label: 'Live trading bot',
       description: 'Connect to live market adapters and execute strategies in production.',
     },
   ];
@@ -134,8 +134,8 @@ export class NodeLaunchDialogComponent {
   readonly steps = [
     {
       key: 'type',
-      title: 'Select node type',
-      description: 'Choose between historical backtesting, sandbox, or live trading execution.',
+      title: 'Select bot mode',
+      description: 'Choose between historical backtesting, sandbox simulation, or live execution.',
     },
     {
       key: 'strategy',
@@ -155,7 +155,7 @@ export class NodeLaunchDialogComponent {
     {
       key: 'review',
       title: 'Review & launch',
-      description: 'Verify configuration and submit the node launch request.',
+      description: 'Verify configuration and submit the bot launch request.',
     },
   ] as const;
 
@@ -498,7 +498,7 @@ export class NodeLaunchDialogComponent {
         const control = this.form.controls.nodeType;
         control.markAsTouched();
         if (!control.value) {
-          this.stepError.set('Please select the node execution mode.');
+          this.stepError.set('Please select the bot execution mode.');
           return false;
         }
         return true;
@@ -522,7 +522,7 @@ export class NodeLaunchDialogComponent {
         const mode = this.form.controls.nodeType.value;
         if (mode === 'live') {
           if (adapters.length === 0) {
-            this.stepError.set('Select at least one exchange for live nodes.');
+            this.stepError.set('Select at least one exchange for live bots.');
             return false;
           }
           const missingKeys = adapters.controls.some((group) => !group.controls.keyId.value);
@@ -547,7 +547,7 @@ export class NodeLaunchDialogComponent {
           return true;
         }
         if (!this.form.valid) {
-          this.stepError.set('Resolve validation errors before launching the node.');
+          this.stepError.set('Resolve validation errors before launching the bot.');
           return false;
         }
         return true;

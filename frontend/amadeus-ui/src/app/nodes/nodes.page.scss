@@ -65,6 +65,18 @@
   background: transparent;
 }
 
+.btn--danger {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: rgba(248, 113, 113, 0.95);
+}
+
+.btn--danger:hover:not(:disabled),
+.btn--danger:focus-visible:not(:disabled) {
+  background: rgba(248, 113, 113, 0.26);
+  border-color: rgba(252, 165, 165, 0.55);
+}
+
 .nodes-page__meta {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -95,6 +107,10 @@
 
 .meta-card__value--warn {
   color: #f97316;
+}
+
+.meta-card__value--good {
+  color: #34d399;
 }
 
 .meta-card__hint {

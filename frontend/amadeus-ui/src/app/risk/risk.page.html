@@ -96,9 +96,9 @@
                   <p class="field-error" *ngIf="hasError(limitGroup.get('venue'), 'required')">Venue is required.</p>
                 </div>
                 <div class="risk-table__field" [class.risk-table__field--error]="hasError(limitGroup.get('node'), 'required')">
-                  <label>Node</label>
+                  <label>Bot</label>
                   <input type="text" formControlName="node" placeholder="lv-00112233" maxlength="64" />
-                  <p class="field-error" *ngIf="hasError(limitGroup.get('node'), 'required')">Node identifier is required.</p>
+                  <p class="field-error" *ngIf="hasError(limitGroup.get('node'), 'required')">Bot identifier is required.</p>
                 </div>
                 <div
                   class="risk-table__field risk-table__field--number"
@@ -201,9 +201,9 @@
                   <p class="field-error" *ngIf="hasError(lockGroup.get('venue'), 'required')">Venue is required.</p>
                 </div>
                 <div class="risk-table__field" [class.risk-table__field--error]="hasError(lockGroup.get('node'), 'required')">
-                  <label>Node</label>
+                  <label>Bot</label>
                   <input type="text" formControlName="node" placeholder="lv-00112233" maxlength="64" />
-                  <p class="field-error" *ngIf="hasError(lockGroup.get('node'), 'required')">Node identifier is required.</p>
+                  <p class="field-error" *ngIf="hasError(lockGroup.get('node'), 'required')">Bot identifier is required.</p>
                 </div>
                 <div class="risk-table__field risk-table__field--checkbox">
                   <label class="checkbox-label">

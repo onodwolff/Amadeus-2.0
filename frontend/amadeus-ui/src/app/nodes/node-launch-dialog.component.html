@@ -3,7 +3,7 @@
   <div class="launch-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="launchDialogTitle">
     <header class="launch-dialog__header">
       <div>
-        <p class="launch-dialog__eyebrow">Node launch wizard</p>
+        <p class="launch-dialog__eyebrow">Bot launch wizard</p>
         <h2 class="launch-dialog__title" id="launchDialogTitle">{{ currentStepDescriptor().title }}</h2>
         <p class="launch-dialog__subtitle">{{ currentStepDescriptor().description }}</p>
       </div>
@@ -25,7 +25,7 @@
       [formGroup]="form"
       (ngSubmit)="submit()"
     >
-      <section *ngIf="currentStep() === 0" class="launch-dialog__section" aria-label="Node type selection">
+      <section *ngIf="currentStep() === 0" class="launch-dialog__section" aria-label="Bot mode selection">
         <div class="option-grid">
           <label *ngFor="let option of nodeTypeOptions" class="option-card" [class.option-card--active]="form.value.nodeType === option.value">
             <input type="radio" formControlName="nodeType" [value]="option.value" />
@@ -153,7 +153,7 @@
       <section *ngIf="currentStep() === 4" class="launch-dialog__section launch-dialog__section--review" aria-label="Review configuration">
         <dl class="review-grid">
           <div>
-            <dt>Node type</dt>
+            <dt>Bot mode</dt>
             <dd>{{ form.value.nodeType }}</dd>
           </div>
           <div>
@@ -232,7 +232,7 @@
           form="nodeLaunchForm"
           *ngIf="currentStep() === steps.length - 1"
         >
-          Launch node
+          Launch bot
         </button>
       </div>
     </footer>

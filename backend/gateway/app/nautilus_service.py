@@ -7,6 +7,7 @@ import json
 import logging
 import pkgutil
 import random
+import shutil
 import sys
 import threading
 import uuid
@@ -4038,6 +4039,44 @@ class MockNautilusService:
         self._update_node_summary(node_id)
         self._persist_node_handle(handle)
         return handle
+
+    def delete_node(self, node_id: str) -> None:
+        state = self._nodes.get(node_id)
+        if state is None:
+            raise ValueError(f"Node {node_id} not found")
+
+        handle = state.handle
+        if handle.status == "running":
+            handle = self.stop_node(node_id)
+            state = self._require_node(node_id)
+
+        payload = self.as_dict(handle)
+
+        self._nodes.pop(node_id, None)
+        self._config_versions.pop(node_id, None)
+
+        for category in self._risk_alerts.values():
+            category[:] = [
+                alert
+                for alert in category
+                if str(alert.context.get("node") or alert.context.get("node_id") or "")
+                != node_id
+            ]
+        self._risk_usage.pop(node_id, None)
+        self._breach_states.pop(node_id, None)
+        self._last_exposure_entries = [
+            entry for entry in self._last_exposure_entries if entry.get("node_id") != node_id
+        ]
+
+        storage_dir = self._engine_service.storage_root / "nodes" / node_id
+        try:
+            if storage_dir.exists():
+                shutil.rmtree(storage_dir, ignore_errors=False)
+        except OSError:
+            LOGGER.debug("node_storage_cleanup_failed", extra={"node_id": node_id})
+
+        self._publish("engine.nodes", {"event": "deleted", "node": payload})
+        self._storage.delete_node(node_id)
 
     def node_detail(self, node_id: str) -> dict:
         state = self._require_node(node_id)

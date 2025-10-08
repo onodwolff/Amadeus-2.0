@@ -48,9 +48,9 @@
       </select>
     </label>
     <label>
-      Node
+      Bot
       <select [ngModel]="selectedNode() ?? ''" (ngModelChange)="onNodeChange($event)">
-        <option value="">All nodes</option>
+        <option value="">All bots</option>
         <option *ngFor="let node of availableNodes()" [value]="node">{{ node }}</option>
       </select>
     </label>
@@ -74,7 +74,7 @@
             <tr>
               <th>Account</th>
               <th>Venue</th>
-              <th>Node</th>
+              <th>Bot</th>
               <th>Currency</th>
               <th class="numeric">Total</th>
               <th class="numeric">Available</th>
@@ -117,7 +117,7 @@
               <th>Symbol</th>
               <th>Venue</th>
               <th>Account</th>
-              <th>Node</th>
+              <th>Bot</th>
               <th class="numeric">Quantity</th>
               <th class="numeric">Avg price</th>
               <th class="numeric">Mark price</th>
