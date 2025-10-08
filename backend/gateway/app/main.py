@@ -54,6 +54,7 @@ from .nautilus_service import (
 )
 from .nautilus_engine_service import EngineConfigError, EngineMode, EngineNodeHandle
 from .logging import bind_contextvars, clear_contextvars, get_logger
+from .routes.data import router as data_router
 from .routes.keys import router as keys_router
 from .routes.orders import router as orders_router
 from .routes.users import router as users_router
@@ -602,6 +603,7 @@ async def _apply_launch_adapters(
         ]
 app = FastAPI(title="Amadeus Gateway")
 app.include_router(risk_router)
+app.include_router(data_router, prefix="/api")
 app.include_router(keys_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(users_router, prefix="/api")

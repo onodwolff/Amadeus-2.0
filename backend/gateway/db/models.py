@@ -537,13 +537,108 @@ class EquityHistory(Base):
     node: Mapped[Node] = relationship("Node", back_populates="equity_history")
 
 
+class HistoricalDataStatus(str, enum.Enum):
+    """Lifecycle status of a historical data snapshot."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class HistoricalDataset(Base):
+    """Metadata describing a cached historical market data snapshot."""
+
+    __tablename__ = "historical_datasets"
+    __table_args__ = (
+        Index("ix_historical_datasets_fingerprint", "fingerprint", unique=True),
+        Index("ix_historical_datasets_dataset_id", "dataset_id", unique=True),
+        Index("ix_historical_datasets_status", "status"),
+        Index("ix_historical_datasets_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    venue: Mapped[str] = mapped_column(String(64), nullable=False)
+    instrument: Mapped[str] = mapped_column(String(128), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(32), nullable=False)
+    date_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    date_to: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[HistoricalDataStatus] = mapped_column(
+        Enum(HistoricalDataStatus, name="historical_data_status"),
+        nullable=False,
+        default=HistoricalDataStatus.PENDING,
+        server_default=HistoricalDataStatus.PENDING.value,
+    )
+    source: Mapped[Optional[str]] = mapped_column(String(64))
+    path: Mapped[Optional[str]] = mapped_column(String(255))
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer)
+    rows: Mapped[Optional[int]] = mapped_column(Integer)
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    parameters: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    backtests: Mapped[List["BacktestResult"]] = relationship(
+        "BacktestResult", back_populates="dataset", cascade="all, delete-orphan"
+    )
+
+
+class BacktestResult(Base):
+    """Aggregated metrics recorded after a backtest run completes."""
+
+    __tablename__ = "backtest_results"
+    __table_args__ = (
+        Index("ix_backtest_results_node_key", "node_key", unique=True),
+        Index("ix_backtest_results_dataset_id", "dataset_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    dataset_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("historical_datasets.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    total_return: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=20, scale=10))
+    sharpe_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=20, scale=10))
+    max_drawdown: Mapped[Optional[Decimal]] = mapped_column(Numeric(precision=20, scale=10))
+    metrics: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    dataset: Mapped[Optional[HistoricalDataset]] = relationship(
+        "HistoricalDataset", back_populates="backtests"
+    )
+
+
 __all__ = [
     "ApiKey",
+    "BacktestResult",
     "Balance",
     "Config",
     "ConfigFormat",
     "ConfigSource",
     "EquityHistory",
+    "HistoricalDataStatus",
+    "HistoricalDataset",
     "Execution",
     "LogsIndex",
     "Node",

@@ -93,15 +93,38 @@
         <h2 id="dataset-block">Dataset</h2>
         <p>Choose a curated dataset that will be replayed during the simulation.</p>
       </div>
+      <div class="dataset-toolbar">
+        <button type="button" class="btn btn--secondary" (click)="refreshDatasets()" [disabled]="isLoadingDatasets()">
+          {{ isLoadingDatasets() ? 'Refreshing…' : 'Refresh datasets' }}
+        </button>
+        <span class="dataset-toolbar__status" *ngIf="isLoadingDatasets()">Loading cached datasets…</span>
+        <span class="dataset-toolbar__status dataset-toolbar__status--error" *ngIf="datasetLoadError() as error">
+          {{ error }}
+        </span>
+      </div>
       <div class="option-grid option-grid--dataset">
         <label
           class="option-card"
-          *ngFor="let option of datasetOptions"
+          *ngFor="let option of datasets(); trackBy: trackByDatasetId"
           [class.option-card--active]="option.id === form.controls.dataset.controls.id.value"
         >
-          <input type="radio" formControlName="id" [value]="option.id" (change)="onDatasetSelect(option.id)" />
+            <input
+              type="radio"
+              formControlName="id"
+              [value]="option.id"
+              (change)="onDatasetSelect(option.id)"
+              [disabled]="option.status ? option.status !== 'ready' : false"
+            />
           <span class="option-card__title">{{ option.name }}</span>
-          <span class="option-card__meta">Venue: {{ option.venue }} · Interval: {{ option.barInterval }}</span>
+          <span class="option-card__meta">
+            Venue: {{ option.venue }} · Interval: {{ option.barInterval }} · Instrument: {{ option.instrument }}
+          </span>
+          <span class="option-card__meta">
+            Range: {{ option.start | date: 'mediumDate' }} → {{ option.end | date: 'mediumDate' }}
+          </span>
+          <span class="option-card__status" [class.option-card__status--pending]="option.status && option.status !== 'ready'">
+            {{ (option.status || 'ready') | titlecase }}
+          </span>
           <span class="option-card__description">{{ option.description }}</span>
         </label>
       </div>

@@ -11,3 +11,4 @@ export * from './watchlist.model';
 export * from './market-data.model';
 export * from './user.model';
 export * from './integration.model';
+export * from './historical-data.model';

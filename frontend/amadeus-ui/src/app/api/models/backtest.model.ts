@@ -15,6 +15,10 @@ export interface BacktestDatasetDto {
   venue: string;
   barInterval: string;
   description: string;
+  instrument: string;
+  start: string;
+  end: string;
+  status?: string;
 }
 
 export interface BacktestDateRangeDto {

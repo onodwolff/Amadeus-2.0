@@ -18,6 +18,10 @@ export const routes: Routes = [
     ],
   },
   { path: 'risk', loadComponent: () => import('./risk/risk.page').then(m => m.RiskPage) },
+  {
+    path: 'data',
+    loadComponent: () => import('./data/historical-data.page').then(m => m.HistoricalDataPage),
+  },
   { path: 'settings', loadComponent: () => import('./settings/settings.page').then(m => m.SettingsPage) },
   { path: '**', redirectTo: 'nodes' },
 ];

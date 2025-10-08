@@ -108,6 +108,22 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.dataset-toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.dataset-toolbar__status {
+  font-size: 0.85rem;
+  color: rgba(148, 163, 184, 0.85);
+}
+
+.dataset-toolbar__status--error {
+  color: #fca5a5;
+}
+
 .option-card {
   position: relative;
   display: flex;
@@ -150,6 +166,18 @@
 .option-card__meta {
   font-size: 0.85rem;
   color: rgba(148, 163, 184, 0.85);
+}
+
+.option-card__status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(74, 222, 128, 0.9);
+}
+
+.option-card__status--pending {
+  color: #fbbf24;
 }
 
 .parameter-list {
