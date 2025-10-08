@@ -307,6 +307,7 @@ class NautilusEngineService:
         self._api_session_factory = None
         self._node_configs: Dict[str, Dict[str, Any]] = {}
         self._adapter_status: Dict[str, List[Dict[str, Any]]] = {}
+        self._telemetry_threads: Dict[str, Tuple[threading.Thread, threading.Event]] = {}
 
     @property
     def bus(self) -> EngineEventBus:
@@ -688,6 +689,14 @@ class NautilusEngineService:
                 exc,
             )
 
+        self._publish_node_event(
+            node_id=resolved_node_id,
+            event="started",
+            detail="Node launch requested",
+        )
+
+        self._start_telemetry(node, resolved_node_id)
+
         return handle
 
     def launch_node(
@@ -759,12 +768,20 @@ class NautilusEngineService:
             except Exception:  # pragma: no cover - best effort join
                 pass
 
+        self._stop_telemetry(node_id)
+
         handle.node = None
 
         self._nodes_running.pop(node_id, None)
 
         self._set_adapter_state(node_id, "stopped")
         handle.adapters = deepcopy(self._adapter_status.get(node_id, []))
+
+        self._publish_node_event(
+            node_id=node_id,
+            event="stopped",
+            detail="Node stop requested",
+        )
 
         return handle
 
@@ -813,17 +830,21 @@ class NautilusEngineService:
         """Bridge Nautilus event callbacks to the gateway event bus."""
 
         dispatcher = getattr(node, "event_dispatcher", None)
-        if dispatcher is None:
-            self._logger.debug(
-                "Node %s exposes no event dispatcher – skipping bus bridge.", node_id
-            )
-            return
+        subscribe = getattr(dispatcher, "subscribe", None) if dispatcher else None
+        subscribe_all = (
+            getattr(dispatcher, "subscribe_all", None) if dispatcher else None
+        )
 
-        subscribe = getattr(dispatcher, "subscribe", None)
-        subscribe_all = getattr(dispatcher, "subscribe_all", None)
-        if not callable(subscribe) and not callable(subscribe_all):
+        kernel = getattr(node, "kernel", None)
+        msgbus = getattr(kernel, "msgbus", None) if kernel is not None else None
+        msgbus_subscribe = getattr(msgbus, "subscribe", None)
+
+        if not callable(subscribe) and not callable(subscribe_all) and not callable(
+            msgbus_subscribe
+        ):
             self._logger.debug(
-                "Nautilus dispatcher for node %s exposes no subscribe helpers.", node_id
+                "Node %s exposes no event dispatcher or message bus – skipping bus bridge.",
+                node_id,
             )
             return
 
@@ -952,6 +973,20 @@ class NautilusEngineService:
                     exc,
                 )
 
+        if callable(msgbus_subscribe):
+            patterns = {
+                "events.order*": handle_order,
+                "events.execution*": handle_execution,
+                "events.position*": handle_generic,
+                "events.risk*": handle_risk,
+                "events.*": handle_generic,
+            }
+            for pattern, handler in patterns.items():
+                try:
+                    msgbus_subscribe(pattern, handler)
+                except Exception:  # pragma: no cover - optional API shapes
+                    continue
+
         def lifecycle_stopped(*_: Any) -> None:
             self._set_adapter_state(node_id, "stopped")
             payload = {
@@ -971,6 +1006,134 @@ class NautilusEngineService:
                 break
             except Exception:  # pragma: no cover - optional API shapes
                 continue
+
+    def _publish_node_event(self, *, node_id: str, event: str, detail: str) -> None:
+        payload = {
+            "event": event,
+            "node_id": node_id,
+            "detail": detail,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+        self.publish("engine.nodes", payload)
+        self.publish(f"engine.nodes.{node_id}.lifecycle", payload)
+
+    def _start_telemetry(self, node: Any, node_id: str) -> None:
+        if node is None:
+            return
+        if node_id in self._telemetry_threads:
+            return
+
+        stop_event = threading.Event()
+
+        def runner() -> None:
+            while not stop_event.wait(1.0):
+                try:
+                    sample = self._collect_node_metrics(node, node_id)
+                except Exception:  # pragma: no cover - defensive guard
+                    continue
+                if not sample:
+                    continue
+                self.publish(f"engine.nodes.{node_id}.metrics", sample)
+                self.publish("engine.nodes.metrics", sample)
+
+        thread = threading.Thread(
+            target=runner,
+            name=f"nautilus-node-{node_id}-telemetry",
+            daemon=True,
+        )
+        self._telemetry_threads[node_id] = (thread, stop_event)
+        thread.start()
+
+    def _stop_telemetry(self, node_id: str) -> None:
+        entry = self._telemetry_threads.pop(node_id, None)
+        if not entry:
+            return
+        thread, stop_event = entry
+        stop_event.set()
+        if thread.is_alive():
+            try:
+                thread.join(timeout=2.0)
+            except Exception:  # pragma: no cover - defensive guard
+                pass
+
+    def _collect_node_metrics(self, node: Any, node_id: str) -> Optional[Dict[str, Any]]:
+        portfolio = getattr(node, "portfolio", None)
+        if portfolio is None:
+            kernel = getattr(node, "kernel", None)
+            portfolio = getattr(kernel, "portfolio", None)
+        if portfolio is None:
+            return None
+
+        metrics: Dict[str, Optional[float]] = {
+            "pnl": None,
+            "equity": None,
+            "latency_ms": None,
+            "cpu_percent": None,
+            "memory_mb": None,
+        }
+
+        analyzer = getattr(portfolio, "analyzer", None)
+        if analyzer is not None:
+            try:
+                pnl_value = analyzer.total_pnl()  # type: ignore[attr-defined]
+            except Exception:
+                pnl_value = None
+            if pnl_value is not None:
+                metrics["pnl"] = self._coerce_number(pnl_value)
+
+            balances = getattr(analyzer, "_account_balances", None)
+            if isinstance(balances, dict):
+                equity_total = 0.0
+                found_equity = False
+                for value in balances.values():
+                    numeric = self._coerce_money(value)
+                    if numeric is None:
+                        continue
+                    found_equity = True
+                    equity_total += numeric
+                if found_equity:
+                    metrics["equity"] = equity_total
+
+        if not any(value is not None for value in metrics.values()):
+            return None
+
+        payload = {
+            "node_id": node_id,
+            "metrics": {key: value for key, value in metrics.items() if value is not None},
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+        return payload
+
+    @staticmethod
+    def _coerce_number(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _coerce_money(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        as_double = getattr(value, "as_double", None)
+        if callable(as_double):
+            try:
+                return float(as_double())
+            except Exception:
+                pass
+        as_decimal = getattr(value, "as_decimal", None)
+        if callable(as_decimal):
+            try:
+                decimal_value = as_decimal()
+                return float(decimal_value)
+            except Exception:
+                pass
+        return None
 
     def submit_order(self, instructions: Dict[str, Any]) -> None:
         """Forward order instructions to a running Nautilus trading node if available."""
