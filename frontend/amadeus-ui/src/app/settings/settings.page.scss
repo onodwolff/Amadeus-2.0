@@ -52,7 +52,7 @@
   align-items: center;
 }
 
-.account-settings {
+.settings-section {
   display: grid;
   gap: 20px;
   padding: 24px;
@@ -61,7 +61,7 @@
   background: rgba(15, 23, 42, 0.5);
 }
 
-.account-settings__header {
+.settings-section__header {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -69,51 +69,109 @@
   align-items: flex-start;
 }
 
-.account-settings__title {
+.settings-section__title {
   margin: 0;
   font-size: 1.35rem;
 }
 
-.account-settings__subtitle {
+.settings-section__subtitle {
   margin: 8px 0 0;
   max-width: 560px;
   color: rgba(148, 163, 184, 0.85);
   font-size: 0.95rem;
 }
 
-.account-settings__timestamp {
+.settings-section__timestamp {
   color: rgba(148, 163, 184, 0.75);
   font-size: 0.85rem;
 }
 
-.account-settings__form {
+.settings-card {
   display: grid;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.settings-card--form {
   gap: 20px;
 }
 
-.account-settings__grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+.settings-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
 }
 
-.account-settings__alerts {
+.settings-card__title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.settings-card__description {
+  margin: 6px 0 0;
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 0.95rem;
+}
+
+.settings-card__grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-card__messages {
   display: grid;
   gap: 8px;
 }
 
-.account-settings__success {
+.settings-card__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.security-card .settings-card__actions {
+  justify-content: flex-start;
+}
+
+.settings-message {
   margin: 0;
   padding: 12px 16px;
   border-radius: 10px;
+  font-size: 0.95rem;
+}
+
+.settings-message--error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  color: rgb(248, 113, 113);
+}
+
+.settings-message--success {
   background: rgba(34, 197, 94, 0.12);
   border: 1px solid rgba(74, 222, 128, 0.3);
   color: rgb(74, 222, 128);
 }
 
-.account-settings__footer {
-  display: flex;
-  justify-content: flex-end;
+.account-email {
+  display: grid;
+  gap: 4px;
+}
+
+.account-email__value {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.account-email__hint {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.75);
+  font-size: 0.9rem;
 }
 
 .credentials-meta {
@@ -142,8 +200,7 @@
   font-weight: 600;
 }
 
-.credentials-error,
-.account-settings__error {
+.credentials-error {
   margin: 0;
   padding: 12px 16px;
   border-radius: 10px;
