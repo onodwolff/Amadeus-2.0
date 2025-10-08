@@ -47,6 +47,8 @@ from gateway.db.models import (
     User as DbUser,
     UserRole,
 )
+from gateway.scripts.apply_migrations import run_migrations
+
 from .db import get_engine, get_session
 from .nautilus_service import (
     EngineUnavailableError,
@@ -69,6 +71,18 @@ from .security import hash_password
 
 
 logger = get_logger("gateway.api")
+
+
+async def _apply_database_migrations(database_url: str) -> None:
+    """Apply pending Alembic migrations in a background thread."""
+
+    logger.info("database_migration_started")
+    try:
+        await asyncio.to_thread(run_migrations, database_url)
+    except Exception:  # pragma: no cover - defensive logging
+        logger.exception("database_migration_failed")
+        raise
+    logger.info("database_migration_completed")
 
 
 async def _resolve_primary_user(session: AsyncSession) -> DbUser:
@@ -704,6 +718,8 @@ async def startup_event() -> None:
         logger.exception("database_connectivity_failed")
         raise RuntimeError("Database connectivity check failed") from exc
     logger.info("database_ready")
+
+    await _apply_database_migrations(database_url)
 
     await _ensure_admin_user()
 
