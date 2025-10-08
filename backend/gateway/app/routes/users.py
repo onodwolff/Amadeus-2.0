@@ -37,7 +37,6 @@ class AccountResource(BaseModel):
     id: str
     name: str | None = None
     email: str
-    username: str
     role: str
     active: bool = True
     created_at: datetime
@@ -53,7 +52,6 @@ class AccountResponse(BaseModel):
 class AccountUpdateRequest(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = None
-    username: str | None = Field(default=None, min_length=3, max_length=64)
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -74,17 +72,6 @@ class AccountUpdateRequest(BaseModel):
             return None
         return EmailStr(str(value).strip().lower())
 
-    @field_validator("username")
-    @classmethod
-    def _validate_username(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("Login cannot be empty")
-        return trimmed
-
-
 class PasswordUpdateRequest(BaseModel):
     current_password: str = Field(..., alias="currentPassword", min_length=1)
     new_password: str = Field(..., alias="newPassword", min_length=8)
@@ -97,7 +84,6 @@ def _serialize_account(user: User) -> AccountResource:
         id=str(user.id),
         name=user.name,
         email=user.email,
-        username=user.username,
         role=user.role.value if getattr(user, "role", None) else "member",
         active=True,
         created_at=user.created_at,
@@ -157,19 +143,6 @@ async def update_account_settings(
         if duplicate_email.scalars().first():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already in use")
         user.email = normalized_email
-        changed = True
-
-    if payload.username is not None and payload.username != user.username:
-        normalized_username = payload.username
-        duplicate_username_stmt = (
-            select(User.id)
-            .where(func.lower(User.username) == normalized_username.lower())
-            .where(User.id != user.id)
-        )
-        duplicate_username = await session.execute(duplicate_username_stmt)
-        if duplicate_username.scalars().first():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Login is already taken")
-        user.username = normalized_username
         changed = True
 
     if changed:
