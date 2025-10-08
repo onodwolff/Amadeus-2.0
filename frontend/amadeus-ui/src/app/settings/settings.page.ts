@@ -70,9 +70,11 @@ type KeyDeleteFormGroup = FormGroup<{
   passphrase: FormControl<string>;
 }>;
 
-type AccountFormGroup = FormGroup<{
-  name: FormControl<string>;
+type EmailFormGroup = FormGroup<{
   email: FormControl<string>;
+}>;
+
+type PasswordFormGroup = FormGroup<{
   currentPassword: FormControl<string>;
   password: FormControl<string>;
   confirmPassword: FormControl<string>;
@@ -170,11 +172,16 @@ export class SettingsPage implements OnInit {
   readonly exchangesError = signal<string | null>(null);
 
   readonly activeUser = signal<UserProfile | null>(null);
-  readonly isAccountSaving = signal(false);
-  readonly accountError = signal<string | null>(null);
-  readonly accountSuccess = signal<string | null>(null);
 
-  readonly accountForm: AccountFormGroup = this.createAccountForm();
+  readonly emailForm: EmailFormGroup = this.createEmailForm();
+  readonly isEmailSaving = signal(false);
+  readonly emailError = signal<string | null>(null);
+  readonly emailSuccess = signal<string | null>(null);
+
+  readonly passwordForm: PasswordFormGroup = this.createPasswordForm();
+  readonly isPasswordSaving = signal(false);
+  readonly passwordError = signal<string | null>(null);
+  readonly passwordSuccess = signal<string | null>(null);
   
   private readonly healthAlertsDisplayed = new Set<string>();
 
@@ -196,6 +203,14 @@ export class SettingsPage implements OnInit {
 
   refresh(): void {
     this.fetchKeys({ silent: true });
+  }
+
+  manageTwoFactor(): void {
+    this.notifications.info('2FA management is coming soon.', 'Security');
+  }
+
+  logOutAllSessions(): void {
+    this.notifications.info('Session revocation is coming soon.', 'Security');
   }
 
   private loadExchangeCatalog(): void {
@@ -223,34 +238,30 @@ export class SettingsPage implements OnInit {
   }
 
   private loadAccountProfile(): void {
-    this.accountError.set(null);
-    this.accountSuccess.set(null);
+    this.emailError.set(null);
+    this.emailSuccess.set(null);
+    this.passwordError.set(null);
+    this.passwordSuccess.set(null);
     this.usersApi.getAccount().subscribe({
       next: (response) => {
         const account = response.account ?? null;
         this.activeUser.set(account);
-        if (account) {
-          this.accountForm.reset({
-            name: account.name ?? '',
-            email: account.email ?? '',
-            currentPassword: '',
-            password: '',
-            confirmPassword: '',
-          });
-        } else {
-          this.accountForm.reset({
-            name: '',
-            email: '',
-            currentPassword: '',
-            password: '',
-            confirmPassword: '',
-          });
-        }
-        this.accountForm.markAsPristine();
-        this.accountForm.markAsUntouched();
+        this.emailForm.reset({
+          email: '',
+        });
+        this.emailForm.markAsPristine();
+        this.emailForm.markAsUntouched();
+
+        this.passwordForm.reset({
+          currentPassword: '',
+          password: '',
+          confirmPassword: '',
+        });
+        this.passwordForm.markAsPristine();
+        this.passwordForm.markAsUntouched();
       },
       error: (error) => {
-        this.handleError(error, this.accountError, 'Unable to load account profile.');
+        this.handleError(error, this.emailError, 'Unable to load account profile.');
       },
     });
   }
@@ -356,121 +367,120 @@ export class SettingsPage implements OnInit {
     }
   }
 
-  async saveAccountSettings(): Promise<void> {
-    this.accountError.set(null);
-    this.accountSuccess.set(null);
+  async changeEmail(): Promise<void> {
+    this.emailError.set(null);
+    this.emailSuccess.set(null);
 
     const currentUser = this.activeUser();
     if (!currentUser) {
-      this.accountError.set('No user profile available.');
+      this.emailError.set('No user profile available.');
       return;
     }
 
-    if (this.accountForm.invalid) {
-      this.accountForm.markAllAsTouched();
+    if (this.emailForm.invalid) {
+      this.emailForm.markAllAsTouched();
+      this.emailError.set('Enter a valid email address to continue.');
       return;
     }
 
-    const raw = this.accountForm.getRawValue();
+    const newEmail = this.emailForm.controls.email.value.trim();
+    if (!newEmail) {
+      this.emailError.set('Enter a new email address to continue.');
+      return;
+    }
+
+    if (newEmail.toLowerCase() === (currentUser.email ?? '').toLowerCase()) {
+      this.emailError.set('That email is already associated with your account.');
+      return;
+    }
+
+    this.isEmailSaving.set(true);
+    try {
+      const payload: AccountUpdateRequest = { email: newEmail };
+      const accountResponse = await firstValueFrom(this.usersApi.updateAccount(payload));
+      const latestAccount = accountResponse.account;
+      this.activeUser.set(latestAccount);
+
+      this.emailForm.reset({ email: '' });
+      this.emailForm.markAsPristine();
+      this.emailForm.markAsUntouched();
+
+      this.emailSuccess.set(
+        'Update requested. Complete the confirmation sent to the new address to finish changing your login email.',
+      );
+      this.notifications.success('Email update requested.', 'Settings');
+    } catch (error) {
+      this.handleError(error, this.emailError, 'Failed to update email address.');
+    } finally {
+      this.isEmailSaving.set(false);
+    }
+  }
+
+  async changePassword(): Promise<void> {
+    this.passwordError.set(null);
+    this.passwordSuccess.set(null);
+
+    const currentUser = this.activeUser();
+    if (!currentUser) {
+      this.passwordError.set('No user profile available.');
+      return;
+    }
+
+    if (this.passwordForm.invalid) {
+      this.passwordForm.markAllAsTouched();
+      this.passwordError.set('Fill in every field to update your password.');
+      return;
+    }
+
+    const raw = this.passwordForm.getRawValue();
     const currentPassword = raw.currentPassword.trim();
     const newPassword = raw.password.trim();
     const confirmPassword = raw.confirmPassword.trim();
 
-    const wantsPasswordChange =
-      currentPassword.length > 0 || newPassword.length > 0 || confirmPassword.length > 0;
-
-    if (wantsPasswordChange) {
-      if (!currentPassword) {
-        this.accountError.set('Current password is required to update your password.');
-        return;
-      }
-      if (!newPassword) {
-        this.accountError.set('New password must be provided.');
-        return;
-      }
-      if (newPassword.length < 8) {
-        this.accountError.set('Password must be at least 8 characters.');
-        return;
-      }
-      if (newPassword !== confirmPassword) {
-        this.accountError.set('Password confirmation does not match.');
-        return;
-      }
-    }
-
-    const accountPayload: AccountUpdateRequest = {};
-    const name = raw.name.trim();
-    if (name && name !== currentUser.name) {
-      accountPayload.name = name;
-    }
-
-    const email = raw.email.trim();
-    if (email && email !== currentUser.email) {
-      accountPayload.email = email;
-    }
-
-    const operations: Array<'account' | 'password'> = [];
-    if (Object.keys(accountPayload).length > 0) {
-      operations.push('account');
-    }
-    if (wantsPasswordChange && newPassword) {
-      operations.push('password');
-    }
-
-    if (operations.length === 0) {
-      this.accountSuccess.set('Account settings are already up to date.');
+    if (!currentPassword) {
+      this.passwordError.set('Current password is required to update your password.');
       return;
     }
 
-    this.isAccountSaving.set(true);
+    if (!newPassword) {
+      this.passwordError.set('New password must be provided.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      this.passwordError.set('Password must be at least 8 characters.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      this.passwordError.set('Password confirmation does not match.');
+      return;
+    }
+
+    this.isPasswordSaving.set(true);
     try {
-      let latestAccount = currentUser;
+      const passwordPayload: PasswordUpdateRequest = {
+        currentPassword,
+        newPassword,
+      };
+      const passwordResponse = await firstValueFrom(this.usersApi.updatePassword(passwordPayload));
+      const latestAccount = passwordResponse.account;
+      this.activeUser.set(latestAccount);
 
-      if (operations.includes('account')) {
-        const accountResponse = await firstValueFrom(this.usersApi.updateAccount(accountPayload));
-        latestAccount = accountResponse.account;
-        this.activeUser.set(latestAccount);
-      }
-
-      if (operations.includes('password')) {
-        const passwordPayload: PasswordUpdateRequest = {
-          currentPassword,
-          newPassword,
-        };
-        const passwordResponse = await firstValueFrom(this.usersApi.updatePassword(passwordPayload));
-        latestAccount = passwordResponse.account;
-        this.activeUser.set(latestAccount);
-      }
-
-      this.accountForm.reset({
-        name: latestAccount.name ?? '',
-        email: latestAccount.email ?? '',
+      this.passwordForm.reset({
         currentPassword: '',
         password: '',
         confirmPassword: '',
       });
-      this.accountForm.markAsPristine();
-      this.accountForm.markAsUntouched();
+      this.passwordForm.markAsPristine();
+      this.passwordForm.markAsUntouched();
 
-      const successMessage =
-        operations.length === 2
-          ? 'Account details and password updated successfully.'
-          : operations[0] === 'password'
-            ? 'Password updated successfully.'
-            : 'Account settings updated successfully.';
-      this.accountSuccess.set(successMessage);
-
-      const notificationMessage =
-        operations.length === 2
-          ? 'Account and password updated.'
-          : operations[0] === 'password'
-            ? 'Password updated.'
-            : 'Account settings updated.';
-      this.notifications.success(notificationMessage, 'Settings');
+      this.passwordSuccess.set('Password updated successfully.');
+      this.notifications.success('Password updated.', 'Settings');
     } catch (error) {
-      this.handleError(error, this.accountError, 'Failed to update account settings.');
+      this.handleError(error, this.passwordError, 'Failed to update password.');
     } finally {
-      this.isAccountSaving.set(false);
+      this.isPasswordSaving.set(false);
     }
   }
 
@@ -1154,15 +1164,25 @@ export class SettingsPage implements OnInit {
     return Array.from(scopes);
   }
 
-  private createAccountForm(): AccountFormGroup {
+  private createEmailForm(): EmailFormGroup {
     return this.fb.group({
-      name: this.fb.nonNullable.control('', { validators: [Validators.required] }),
       email: this.fb.nonNullable.control('', {
         validators: [Validators.required, Validators.email],
       }),
-      currentPassword: this.fb.nonNullable.control(''),
-      password: this.fb.nonNullable.control(''),
-      confirmPassword: this.fb.nonNullable.control(''),
+    });
+  }
+
+  private createPasswordForm(): PasswordFormGroup {
+    return this.fb.group({
+      currentPassword: this.fb.nonNullable.control('', {
+        validators: [Validators.required],
+      }),
+      password: this.fb.nonNullable.control('', {
+        validators: [Validators.required, Validators.minLength(8)],
+      }),
+      confirmPassword: this.fb.nonNullable.control('', {
+        validators: [Validators.required],
+      }),
     });
   }
 

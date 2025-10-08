@@ -9,30 +9,87 @@
     </div>
   </header>
 
-  <section class="account-settings">
-    <header class="account-settings__header">
+  <section class="settings-section account-settings">
+    <header class="settings-section__header">
       <div>
-        <h2 class="account-settings__title">Account</h2>
-        <p class="account-settings__subtitle">
-          Update your display name, sign-in email address and password used to access the control plane.
+        <h2 class="settings-section__title">Account</h2>
+        <p class="settings-section__subtitle">
+          Manage the email address you use to sign in and rotate your password in line with OWASP guidance.
         </p>
       </div>
-      <span class="account-settings__timestamp" *ngIf="activeUser() as user">Last updated {{ user.updated_at | date: 'medium' }}</span>
+      <span class="settings-section__timestamp" *ngIf="activeUser() as user"
+        >Last updated {{ user.updated_at | date: 'medium' }}</span
+      >
     </header>
 
-    <form class="account-settings__form" [formGroup]="accountForm" (ngSubmit)="saveAccountSettings()">
-      <div class="account-settings__grid">
-        <label class="field">
-          <span class="field__label">Full name</span>
-          <input class="field__control" formControlName="name" type="text" placeholder="Jane Operator" required />
-        </label>
+    <article class="settings-card">
+      <header class="settings-card__header">
+        <div>
+          <h3 class="settings-card__title">Email</h3>
+          <p class="settings-card__description">
+            Your verified email doubles as your username. Updates require confirmation.
+          </p>
+        </div>
+      </header>
+      <div class="account-email" *ngIf="activeUser() as user; else missingAccount">
+        <span class="account-email__value">{{ user.email }}</span>
+        <p class="account-email__hint">We’ll email a verification link before the new address is activated.</p>
+      </div>
+      <ng-template #missingAccount>
+        <p class="account-email__value">—</p>
+      </ng-template>
+    </article>
 
-        <label class="field">
-          <span class="field__label">Email</span>
-          <input class="field__control" formControlName="email" type="email" placeholder="operator@example.com" required />
-          <span class="field__hint">This address is used to sign in.</span>
-        </label>
+    <form class="settings-card settings-card--form" [formGroup]="emailForm" (ngSubmit)="changeEmail()">
+      <header class="settings-card__header">
+        <div>
+          <h3 class="settings-card__title">Change email</h3>
+          <p class="settings-card__description">
+            Enter the new address you’d like to use to sign in. We’ll guide you through re-verification.
+          </p>
+        </div>
+      </header>
 
+      <label class="field">
+        <span class="field__label">New email address</span>
+        <input
+          class="field__control"
+          formControlName="email"
+          type="email"
+          placeholder="operator@example.com"
+          autocomplete="email"
+          required
+        />
+      </label>
+
+      <div class="settings-card__messages">
+        <p class="settings-message settings-message--error" *ngIf="emailError() as error">{{ error }}</p>
+        <p class="settings-message settings-message--success" *ngIf="emailSuccess() as success">{{ success }}</p>
+      </div>
+
+      <footer class="settings-card__actions">
+        <button
+          type="submit"
+          class="btn btn--primary"
+          [disabled]="isEmailSaving() || emailForm.invalid || emailForm.pristine"
+        >
+          <span *ngIf="isEmailSaving(); else emailLabel">Saving…</span>
+          <ng-template #emailLabel>Send confirmation</ng-template>
+        </button>
+      </footer>
+    </form>
+
+    <form class="settings-card settings-card--form" [formGroup]="passwordForm" (ngSubmit)="changePassword()">
+      <header class="settings-card__header">
+        <div>
+          <h3 class="settings-card__title">Change password</h3>
+          <p class="settings-card__description">
+            Use a unique, high-entropy passphrase and rotate it regularly per OWASP recommendations.
+          </p>
+        </div>
+      </header>
+
+      <div class="settings-card__grid">
         <label class="field">
           <span class="field__label">Current password</span>
           <input
@@ -40,34 +97,94 @@
             formControlName="currentPassword"
             type="password"
             autocomplete="current-password"
+            required
           />
-          <span class="field__hint">Required when updating your password.</span>
+          <span class="field__hint">We’ll verify this before applying any change.</span>
         </label>
 
         <label class="field">
           <span class="field__label">New password</span>
-          <input class="field__control" formControlName="password" type="password" autocomplete="new-password" />
-          <span class="field__hint">Leave blank to keep the current password.</span>
+          <input
+            class="field__control"
+            formControlName="password"
+            type="password"
+            autocomplete="new-password"
+            required
+          />
+          <span class="field__hint">Minimum eight characters; passphrases are recommended.</span>
         </label>
 
         <label class="field">
           <span class="field__label">Confirm password</span>
-          <input class="field__control" formControlName="confirmPassword" type="password" autocomplete="new-password" />
+          <input
+            class="field__control"
+            formControlName="confirmPassword"
+            type="password"
+            autocomplete="new-password"
+            required
+          />
         </label>
       </div>
 
-      <div class="account-settings__alerts">
-        <p class="account-settings__error" *ngIf="accountError() as error">{{ error }}</p>
-        <p class="account-settings__success" *ngIf="accountSuccess() as success">{{ success }}</p>
+      <div class="settings-card__messages">
+        <p class="settings-message settings-message--error" *ngIf="passwordError() as error">{{ error }}</p>
+        <p class="settings-message settings-message--success" *ngIf="passwordSuccess() as success">{{ success }}</p>
       </div>
 
-      <footer class="account-settings__footer">
-        <button type="submit" class="btn btn--primary" [disabled]="isAccountSaving() || accountForm.pristine">
-          <span *ngIf="isAccountSaving(); else saveLabel">Saving…</span>
-          <ng-template #saveLabel>Save changes</ng-template>
+      <footer class="settings-card__actions">
+        <button
+          type="submit"
+          class="btn btn--primary"
+          [disabled]="isPasswordSaving() || passwordForm.invalid || passwordForm.pristine"
+        >
+          <span *ngIf="isPasswordSaving(); else passwordLabel">Saving…</span>
+          <ng-template #passwordLabel>Update password</ng-template>
         </button>
       </footer>
     </form>
+  </section>
+
+  <section class="settings-section security-settings">
+    <header class="settings-section__header">
+      <div>
+        <h2 class="settings-section__title">Security</h2>
+        <p class="settings-section__subtitle">
+          Strengthen account defenses with multi-factor authentication and session hygiene.
+        </p>
+      </div>
+    </header>
+
+    <article class="settings-card security-card">
+      <header class="settings-card__header">
+        <div>
+          <h3 class="settings-card__title">Two-factor authentication (TOTP)</h3>
+          <p class="settings-card__description">
+            Generate one-time codes with an authenticator app to require a second factor at sign-in.
+          </p>
+        </div>
+      </header>
+      <footer class="settings-card__actions">
+        <button type="button" class="btn btn--ghost" (click)="manageTwoFactor()">
+          Manage 2FA
+        </button>
+      </footer>
+    </article>
+
+    <article class="settings-card security-card">
+      <header class="settings-card__header">
+        <div>
+          <h3 class="settings-card__title">Log out of all sessions</h3>
+          <p class="settings-card__description">
+            Revoke browser sessions across devices to enforce re-authentication everywhere.
+          </p>
+        </div>
+      </header>
+      <footer class="settings-card__actions">
+        <button type="button" class="btn btn--ghost" (click)="logOutAllSessions()">
+          Log out everywhere
+        </button>
+      </footer>
+    </article>
   </section>
 
   <section class="credentials-section">
