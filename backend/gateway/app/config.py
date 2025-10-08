@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, TypeAdapter, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +14,8 @@ _DEFAULT_ENV_FILES: tuple[Path, ...] = (
     _ROOT_DIR / ".env",
     _GATEWAY_DIR / ".env",
 )
+
+_EMAIL_STR_ADAPTER = TypeAdapter(EmailStr)
 
 
 class EngineSettings(BaseModel):
@@ -78,7 +80,8 @@ class AuthSettings(BaseModel):
     def _normalise_admin_email(cls, value: str | EmailStr | None) -> EmailStr | None:
         if value is None:
             return None
-        return EmailStr(str(value).strip().lower())
+        normalised = str(value).strip().lower()
+        return _EMAIL_STR_ADAPTER.validate_python(normalised)
 
 
 class StorageSettings(BaseModel):
@@ -190,3 +193,4 @@ __all__ = [
     "StorageSettings",
     "settings",
 ]
+
