@@ -1046,14 +1046,23 @@ def restart_node(node_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_node(node_id: str):
+def _perform_node_delete(node_id: str) -> Response:
     _ensure_engine_available()
     try:
         svc.delete_node(node_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_node(node_id: str):
+    return _perform_node_delete(node_id)
+
+
+@app.post("/nodes/{node_id}/delete", status_code=status.HTTP_204_NO_CONTENT)
+def delete_node_legacy(node_id: str):
+    return _perform_node_delete(node_id)
 
 
 @app.get("/nodes/{node_id}")

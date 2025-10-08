@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, catchError, throwError } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
 import {
   NodeDetailResponse,
@@ -31,7 +31,20 @@ export class NodesApi {
   }
 
   deleteNode(nodeId: string): Observable<void> {
-    return this.http.delete<void>(buildApiUrl(`/nodes/${nodeId}`));
+    const encodedId = encodeURIComponent(nodeId);
+    const legacyUrl = buildApiUrl(`/nodes/${encodedId}`);
+    const url = buildApiUrl(`/nodes/${encodedId}/delete`);
+    return this.http.post<void>(url, {}).pipe(
+      catchError((error: unknown) => {
+        if (typeof error === 'object' && error !== null && 'status' in error) {
+          const status = (error as { status?: number }).status;
+          if (status === 404 || status === 405) {
+            return this.http.delete<void>(legacyUrl);
+          }
+        }
+        return throwError(() => error);
+      }),
+    );
   }
 
   getNodeDetail(nodeId: string): Observable<NodeDetailResponse> {
