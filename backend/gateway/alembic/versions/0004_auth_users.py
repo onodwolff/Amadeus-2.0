@@ -4,6 +4,22 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import ProgrammingError
+
+
+def _is_postgres(bind) -> bool:
+    return bind.dialect.name == "postgresql"
+
+
+def _ensure_citext_extension(bind) -> None:
+    if not _is_postgres(bind):
+        return
+
+    try:
+        bind.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS citext")
+    except ProgrammingError as exc:  # pragma: no cover - depends on database privs
+        if getattr(getattr(exc, "orig", None), "pgcode", None) != "42501":
+            raise
 
 # revision identifiers, used by Alembic.
 revision = "0004_auth_users"
@@ -11,15 +27,18 @@ down_revision = "0003_strategy_tester"
 branch_labels = None
 depends_on = None
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS citext")
+    bind = op.get_bind()
+    is_postgres = _is_postgres(bind)
+    _ensure_citext_extension(bind)
 
-    op.alter_column(
-        "users",
-        "email",
-        type_=postgresql.CITEXT(),
-        existing_type=sa.String(length=320),
-        existing_nullable=False,
-    )
+    if is_postgres:
+        op.alter_column(
+            "users",
+            "email",
+            type_=postgresql.CITEXT(),
+            existing_type=sa.String(length=320),
+            existing_nullable=False,
+        )
 
     op.add_column(
         "users",
@@ -39,6 +58,7 @@ def upgrade() -> None:
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
     )
 
+    new_email_type = postgresql.CITEXT() if is_postgres else sa.String(length=320)
     op.create_table(
         "auth_sessions",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
@@ -58,7 +78,7 @@ def upgrade() -> None:
         "email_change_requests",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("new_email", postgresql.CITEXT(), nullable=False),
+        sa.Column("new_email", new_email_type, nullable=False),
         sa.Column("token_hash", sa.String(length=128), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
@@ -73,6 +93,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    is_postgres = _is_postgres(bind)
+
     op.drop_index("ix_email_change_requests_user_id", table_name="email_change_requests")
     op.drop_table("email_change_requests")
 
@@ -86,12 +109,14 @@ def downgrade() -> None:
     op.drop_column("users", "email_verified")
     op.drop_column("users", "is_admin")
 
-    op.alter_column(
-        "users",
-        "email",
-        type_=sa.String(length=320),
-        existing_type=postgresql.CITEXT(),
-        existing_nullable=False,
-    )
+    if is_postgres:
+        op.alter_column(
+            "users",
+            "email",
+            type_=sa.String(length=320),
+            existing_type=postgresql.CITEXT(),
+            existing_nullable=False,
+        )
 
-    op.execute("DROP EXTENSION IF EXISTS citext")
+    if is_postgres:
+        bind.exec_driver_sql("DROP EXTENSION IF EXISTS citext")
