@@ -133,9 +133,25 @@ def _persist_node_record(
         "config_source": config_meta.get("source"),
         "config_format": config_meta.get("format"),
     }
+    if strategy:
+        strategy_summary: Dict[str, Any] = {}
+        if strategy.get("id") is not None:
+            strategy_summary["id"] = strategy.get("id")
+        if strategy.get("name") is not None:
+            strategy_summary["name"] = strategy.get("name")
+        parameters = strategy.get("parameters")
+        if isinstance(parameters, list) and parameters:
+            strategy_summary["parameters"] = [deepcopy(param) for param in parameters]
+        summary["strategy"] = strategy_summary
     if handle is not None:
         summary["adapters"] = deepcopy(handle.adapters)
         summary["started_at"] = handle.started_at.isoformat()
+        if handle.metrics:
+            summary["metrics"] = deepcopy(handle.metrics)
+            for metric_key in ("pnl", "equity", "latency_ms", "cpu_percent", "memory_mb"):
+                metric_value = handle.metrics.get(metric_key)
+                if metric_value is not None:
+                    summary[metric_key] = metric_value
     if error:
         summary["error"] = error
 
@@ -937,17 +953,55 @@ async def launch_node(
     if started_at.tzinfo is None:
         started_at = started_at.replace(tzinfo=timezone.utc)
 
-    response_node = {
-        "id": engine_handle.id,
-        "mode": engine_mode.value,
-        "status": DbNodeStatus.RUNNING.value,
-        "detail": detail,
-        "started_at": started_at.isoformat().replace("+00:00", "Z"),
-        "config_version": engine_handle.config_version,
-        "adapters": deepcopy(engine_handle.adapters),
-        "db_id": node_record.id,
-        "summary": node_record.summary,
-    }
+    node_snapshot: Optional[Dict[str, Any]] = None
+    try:
+        node_snapshot = next(
+            (
+                svc.as_dict(node)
+                for node in svc.list_nodes()
+                if node.id == engine_handle.id
+            ),
+            None,
+        )
+    except Exception:
+        node_snapshot = None
+
+    response_node: Dict[str, Any]
+    if node_snapshot is not None:
+        response_node = node_snapshot
+    else:
+        response_node = {
+            "id": engine_handle.id,
+            "mode": engine_mode.value,
+            "status": DbNodeStatus.RUNNING.value,
+            "detail": detail,
+            "created_at": started_at.isoformat().replace("+00:00", "Z"),
+            "updated_at": started_at.isoformat().replace("+00:00", "Z"),
+            "metrics": {},
+            "adapters": deepcopy(engine_handle.adapters),
+        }
+
+    response_node.setdefault("mode", engine_mode.value)
+    response_node.setdefault("status", DbNodeStatus.RUNNING.value)
+    response_node.setdefault("detail", detail)
+    response_node.setdefault(
+        "started_at", started_at.isoformat().replace("+00:00", "Z")
+    )
+    response_node.setdefault("adapters", deepcopy(engine_handle.adapters))
+    response_node["config_version"] = engine_handle.config_version
+    response_node["db_id"] = node_record.id
+
+    summary_from_db = deepcopy(node_record.summary)
+    summary_from_runtime = deepcopy(response_node.get("summary") or {})
+    merged_summary = summary_from_db
+    merged_summary.update(summary_from_runtime)
+    merged_summary.setdefault("external_id", engine_handle.id)
+    merged_summary.setdefault("mode", engine_mode.value)
+    merged_summary.setdefault("status", DbNodeStatus.RUNNING.value)
+    if detail and "detail" not in merged_summary:
+        merged_summary["detail"] = detail
+    response_node["summary"] = merged_summary
+
     return {"node": response_node}
 
 

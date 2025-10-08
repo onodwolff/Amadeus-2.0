@@ -187,6 +187,22 @@
   color: rgba(229, 231, 235, 0.72);
 }
 
+.strategy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.strategy__name {
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.strategy__meta {
+  font-size: 0.8rem;
+  color: rgba(148, 163, 184, 0.85);
+}
+
 .equity {
   min-width: 160px;
 }
