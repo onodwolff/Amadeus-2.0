@@ -59,6 +59,7 @@ def run_migrations(database_url: str) -> None:
     if database_url.startswith("sqlite"):
         _patch_sqlite()
     cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "backend" / "gateway" / "alembic"))
     cfg.set_main_option("sqlalchemy.url", database_url)
     command.upgrade(cfg, "head")
 
