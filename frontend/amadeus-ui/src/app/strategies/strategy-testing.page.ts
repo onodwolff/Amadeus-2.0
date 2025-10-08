@@ -279,6 +279,11 @@ export class StrategyTestingPage implements OnDestroy {
     template.ranges.forEach(range => this.parameters.push(this.createParameterGroup(range)));
   }
 
+  getSelectValue(event: Event): string {
+    const target = event.target as HTMLSelectElement | null;
+    return target?.value ?? '';
+  }
+
   onDatasetChange(datasetId: string): void {
     const dataset = this.datasetOptions.find(entry => entry.id === datasetId);
     if (!dataset) {
@@ -420,7 +425,7 @@ export class StrategyTestingPage implements OnDestroy {
     return payload;
   }
 
-  private startPolling(runId: string): void {
+  startPolling(runId: string): void {
     this.pollSub?.unsubscribe();
     this.pollSub = timer(0, 4000)
       .pipe(
