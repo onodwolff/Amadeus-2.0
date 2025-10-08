@@ -79,7 +79,7 @@
       <div>
         <h2 class="credentials-section__title">API keys</h2>
         <p class="credentials-section__subtitle">
-          Store encrypted exchange credentials and manage adapter access across Nautilus Trader nodes.
+          Store encrypted exchange credentials and manage adapter access across Nautilus Trader bots.
         </p>
       </div>
       <div class="credentials-section__actions">
@@ -223,7 +223,7 @@
       >
         <header class="assignment-card__header">
           <div>
-            <h3 class="assignment-card__title">Node {{ assignment.nodeId }}</h3>
+            <h3 class="assignment-card__title">Bot {{ assignment.nodeId }}</h3>
             <p class="assignment-card__subtitle">
               {{ assignment.strategyName }} • {{ formatMode(assignment.nodeMode) }}
             </p>
@@ -274,7 +274,7 @@
 
     <ng-template #noAssignments>
       <p class="assignments-section__empty">
-        No active nodes require credential assignments. Launch a node to begin mapping API keys.
+        No active bots require credential assignments. Launch a bot to begin mapping API keys.
       </p>
     </ng-template>
   </section>

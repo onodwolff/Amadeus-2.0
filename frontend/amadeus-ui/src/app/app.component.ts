@@ -21,7 +21,7 @@ export class AppComponent {
   protected sidebarOpen = false;
 
   protected navLinks: NavLink[] = [
-    { label: 'Nodes', route: '/nodes', icon: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z' },
+    { label: 'Dashboard', route: '/dashboard', icon: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z' },
     { label: 'Market', route: '/market', icon: 'M4 16.5l5.25-6.75L13 13.5l7-9', stroke: true },
     { label: 'Portfolio', route: '/portfolio', icon: 'M4 6h16M4 10h16M4 14h10M4 18h6', stroke: true },
     { label: 'Orders', route: '/orders', icon: 'M5 5h14v4H5V5zm0 6h14v8H5v-8z' },

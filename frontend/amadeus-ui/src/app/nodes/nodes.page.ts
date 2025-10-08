@@ -7,6 +7,7 @@ import {
   HealthStatus,
   NodeDetailResponse,
   NodeHandle,
+  NodeMetrics,
   NodeLaunchRequest,
   NodeLifecycleEvent,
   NodeLogEntry,
@@ -45,9 +46,10 @@ export class NodesPage implements OnInit, OnDestroy {
   readonly detailError = signal<string | null>(null);
   readonly logsError = signal<string | null>(null);
   readonly logStreamState = signal<WsConnectionState>('connecting');
-  readonly isRestarting = signal(false);
-  readonly isStopping = signal(false);
   readonly isDownloadingLogs = signal(false);
+  readonly stoppingNodeId = signal<string | null>(null);
+  readonly restartingNodeId = signal<string | null>(null);
+  readonly deletingNodeId = signal<string | null>(null);
 
   private readonly nodesApi = inject(NodesApi);
   private readonly systemApi = inject(SystemApi);
@@ -88,6 +90,36 @@ export class NodesPage implements OnInit, OnDestroy {
     }
     return this.nodes().find((node) => node.id === id) ?? null;
   });
+  readonly isStopping = computed(() => this.stoppingNodeId() !== null);
+  readonly isRestarting = computed(() => this.restartingNodeId() !== null);
+  readonly isDeleting = computed(() => this.deletingNodeId() !== null);
+  readonly totalBots = computed(() => this.nodes().length);
+  readonly runningBots = computed(
+    () => this.nodes().filter((node) => node.status === 'running').length,
+  );
+  readonly pausedBots = computed(
+    () => this.nodes().filter((node) => node.status !== 'running').length,
+  );
+  readonly totalPnl = computed(() =>
+    this.nodes().reduce((sum, node) => sum + (this.resolveMetric(node, 'pnl') ?? 0), 0),
+  );
+  readonly totalEquity = computed(() =>
+    this.nodes().reduce((sum, node) => sum + (this.resolveMetric(node, 'equity') ?? 0), 0),
+  );
+  readonly averageLatencyMs = computed(() => {
+    const samples = this.nodes()
+      .map((node) => this.resolveMetric(node, 'latency_ms'))
+      .filter((value): value is number => value !== null);
+    if (!samples.length) {
+      return null;
+    }
+    const total = samples.reduce((acc, value) => acc + value, 0);
+    return total / samples.length;
+  });
+
+  metric(node: NodeHandle, key: keyof NodeMetrics): number | null {
+    return this.resolveMetric(node, key);
+  }
 
   openWizard(dialog: NodeLaunchDialogComponent, nodeType: NodeMode): void {
     dialog.open(nodeType);
@@ -104,8 +136,8 @@ export class NodesPage implements OnInit, OnDestroy {
       },
       error: (err) => {
         console.error(err);
-        const detail = err?.error?.detail || 'Failed to launch node.';
-        const message = typeof detail === 'string' ? detail : 'Failed to launch node.';
+        const detail = err?.error?.detail || 'Failed to launch bot.';
+        const message = typeof detail === 'string' ? detail : 'Failed to launch bot.';
         this.errorText.set(message);
         dialog.setSubmissionError(message);
         this.isLaunching.set(false);
@@ -117,13 +149,16 @@ export class NodesPage implements OnInit, OnDestroy {
   }
 
   stop(node: NodeHandle): void {
+    if (this.stoppingNodeId() === node.id) {
+      return;
+    }
     this.errorText.set(null);
-    this.isStopping.set(true);
+    this.stoppingNodeId.set(node.id);
     this.nodesApi.stopNode(node.id).subscribe({
       error: (err) => {
         console.error(err);
-        this.errorText.set('Failed to stop node.');
-        this.isStopping.set(false);
+        this.errorText.set('Failed to stop bot.');
+        this.stoppingNodeId.set(null);
       },
       next: () => {
         this.fetchNodes();
@@ -132,7 +167,7 @@ export class NodesPage implements OnInit, OnDestroy {
         }
       },
       complete: () => {
-        this.isStopping.set(false);
+        this.stoppingNodeId.set(null);
       },
     });
   }
@@ -167,8 +202,11 @@ export class NodesPage implements OnInit, OnDestroy {
   }
 
   restart(node: NodeHandle): void {
+    if (this.restartingNodeId() === node.id) {
+      return;
+    }
     this.errorText.set(null);
-    this.isRestarting.set(true);
+    this.restartingNodeId.set(node.id);
     this.nodesApi.restartNode(node.id).subscribe({
       next: () => {
         this.fetchNodes();
@@ -178,11 +216,44 @@ export class NodesPage implements OnInit, OnDestroy {
       },
       error: (err) => {
         console.error(err);
-        this.errorText.set('Failed to restart node.');
-        this.isRestarting.set(false);
+        this.errorText.set('Failed to restart bot.');
+        this.restartingNodeId.set(null);
       },
       complete: () => {
-        this.isRestarting.set(false);
+        this.restartingNodeId.set(null);
+      },
+    });
+  }
+
+  delete(node: NodeHandle): void {
+    if (this.deletingNodeId() === node.id) {
+      return;
+    }
+
+    const confirmationMessage =
+      `Delete trading bot ${node.id}? This will permanently remove its metrics, logs, and configuration history.`;
+    const isConfirmed =
+      typeof window === 'undefined' ? true : window.confirm(confirmationMessage);
+    if (!isConfirmed) {
+      return;
+    }
+
+    this.errorText.set(null);
+    this.deletingNodeId.set(node.id);
+    this.nodesApi.deleteNode(node.id).subscribe({
+      next: () => {
+        if (this.selectedNodeId() === node.id) {
+          this.closeDetail();
+        }
+        this.fetchNodes();
+      },
+      error: (err) => {
+        console.error(err);
+        this.errorText.set('Failed to delete bot.');
+        this.deletingNodeId.set(null);
+      },
+      complete: () => {
+        this.deletingNodeId.set(null);
       },
     });
   }
@@ -215,8 +286,57 @@ export class NodesPage implements OnInit, OnDestroy {
     this.stop(node);
   }
 
+  onStartClick(event: MouseEvent, node: NodeHandle): void {
+    event.stopPropagation();
+    this.restart(node);
+  }
+
+  onRestartClick(event: MouseEvent, node: NodeHandle): void {
+    event.stopPropagation();
+    this.restart(node);
+  }
+
+  onDeleteClick(event: MouseEvent, node: NodeHandle): void {
+    event.stopPropagation();
+    this.delete(node);
+  }
+
   ngOnDestroy(): void {
     this.disposeNodeStream();
+  }
+
+  private resolveMetric(node: NodeHandle, key: keyof NodeMetrics): number | null {
+    const summaryRecord = node.summary as Record<string, unknown> | undefined;
+    const nodeRecord = node as unknown as Record<string, unknown>;
+    const sources: unknown[] = [
+      node.metrics?.[key],
+      node.summary?.metrics?.[key],
+      summaryRecord?.[key as string],
+      nodeRecord[key as string],
+    ];
+
+    for (const candidate of sources) {
+      const value = this.parseNumber(candidate);
+      if (value !== null) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private parseNumber(value: unknown): number | null {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return null;
+      }
+      const numeric = Number(trimmed);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+    return null;
   }
 
   private fetchNodes(): void {
@@ -236,7 +356,7 @@ export class NodesPage implements OnInit, OnDestroy {
       error: (err) => {
         console.error(err);
         this.wsState.set('disconnected');
-        this.errorText.set('Unable to load nodes list.');
+        this.errorText.set('Unable to load bots list.');
         this.isLoading.set(false);
       },
     });

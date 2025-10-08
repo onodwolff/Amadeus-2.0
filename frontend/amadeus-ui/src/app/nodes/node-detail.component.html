@@ -1,13 +1,15 @@
 <section class="node-detail" *ngIf="node as current">
   <header class="node-detail__header">
     <div class="node-detail__title">
-      <h2>Node {{ current.id }}</h2>
+      <h2>Bot {{ current.id }}</h2>
       <p class="node-detail__subtitle">{{ current.detail || 'Runtime information available below.' }}</p>
       <div class="node-detail__status-line">
         <span class="node-detail__status" [class.node-detail__status--running]="current.status === 'running'">
-          {{ current.status }}
+          {{ current.status | titlecase }}
         </span>
-        <span class="node-detail__status" *ngIf="current.mode">• {{ current.mode }} mode</span>
+        <span class="node-detail__status" *ngIf="current.mode">
+          • {{ (current.mode || 'unknown') | titlecase }} mode
+        </span>
         <span class="node-detail__status" *ngIf="current.summary?.strategy as strategySummary">
           • {{ strategySummary.name || strategySummary.id }}
         </span>
@@ -20,7 +22,7 @@
         type="button"
         class="btn"
         (click)="restartRequested.emit()"
-        [disabled]="isRestarting || isStopping"
+        [disabled]="isRestarting || isStopping || isDeleting"
       >
         {{ isRestarting ? 'Restarting…' : 'Restart' }}
       </button>
@@ -28,15 +30,23 @@
         type="button"
         class="btn"
         (click)="stopRequested.emit()"
-        [disabled]="isStopping || current.status === 'stopped'"
+        [disabled]="isStopping || current.status === 'stopped' || isDeleting"
       >
         {{ isStopping ? 'Stopping…' : 'Stop' }}
       </button>
       <button
         type="button"
+        class="btn btn--ghost btn--danger"
+        (click)="deleteRequested.emit()"
+        [disabled]="isDeleting || isRestarting || isStopping"
+      >
+        {{ isDeleting ? 'Deleting…' : 'Delete' }}
+      </button>
+      <button
+        type="button"
         class="btn btn--primary"
         (click)="logsDownloadRequested.emit()"
-        [disabled]="isDownloadingLogs"
+        [disabled]="isDownloadingLogs || isDeleting"
       >
         {{ isDownloadingLogs ? 'Preparing…' : 'Download logs' }}
       </button>

@@ -30,6 +30,10 @@ export class NodesApi {
     return this.http.post<NodeResponse>(buildApiUrl(`/nodes/${nodeId}/restart`), {});
   }
 
+  deleteNode(nodeId: string): Observable<void> {
+    return this.http.delete<void>(buildApiUrl(`/nodes/${nodeId}`));
+  }
+
   getNodeDetail(nodeId: string): Observable<NodeDetailResponse> {
     return this.http.get<NodeDetailResponse>(buildApiUrl(`/nodes/${nodeId}`));
   }

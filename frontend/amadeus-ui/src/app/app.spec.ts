@@ -22,18 +22,20 @@ describe('AppComponent', () => {
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
     const navLinks = Array.from(
-      compiled.querySelectorAll('.app-nav__link')
+      compiled.querySelectorAll('.app-sidebar__link')
     ).map((link) => link.textContent?.trim());
 
     expect(compiled.querySelector('.app-brand')?.textContent).toBe('Amadeus');
     expect(navLinks).toEqual([
-      'Nodes',
+      'Dashboard',
       'Market',
       'Portfolio',
       'Orders',
       'Backtest',
+      'Strategy Testing',
+      'Data',
       'Risk',
-      'Keys'
+      'Settings'
     ]);
   });
 });

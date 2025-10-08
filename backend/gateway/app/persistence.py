@@ -83,6 +83,9 @@ class NullStorage:
     def record_config_version(self, payload: Dict[str, Any]) -> None:
         return None
 
+    def delete_node(self, node_id: str) -> None:
+        return None
+
 
 class GatewayStorage(NullStorage):
     """Threaded adapter exposing synchronous helpers backed by ``AsyncDatabase``."""
@@ -356,6 +359,40 @@ class GatewayStorage(NullStorage):
 
     def record_config_version(self, payload: Dict[str, Any]) -> None:  # type: ignore[override]
         self._submit(self._insert_config_version(payload))
+
+    async def _delete_node(self, node_identifier: str) -> None:
+        if not SQLALCHEMY_AVAILABLE or select is None:
+            return
+
+        async with self._database.session() as session:
+            record = None
+            try:
+                numeric_id = int(node_identifier)
+            except (TypeError, ValueError):
+                numeric_id = None
+
+            if numeric_id is not None:
+                record = await session.get(Node, numeric_id)
+
+            if record is None:
+                result = await session.execute(
+                    select(Node).where(Node.summary["external_id"].astext == str(node_identifier))
+                )
+                record = result.scalars().first()
+
+            if record is None:
+                result = await session.execute(
+                    select(Node).where(Node.summary["id"].astext == str(node_identifier))
+                )
+                record = result.scalars().first()
+
+            if record is None:
+                return
+
+            await session.delete(record)
+
+    def delete_node(self, node_id: str) -> None:  # type: ignore[override]
+        self._submit(self._delete_node(node_id))
 
 
 def build_storage(database_url: str) -> NullStorage:
