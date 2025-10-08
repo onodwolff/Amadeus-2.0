@@ -28,6 +28,7 @@ from .nautilus_engine_service import (
 from .persistence import NullStorage, build_storage
 from .state_sync import EngineStateSync
 from .storage import CacheFacade, build_cache
+from .strategy_tester import StrategyTester
 
 
 if TYPE_CHECKING:  # pragma: no cover - typing helpers
@@ -4479,6 +4480,7 @@ class NautilusService:
         self._start_bus_consumers()
         self._engine_orders: Dict[str, Dict[str, Any]] = {}
         self._config_versions: Dict[str, int] = {}
+        self.strategy_tester = StrategyTester(self)
 
     def __getattr__(self, item: str):  # pragma: no cover - delegation helper
         return getattr(self._mock, item)

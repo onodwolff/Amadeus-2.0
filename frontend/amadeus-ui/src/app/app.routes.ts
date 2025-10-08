@@ -17,6 +17,10 @@ export const routes: Routes = [
       },
     ],
   },
+  {
+    path: 'strategy-tests',
+    loadComponent: () => import('./strategies/strategy-testing.page').then(m => m.StrategyTestingPage),
+  },
   { path: 'risk', loadComponent: () => import('./risk/risk.page').then(m => m.RiskPage) },
   {
     path: 'data',

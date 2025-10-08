@@ -57,6 +57,7 @@ from .logging import bind_contextvars, clear_contextvars, get_logger
 from .routes.data import router as data_router
 from .routes.keys import router as keys_router
 from .routes.orders import router as orders_router
+from .routes.strategies import router as strategies_router
 from .routes.users import router as users_router
 from .routes.risk import router as risk_router
 
@@ -623,6 +624,7 @@ app.include_router(data_router, prefix="/api")
 app.include_router(keys_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
+app.include_router(strategies_router, prefix="/api")
 
 
 @app.on_event("startup")

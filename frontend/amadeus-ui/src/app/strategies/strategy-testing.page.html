@@ -1,0 +1,313 @@
+<section class="strategy-testing">
+  <header class="strategy-testing__header">
+    <div>
+      <h1 class="strategy-testing__title">Strategy optimisation</h1>
+      <p class="strategy-testing__subtitle">
+        Sweep parameter ranges across historical datasets, automatically launch backtests and surface the most promising configuration.
+      </p>
+    </div>
+    <button
+      type="submit"
+      class="btn btn--primary"
+      form="strategyTestingForm"
+      [disabled]="isSubmitting() || form.invalid"
+    >
+      {{ isSubmitting() ? 'Launching…' : 'Start optimisation' }}
+    </button>
+  </header>
+
+  <form class="strategy-testing__form" [formGroup]="form" (ngSubmit)="submit()" id="strategyTestingForm">
+    <section class="form-section" aria-labelledby="run-name-block">
+      <div class="section-header">
+        <h2 id="run-name-block">Run metadata</h2>
+        <p>Give the optimisation run a descriptive title.</p>
+      </div>
+      <div class="field">
+        <label for="run-name">Run name</label>
+        <input
+          id="run-name"
+          type="text"
+          formControlName="name"
+          [class.field__control--invalid]="form.controls.name.invalid && form.controls.name.touched"
+        />
+        <p class="field__error" *ngIf="form.controls.name.invalid && form.controls.name.touched">
+          Please provide a run name (max 120 characters).
+        </p>
+      </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="strategy-config" formGroupName="strategy">
+      <div class="section-header">
+        <h2 id="strategy-config">Strategy</h2>
+        <p>Select a template to pre-fill parameter ranges or build your own sweep.</p>
+      </div>
+
+      <div class="option-grid">
+        <label
+          class="option-card"
+          *ngFor="let template of strategyTemplates"
+          [class.option-card--active]="template.id === form.controls.strategy.controls.id.value"
+        >
+          <input
+            type="radio"
+            formControlName="id"
+            [value]="template.id"
+            (change)="onStrategyChange(template.id)"
+          />
+          <span class="option-card__title">{{ template.name }}</span>
+          <span class="option-card__description">{{ template.description }}</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label for="strategy-name">Strategy name</label>
+        <input id="strategy-name" type="text" formControlName="name" />
+      </div>
+
+      <div class="parameter-list" formArrayName="parameters">
+        <div
+          class="parameter-list__item"
+          *ngFor="let parameter of parameterControls(); let i = index; trackBy: trackParameter"
+          [formGroupName]="i"
+        >
+          <div class="field">
+            <label [for]="'param-key-' + i">Parameter key</label>
+            <input
+              [id]="'param-key-' + i"
+              type="text"
+              formControlName="key"
+              [class.field__control--invalid]="parameter.controls.key.invalid && parameter.controls.key.touched"
+            />
+          </div>
+          <div class="field">
+            <label [for]="'param-values-' + i">Values (comma separated)</label>
+            <input
+              [id]="'param-values-' + i"
+              type="text"
+              formControlName="values"
+              [class.field__control--invalid]="parameter.controls.values.invalid && parameter.controls.values.touched"
+            />
+          </div>
+          <button type="button" class="btn btn--ghost" (click)="removeParameter(i)" aria-label="Remove parameter">Remove</button>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn--ghost" (click)="addParameter()">Add parameter</button>
+    </section>
+
+    <section class="form-section" aria-labelledby="dataset-config" formGroupName="dataset">
+      <div class="section-header">
+        <h2 id="dataset-config">Dataset</h2>
+        <p>Pick a historical dataset and adjust the evaluation window.</p>
+      </div>
+
+      <div class="field">
+        <label for="dataset-id">Dataset</label>
+        <select id="dataset-id" formControlName="id" (change)="onDatasetChange($event.target.value)">
+          <option *ngFor="let dataset of datasetOptions" [value]="dataset.id">{{ dataset.name }}</option>
+        </select>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="dataset-start">Start</label>
+          <input id="dataset-start" type="datetime-local" formControlName="start" />
+        </div>
+        <div class="field">
+          <label for="dataset-end">End</label>
+          <input id="dataset-end" type="datetime-local" formControlName="end" />
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="dataset-venue">Venue</label>
+          <input id="dataset-venue" type="text" formControlName="venue" />
+        </div>
+        <div class="field">
+          <label for="dataset-instrument">Instrument</label>
+          <input id="dataset-instrument" type="text" formControlName="instrument" />
+        </div>
+        <div class="field">
+          <label for="dataset-bar">Bar interval</label>
+          <input id="dataset-bar" type="text" formControlName="barInterval" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="dataset-description">Description</label>
+        <textarea id="dataset-description" rows="2" formControlName="description"></textarea>
+      </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="optimisation-config">
+      <div class="section-header">
+        <h2 id="optimisation-config">Optimisation plan</h2>
+        <p>Choose the sampling strategy and optimisation objective.</p>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="plan">Plan</label>
+          <select id="plan" formControlName="plan">
+            <option value="grid">Grid search</option>
+            <option value="random">Random search</option>
+          </select>
+        </div>
+        <div class="field" *ngIf="form.controls.plan.value === 'random'">
+          <label for="sample-count">Sample size</label>
+          <input id="sample-count" type="number" formControlName="sampleCount" min="1" />
+        </div>
+        <div class="field">
+          <label for="max-parallel">Parallel workers</label>
+          <input id="max-parallel" type="number" formControlName="maxParallel" min="1" />
+        </div>
+        <div class="field">
+          <label for="optimisation-metric">Optimisation metric</label>
+          <input id="optimisation-metric" type="text" formControlName="optimisationMetric" />
+        </div>
+        <div class="field">
+          <label for="optimisation-direction">Direction</label>
+          <select id="optimisation-direction" formControlName="optimisationDirection">
+            <option value="maximize">Maximise</option>
+            <option value="minimize">Minimise</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="random-seed">Random seed</label>
+          <input id="random-seed" type="number" formControlName="randomSeed" />
+        </div>
+      </div>
+
+      <div class="grid" formGroupName="engine">
+        <div class="field">
+          <label for="initial-balance">Initial balance</label>
+          <input id="initial-balance" type="number" formControlName="initialBalance" min="0" />
+        </div>
+        <div class="field">
+          <label for="base-currency">Base currency</label>
+          <input id="base-currency" type="text" formControlName="baseCurrency" />
+        </div>
+        <div class="field">
+          <label for="slippage">Slippage (bps)</label>
+          <input id="slippage" type="number" formControlName="slippageBps" min="0" />
+        </div>
+        <div class="field">
+          <label for="commission">Commission (bps)</label>
+          <input id="commission" type="number" formControlName="commissionBps" min="0" />
+        </div>
+      </div>
+    </section>
+
+    <div class="submission-error" *ngIf="submissionError() as error">
+      <span>{{ error }}</span>
+    </div>
+  </form>
+
+  <section class="results" *ngIf="activeRun() as run">
+    <div class="results__header">
+      <h2>Active run</h2>
+      <span class="results__status" [class.results__status--completed]="run.status === 'completed'" [class.results__status--failed]="run.status === 'failed'">
+        {{ run.status | titlecase }}
+      </span>
+    </div>
+    <div class="results__progress">
+      <label>Progress</label>
+      <div class="progress-bar">
+        <div class="progress-bar__value" [style.width.%]="run.progress * 100"></div>
+      </div>
+      <span>{{ run.completedJobs }} / {{ run.totalJobs }} completed</span>
+    </div>
+
+    <div class="results__grid">
+      <div class="results__chart" *ngIf="optimisationSeries().length > 0">
+        <h3>Optimisation trajectory</h3>
+        <app-time-series-chart [series]="optimisationSeries()"></app-time-series-chart>
+      </div>
+      <div class="results__metrics" *ngIf="bestResultMetrics().length > 0">
+        <h3>Best configuration</h3>
+        <app-metrics-table [rows]="bestResultMetrics()"></app-metrics-table>
+        <div class="results__parameters" *ngIf="run.bestResult as best">
+          <h4>Parameters</h4>
+          <ul>
+            <li *ngFor="let entry of (best.parameters | keyvalue)">
+              <span>{{ entry.key }}</span>
+              <strong>{{ entry.value }}</strong>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="results__table" *ngIf="run.results?.length">
+      <h3>All evaluations</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Status</th>
+            <th>Optimisation</th>
+            <th>Parameters</th>
+            <th>Completed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let result of run.results; trackBy: trackResult">
+            <td>{{ result.position }}</td>
+            <td>
+              <span class="chip" [class.chip--success]="result.status === 'completed'" [class.chip--danger]="result.status === 'failed'">
+                {{ result.status | titlecase }}
+              </span>
+            </td>
+            <td>
+              <ng-container *ngIf="result.optimisationScore !== undefined && result.optimisationScore !== null; else unknownScore">
+                {{ result.optimisationScore | number: '1.2-4' }}
+              </ng-container>
+              <ng-template #unknownScore>—</ng-template>
+            </td>
+            <td class="results__parameters">
+              <ul>
+                <li *ngFor="let entry of (result.parameters | keyvalue)">
+                  <span>{{ entry.key }}</span>
+                  <strong>{{ entry.value }}</strong>
+                </li>
+              </ul>
+            </td>
+            <td>{{ result.completedAt ? (result.completedAt | date: 'short') : '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="history" *ngIf="runHistory().length > 0">
+    <h2>Recent runs</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Jobs</th>
+          <th>Best score</th>
+          <th>Last updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let run of runHistory(); trackBy: trackRun">
+          <td>{{ run.name }}</td>
+          <td>{{ run.status | titlecase }}</td>
+          <td>{{ run.completedJobs }} / {{ run.totalJobs }}</td>
+          <td>
+            <ng-container *ngIf="run.bestResult?.optimisationScore !== null && run.bestResult?.optimisationScore !== undefined; else dash">
+              {{ run.bestResult?.optimisationScore | number: '1.2-4' }}
+            </ng-container>
+            <ng-template #dash>—</ng-template>
+          </td>
+          <td>{{ run.updatedAt | date: 'short' }}</td>
+          <td><button type="button" class="btn btn--ghost" (click)="startPolling(run.id)">Inspect</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</section>
