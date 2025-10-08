@@ -175,6 +175,70 @@
   font-size: 0.9rem;
 }
 
+.adapter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.adapter-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.75);
+  transition: border 0.2s ease, transform 0.2s ease;
+}
+
+.adapter-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.adapter-card--disabled {
+  opacity: 0.6;
+}
+
+.adapter-card__toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.adapter-card__toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.adapter-card__hint {
+  font-size: 0.8rem;
+  color: rgba(148, 163, 184, 0.8);
+}
+
+.adapter-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.adapter-card__toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.launch-dialog__empty-hint {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: rgba(148, 163, 184, 0.85);
+}
+
 .field {
   display: flex;
   flex-direction: column;

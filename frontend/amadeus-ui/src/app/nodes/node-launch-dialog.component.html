@@ -64,95 +64,72 @@
         </div>
       </section>
 
-      <section *ngIf="currentStep() === 2" class="launch-dialog__section" aria-label="Market data selection">
+      <section *ngIf="currentStep() === 2" class="launch-dialog__section" aria-label="Exchange selection">
         <div class="field">
-          <span class="field__label">Data sources & adapters</span>
-          <div class="data-source-list" formArrayName="dataSources">
-            <div class="data-source-list__item" *ngFor="let ds of dataSourcesArray().controls; let i = index" [formGroupName]="i">
-              <div class="data-source-list__row">
-                <label>
-                  <span class="field__label">Identifier</span>
-                  <input class="field__control" type="text" formControlName="id" placeholder="adapter id" />
-                </label>
-                <label>
-                  <span class="field__label">Label</span>
-                  <input class="field__control" type="text" formControlName="label" placeholder="Human readable label" />
-                </label>
-              </div>
-              <div class="data-source-list__row">
-                <label>
-                  <span class="field__label">Type</span>
-                  <select class="field__control" formControlName="type">
-                    <option value="historical">Historical</option>
-                    <option value="live">Live</option>
-                    <option value="synthetic">Synthetic</option>
-                  </select>
-                </label>
-                <label>
-                  <span class="field__label">Mode</span>
-                  <select class="field__control" formControlName="mode">
-                    <option value="read">Read</option>
-                    <option value="write">Write</option>
-                    <option value="read-write">Read &amp; write</option>
-                  </select>
-                </label>
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="enabled" />
-                  <span>Enabled</span>
-                </label>
-              </div>
-              <div class="data-source-list__actions">
-                <button type="button" class="btn-icon" (click)="removeDataSource(i)" aria-label="Remove data source">✕</button>
-              </div>
-            </div>
-          </div>
-          <div class="preset-list" *ngIf="dataSourcePresets.length">
-            <span class="preset-list__label">Presets</span>
-            <button
-              type="button"
-              class="btn-chip"
-              *ngFor="let preset of dataSourcePresets"
-              (click)="addDataSource(preset)"
-            >
-              {{ preset.label }}
-            </button>
-          </div>
-          <button type="button" class="btn-secondary" (click)="addDataSource()">Add data source</button>
+          <span class="field__label">Venues & credentials</span>
+          <span class="field__hint"
+            >Enable exchanges that have provisioned API keys to register market data and execution adapters.</span
+          >
         </div>
-      </section>
-
-      <section *ngIf="currentStep() === 3" class="launch-dialog__section" aria-label="Credential references">
-        <div class="field">
-          <span class="field__label">Linked keys</span>
-          <div class="key-list" formArrayName="keyReferences">
-            <div class="key-list__item" *ngFor="let key of keyReferencesArray().controls; let i = index" [formGroupName]="i">
-              <div class="key-list__row">
-                <label>
-                  <span class="field__label">Alias</span>
-                  <input class="field__control" type="text" formControlName="alias" placeholder="Credential alias" />
-                </label>
-                <label>
-                  <span class="field__label">Key ID</span>
-                  <select class="field__control" formControlName="keyId">
+        <p class="launch-dialog__error" *ngIf="keysError() as keyError">{{ keyError }}</p>
+        <p class="launch-dialog__error" *ngIf="exchangesError() as exchangeError">{{ exchangeError }}</p>
+        <div class="adapter-grid">
+          <div
+            class="adapter-card"
+            *ngFor="let option of venueOptions()"
+            [class.adapter-card--disabled]="option.keys.length === 0"
+          >
+            <label class="adapter-card__toggle">
+              <input
+                type="checkbox"
+                [checked]="isVenueSelected(option.code)"
+                [disabled]="option.keys.length === 0"
+                (change)="onVenueToggle(option, $any($event.target).checked)"
+              />
+              <span class="adapter-card__title">{{ option.name }}</span>
+            </label>
+            <p class="adapter-card__hint" *ngIf="option.keys.length === 0">
+              Add API keys for {{ option.name }} in Settings to enable this venue.
+            </p>
+            <ng-container *ngIf="adapterGroup(option.code) as group">
+              <div class="adapter-card__body">
+                <label class="field">
+                  <span class="field__label">API key</span>
+                  <select
+                    class="field__control"
+                    [value]="group.controls.keyId.value"
+                    (change)="onAdapterKeyChanged(option.code, $any($event.target).value)"
+                  >
                     <option value="" disabled>Select key</option>
-                    <option *ngFor="let option of availableKeys" [value]="option.id">{{ option.alias }}</option>
+                    <option *ngFor="let key of option.keys" [value]="key.key_id">
+                      {{ key.label || key.key_id }}
+                    </option>
                   </select>
                 </label>
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="required" />
-                  <span>Required</span>
-                </label>
+                <div class="adapter-card__toggles">
+                  <label class="checkbox">
+                    <input type="checkbox" [formControl]="group.controls.enableData" />
+                    <span>Market data</span>
+                  </label>
+                  <label class="checkbox">
+                    <input
+                      type="checkbox"
+                      [formControl]="group.controls.enableTrading"
+                      [disabled]="form.controls.nodeType.value !== 'live'"
+                    />
+                    <span>Trading</span>
+                  </label>
+                </div>
               </div>
-              <div class="key-list__actions">
-                <button type="button" class="btn-icon" (click)="removeKeyReference(i)" aria-label="Remove key">✕</button>
-              </div>
-            </div>
+            </ng-container>
           </div>
-          <button type="button" class="btn-secondary" (click)="addKeyReference()">Add key reference</button>
+        </div>
+        <div class="launch-dialog__empty-hint" *ngIf="!venueOptions().length && !isKeysLoading() && !isExchangesLoading()">
+          <p>No exchanges available yet. Add API keys in Settings to enable adapters for live trading.</p>
         </div>
       </section>
 
-      <section *ngIf="currentStep() === 4" class="launch-dialog__section" formGroupName="constraints" aria-label="Launch constraints">
+      <section *ngIf="currentStep() === 3" class="launch-dialog__section" formGroupName="constraints" aria-label="Launch constraints">
         <div class="constraints-grid">
           <label class="field">
             <span class="field__label">Max runtime (minutes)</span>
@@ -173,7 +150,7 @@
         </div>
       </section>
 
-      <section *ngIf="currentStep() === 5" class="launch-dialog__section launch-dialog__section--review" aria-label="Review configuration">
+      <section *ngIf="currentStep() === 4" class="launch-dialog__section launch-dialog__section--review" aria-label="Review configuration">
         <dl class="review-grid">
           <div>
             <dt>Node type</dt>
@@ -192,21 +169,18 @@
             </dd>
           </div>
           <div>
-            <dt>Data sources</dt>
+            <dt>Adapters</dt>
             <dd>
-              <ng-container *ngFor="let source of form.value.dataSources">
+              <ng-container *ngFor="let adapter of form.value.adapters">
                 <span class="review-pill">
-                  {{ source.label || source.id }} · {{ source.type }} · {{ source.mode }}
-                  <ng-container *ngIf="!source.enabled">(disabled)</ng-container>
+                  {{ adapter.venue }}
+                  <ng-container *ngIf="adapter.keyId">• {{ adapter.keyId }}</ng-container>
+                  <ng-container *ngIf="adapter.enableData">• data</ng-container>
+                  <ng-container *ngIf="adapter.enableTrading">• trading</ng-container>
                 </span>
               </ng-container>
-            </dd>
-          </div>
-          <div>
-            <dt>Keys</dt>
-            <dd>
-              <ng-container *ngFor="let key of form.value.keyReferences">
-                <span class="review-pill">{{ key.alias }} ({{ key.keyId }})</span>
+              <ng-container *ngIf="!form.value.adapters?.length">
+                <span class="review-pill">No adapters selected</span>
               </ng-container>
             </dd>
           </div>

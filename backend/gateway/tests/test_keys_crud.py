@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from backend.gateway.db.models import ApiKey, User, UserRole
@@ -122,3 +123,52 @@ async def test_api_keys_crud_encryption_roundtrip(db_session, session_factory, m
         assert result.scalar_one_or_none() is None
     finally:
         await verify_session.close()
+
+
+@pytest.mark.asyncio
+async def test_create_api_key_rejects_unknown_venue(db_session, monkeypatch):
+    """Creating an API key should fail if the venue is not recognised."""
+
+    from backend.gateway.app.routes import keys
+
+    user = User(
+        email="bob@example.com",
+        username="bob",
+        name="Bob",
+        pwd_hash="argon2$dummy",
+        role=UserRole.ADMIN,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        keys.svc,
+        "list_available_exchanges",
+        lambda: {"exchanges": [{"code": "BINANCE"}]},
+    )
+
+    payload = keys.KeyCreateRequest(
+        keyId="unknown-venue",
+        venue="kraken",
+        label="Unsupported venue",
+        scopes=["trade:read"],
+        apiKey="ACCESS-KEY",
+        secret=keys.EncryptedKeySecret(
+            algorithm="AES-256-GCM",
+            ciphertext="BEADFACE",
+            iv="VECTOR",
+            salt="SALT",
+            iterations=100000,
+            kdf="PBKDF2",
+            hash="SHA256",
+        ),
+        passphraseHash="passphrase",
+        passphraseHint="hint",
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await keys.create_api_key(payload=payload, session=db_session)
+
+    assert excinfo.value.status_code == 400
+    assert "Unknown venue" in excinfo.value.detail
+

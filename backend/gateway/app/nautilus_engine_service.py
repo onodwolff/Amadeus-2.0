@@ -618,7 +618,7 @@ class NautilusEngineService:
 
         self._node_configs[resolved_node_id] = deepcopy(safe_config)
 
-        plan = self._plan_adapters(mode, safe_config, resolved_node_id)
+        plan = self._plan_adapters(mode, safe_config, resolved_node_id, user_id=user_id)
 
         try:
             from nautilus_trader.trading.node import TradingNode  # type: ignore
@@ -1687,7 +1687,12 @@ class NautilusEngineService:
             )
 
     def _plan_adapters(
-        self, mode: EngineMode, config: Dict[str, Any], node_id: str
+        self,
+        mode: EngineMode,
+        config: Dict[str, Any],
+        node_id: str,
+        *,
+        user_id: Optional[str] = None,
     ) -> List[AdapterPlanEntry]:
         data_sources = config.get("dataSources")
         if not isinstance(data_sources, list):
@@ -1711,15 +1716,15 @@ class NautilusEngineService:
             kind = identifier.lower()
             if kind.startswith("binance"):
                 entry = self._plan_binance_adapter(
-                    mode, source, key_refs, node_id, identifier
+                    mode, source, key_refs, node_id, identifier, user_id=user_id
                 )
             elif kind.startswith("bybit"):
                 entry = self._plan_bybit_adapter(
-                    mode, source, key_refs, node_id, identifier
+                    mode, source, key_refs, node_id, identifier, user_id=user_id
                 )
             elif kind.startswith("ib") or "interactive" in kind:
                 entry = self._plan_ib_adapter(
-                    mode, source, key_refs, node_id, identifier
+                    mode, source, key_refs, node_id, identifier, user_id=user_id
                 )
             else:
                 self._logger.debug(
@@ -1884,6 +1889,8 @@ class NautilusEngineService:
         key_refs: Iterable[Dict[str, Any]],
         node_id: str,
         identifier: str,
+        *,
+        user_id: Optional[str] = None,
     ) -> Optional[AdapterPlanEntry]:
         try:
             from nautilus_trader.adapters.binance import (
@@ -1904,7 +1911,9 @@ class NautilusEngineService:
         options = self._extract_options(source)
         sandbox_flag = self._determine_testnet(options, mode)
 
-        credentials = self._resolve_credentials_for_alias("binance", key_refs)
+        credentials = self._resolve_credentials_for_alias(
+            "binance", key_refs, user_id=user_id
+        )
 
         account_type = self._parse_enum(
             BinanceAccountType, options.get("accountType"), BinanceAccountType.SPOT
@@ -1966,6 +1975,8 @@ class NautilusEngineService:
         key_refs: Iterable[Dict[str, Any]],
         node_id: str,
         identifier: str,
+        *,
+        user_id: Optional[str] = None,
     ) -> Optional[AdapterPlanEntry]:
         try:
             from nautilus_trader.adapters.bybit import (
@@ -1985,7 +1996,9 @@ class NautilusEngineService:
         options = self._extract_options(source)
         sandbox_flag = self._determine_testnet(options, mode)
 
-        credentials = self._resolve_credentials_for_alias("bybit", key_refs)
+        credentials = self._resolve_credentials_for_alias(
+            "bybit", key_refs, user_id=user_id
+        )
 
         product_types = self._parse_product_types(
             options.get("productTypes") or options.get("product_types"),
@@ -2045,6 +2058,8 @@ class NautilusEngineService:
         key_refs: Iterable[Dict[str, Any]],
         node_id: str,
         identifier: str,
+        *,
+        user_id: Optional[str] = None,
     ) -> Optional[AdapterPlanEntry]:
         try:
             from nautilus_trader.adapters.interactive_brokers.common import IB
@@ -2070,7 +2085,9 @@ class NautilusEngineService:
             options.get("paper")
         )
 
-        credentials = self._resolve_credentials_for_alias("interactive", key_refs)
+        credentials = self._resolve_credentials_for_alias(
+            "interactive", key_refs, user_id=user_id
+        )
 
         ibg_host = str(options.get("host") or options.get("ibgHost") or "127.0.0.1")
         port_candidate = options.get("port") or options.get("ibgPort")
@@ -2218,7 +2235,11 @@ class NautilusEngineService:
         return False
 
     def _resolve_credentials_for_alias(
-        self, alias: str, key_refs: Iterable[Dict[str, Any]]
+        self,
+        alias: str,
+        key_refs: Iterable[Dict[str, Any]],
+        *,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         credentials: Dict[str, Any] = {}
         reference = self._find_key_reference(alias, key_refs)
@@ -2229,7 +2250,7 @@ class NautilusEngineService:
         if not key_id:
             return credentials
 
-        payload = self._load_api_key_credentials(key_id)
+        payload = self._load_api_key_credentials(key_id, user_id=user_id)
         if payload:
             credentials.update(payload)
 
@@ -2281,7 +2302,9 @@ class NautilusEngineService:
 
         return credentials
 
-    def _load_api_key_credentials(self, key_id: str) -> Optional[Dict[str, Any]]:
+    def _load_api_key_credentials(
+        self, key_id: str, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         if (
             not key_id
             or self._database_url is None
@@ -2291,6 +2314,13 @@ class NautilusEngineService:
             or ApiKey is None
         ):
             return None
+
+        user_id_int: Optional[int] = None
+        if user_id is not None:
+            try:
+                user_id_int = int(user_id)
+            except (TypeError, ValueError):
+                user_id_int = None
 
         async def _execute() -> Optional[Dict[str, Any]]:
             if self._api_session_factory is None:
@@ -2311,6 +2341,8 @@ class NautilusEngineService:
 
             async with self._api_session_factory() as session:  # type: ignore[misc]
                 stmt = select(ApiKey).where(ApiKey.key_id == key_id)
+                if user_id_int is not None:
+                    stmt = stmt.where(ApiKey.user_id == user_id_int)
                 result = await session.execute(stmt)
                 record = result.scalars().first()
                 if record is None:
