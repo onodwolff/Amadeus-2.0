@@ -13,3 +13,4 @@ export * from './user.model';
 export * from './integration.model';
 export * from './historical-data.model';
 export * from './strategy-test.model';
+export * from './auth.model';
