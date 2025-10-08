@@ -14,7 +14,7 @@
       <div>
         <h2 class="account-settings__title">Account</h2>
         <p class="account-settings__subtitle">
-          Update your display information, login and password used to access the control plane.
+          Update your display name, sign-in email address and password used to access the control plane.
         </p>
       </div>
       <span class="account-settings__timestamp" *ngIf="activeUser() as user">Last updated {{ user.updated_at | date: 'medium' }}</span>
@@ -30,11 +30,7 @@
         <label class="field">
           <span class="field__label">Email</span>
           <input class="field__control" formControlName="email" type="email" placeholder="operator@example.com" required />
-        </label>
-
-        <label class="field">
-          <span class="field__label">Login</span>
-          <input class="field__control" formControlName="username" type="text" placeholder="operator" required />
+          <span class="field__hint">This address is used to sign in.</span>
         </label>
 
         <label class="field">

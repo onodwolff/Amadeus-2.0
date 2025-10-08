@@ -73,7 +73,6 @@ type KeyDeleteFormGroup = FormGroup<{
 type AccountFormGroup = FormGroup<{
   name: FormControl<string>;
   email: FormControl<string>;
-  username: FormControl<string>;
   currentPassword: FormControl<string>;
   password: FormControl<string>;
   confirmPassword: FormControl<string>;
@@ -234,7 +233,6 @@ export class SettingsPage implements OnInit {
           this.accountForm.reset({
             name: account.name ?? '',
             email: account.email ?? '',
-            username: account.username ?? '',
             currentPassword: '',
             password: '',
             confirmPassword: '',
@@ -243,7 +241,6 @@ export class SettingsPage implements OnInit {
           this.accountForm.reset({
             name: '',
             email: '',
-            username: '',
             currentPassword: '',
             password: '',
             confirmPassword: '',
@@ -412,11 +409,6 @@ export class SettingsPage implements OnInit {
       accountPayload.email = email;
     }
 
-    const username = raw.username.trim();
-    if (username && username !== currentUser.username) {
-      accountPayload.username = username;
-    }
-
     const operations: Array<'account' | 'password'> = [];
     if (Object.keys(accountPayload).length > 0) {
       operations.push('account');
@@ -453,7 +445,6 @@ export class SettingsPage implements OnInit {
       this.accountForm.reset({
         name: latestAccount.name ?? '',
         email: latestAccount.email ?? '',
-        username: latestAccount.username ?? '',
         currentPassword: '',
         password: '',
         confirmPassword: '',
@@ -1168,9 +1159,6 @@ export class SettingsPage implements OnInit {
       name: this.fb.nonNullable.control('', { validators: [Validators.required] }),
       email: this.fb.nonNullable.control('', {
         validators: [Validators.required, Validators.email],
-      }),
-      username: this.fb.nonNullable.control('', {
-        validators: [Validators.required, Validators.minLength(3)],
       }),
       currentPassword: this.fb.nonNullable.control(''),
       password: this.fb.nonNullable.control(''),

@@ -2,7 +2,6 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
-  username: string;
   role: string;
   active: boolean;
   created_at: string;
@@ -24,7 +23,6 @@ export interface AccountResponse {
 export interface AccountUpdateRequest {
   name?: string;
   email?: string;
-  username?: string;
 }
 
 export interface PasswordUpdateRequest {
