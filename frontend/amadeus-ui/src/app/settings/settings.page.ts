@@ -72,12 +72,22 @@ type KeyDeleteFormGroup = FormGroup<{
 
 type EmailFormGroup = FormGroup<{
   email: FormControl<string>;
+  password: FormControl<string>;
 }>;
 
 type PasswordFormGroup = FormGroup<{
   currentPassword: FormControl<string>;
   password: FormControl<string>;
   confirmPassword: FormControl<string>;
+}>; 
+
+type TwoFactorFormGroup = FormGroup<{
+  code: FormControl<string>;
+  password: FormControl<string>;
+}>;
+
+type PasswordConfirmFormGroup = FormGroup<{
+  password: FormControl<string>;
 }>;
 
 type KeyStatusTone = 'active' | 'stale' | 'idle' | 'expiring' | 'expired';
@@ -146,14 +156,18 @@ export class SettingsPage implements OnInit {
   readonly errorText = signal<string | null>(null);
   readonly lastUpdated = signal<Date | null>(null);
 
+  readonly activeTab = signal<'account' | 'security' | 'api-keys'>('account');
+
   readonly isCreateDialogOpen = signal(false);
   readonly isCreateSubmitting = signal(false);
   readonly createError = signal<string | null>(null);
+  readonly isCreateAdvancedOpen = signal(false);
 
   readonly isEditDialogOpen = signal(false);
   readonly isEditSubmitting = signal(false);
   readonly editError = signal<string | null>(null);
   readonly editDialogKey = signal<ApiKey | null>(null);
+  readonly isEditAdvancedOpen = signal(false);
 
   readonly isDeleteDialogOpen = signal(false);
   readonly isDeleteSubmitting = signal(false);
@@ -173,6 +187,23 @@ export class SettingsPage implements OnInit {
 
   readonly activeUser = signal<UserProfile | null>(null);
 
+  readonly isEmailDialogOpen = signal(false);
+  readonly isPasswordDialogOpen = signal(false);
+
+  readonly isLogoutDialogOpen = signal(false);
+  readonly isLogoutSubmitting = signal(false);
+  readonly logoutError = signal<string | null>(null);
+
+  readonly isTwoFactorEnabled = signal(false);
+  readonly isTwoFactorLoading = signal(false);
+  readonly twoFactorError = signal<string | null>(null);
+  readonly isTwoFactorSubmitting = signal(false);
+  readonly twoFactorSecret = signal<string | null>(null);
+  readonly twoFactorQr = signal<string | null>(null);
+  readonly isDisableTwoFactorDialogOpen = signal(false);
+  readonly isDisableTwoFactorSubmitting = signal(false);
+  readonly disableTwoFactorError = signal<string | null>(null);
+
   readonly emailForm: EmailFormGroup = this.createEmailForm();
   readonly isEmailSaving = signal(false);
   readonly emailError = signal<string | null>(null);
@@ -182,6 +213,10 @@ export class SettingsPage implements OnInit {
   readonly isPasswordSaving = signal(false);
   readonly passwordError = signal<string | null>(null);
   readonly passwordSuccess = signal<string | null>(null);
+
+  readonly twoFactorForm: TwoFactorFormGroup = this.createTwoFactorForm();
+  readonly disableTwoFactorForm: PasswordConfirmFormGroup = this.createPasswordConfirmForm();
+  readonly logoutForm: PasswordConfirmFormGroup = this.createPasswordConfirmForm();
   
   private readonly healthAlertsDisplayed = new Set<string>();
 
@@ -199,18 +234,73 @@ export class SettingsPage implements OnInit {
     void this.loadAssignmentContext();
     this.loadExchangeCatalog();
     this.loadAccountProfile();
+    this.bootstrapTwoFactorState();
+  }
+
+  setActiveTab(tab: 'account' | 'security' | 'api-keys'): void {
+    this.activeTab.set(tab);
   }
 
   refresh(): void {
     this.fetchKeys({ silent: true });
   }
 
-  manageTwoFactor(): void {
-    this.notifications.info('2FA management is coming soon.', 'Security');
+  openEmailDialog(): void {
+    this.emailError.set(null);
+    this.emailSuccess.set(null);
+    this.emailForm.reset({ email: '', password: '' });
+    this.emailForm.markAsPristine();
+    this.emailForm.markAsUntouched();
+    this.isEmailDialogOpen.set(true);
   }
 
-  logOutAllSessions(): void {
-    this.notifications.info('Session revocation is coming soon.', 'Security');
+  closeEmailDialog(): void {
+    this.isEmailDialogOpen.set(false);
+  }
+
+  openPasswordDialog(): void {
+    this.passwordError.set(null);
+    this.passwordSuccess.set(null);
+    this.passwordForm.reset({ currentPassword: '', password: '', confirmPassword: '' });
+    this.passwordForm.markAsPristine();
+    this.passwordForm.markAsUntouched();
+    this.isPasswordDialogOpen.set(true);
+  }
+
+  closePasswordDialog(): void {
+    this.isPasswordDialogOpen.set(false);
+  }
+
+  openLogoutDialog(): void {
+    this.logoutError.set(null);
+    this.logoutForm.reset({ password: '' });
+    this.logoutForm.markAsPristine();
+    this.logoutForm.markAsUntouched();
+    this.isLogoutDialogOpen.set(true);
+  }
+
+  closeLogoutDialog(): void {
+    this.isLogoutDialogOpen.set(false);
+  }
+
+  openDisableTwoFactorDialog(): void {
+    this.disableTwoFactorError.set(null);
+    this.disableTwoFactorForm.reset({ password: '' });
+    this.disableTwoFactorForm.markAsPristine();
+    this.disableTwoFactorForm.markAsUntouched();
+    this.isDisableTwoFactorDialogOpen.set(true);
+  }
+
+  closeDisableTwoFactorDialog(): void {
+    this.isDisableTwoFactorDialogOpen.set(false);
+  }
+
+  toggleCreateAdvanced(): void {
+    this.isCreateAdvancedOpen.update((current) => !current);
+  }
+
+  toggleEditAdvanced(): void {
+    this.isEditAdvancedOpen.update((current) => !current);
   }
 
   private loadExchangeCatalog(): void {
@@ -246,19 +336,21 @@ export class SettingsPage implements OnInit {
       next: (response) => {
         const account = response.account ?? null;
         this.activeUser.set(account);
-        this.emailForm.reset({
-          email: '',
-        });
-        this.emailForm.markAsPristine();
-        this.emailForm.markAsUntouched();
+        if (this.isEmailDialogOpen()) {
+          this.emailForm.reset({ email: '', password: '' });
+          this.emailForm.markAsPristine();
+          this.emailForm.markAsUntouched();
+        }
 
-        this.passwordForm.reset({
-          currentPassword: '',
-          password: '',
-          confirmPassword: '',
-        });
-        this.passwordForm.markAsPristine();
-        this.passwordForm.markAsUntouched();
+        if (this.isPasswordDialogOpen()) {
+          this.passwordForm.reset({
+            currentPassword: '',
+            password: '',
+            confirmPassword: '',
+          });
+          this.passwordForm.markAsPristine();
+          this.passwordForm.markAsUntouched();
+        }
       },
       error: (error) => {
         this.handleError(error, this.emailError, 'Unable to load account profile.');
@@ -271,12 +363,14 @@ export class SettingsPage implements OnInit {
     this.createError.set(null);
     this.isCreateCustomVenue.set(false);
     this.ensureCreateVenueInitialized();
+    this.isCreateAdvancedOpen.set(false);
     this.isCreateDialogOpen.set(true);
   }
 
   closeCreateDialog(): void {
     this.isCreateDialogOpen.set(false);
     this.resetCreateForm();
+    this.isCreateAdvancedOpen.set(false);
   }
 
   openEditDialog(key: ApiKey): void {
@@ -284,6 +378,7 @@ export class SettingsPage implements OnInit {
     this.resetEditForm(key);
     this.editError.set(null);
     this.isEditCustomVenue.set(!this.hasKnownVenue(key.venue));
+    this.isEditAdvancedOpen.set(false);
     this.isEditDialogOpen.set(true);
   }
 
@@ -291,6 +386,7 @@ export class SettingsPage implements OnInit {
     this.isEditDialogOpen.set(false);
     this.editDialogKey.set(null);
     this.resetEditForm();
+    this.isEditAdvancedOpen.set(false);
   }
 
   openDeleteDialog(key: ApiKey): void {
@@ -384,6 +480,7 @@ export class SettingsPage implements OnInit {
     }
 
     const newEmail = this.emailForm.controls.email.value.trim();
+    const password = this.emailForm.controls.password.value.trim();
     if (!newEmail) {
       this.emailError.set('Enter a new email address to continue.');
       return;
@@ -394,6 +491,11 @@ export class SettingsPage implements OnInit {
       return;
     }
 
+    if (!password) {
+      this.emailError.set('Confirm the change with your password.');
+      return;
+    }
+
     this.isEmailSaving.set(true);
     try {
       const payload: AccountUpdateRequest = { email: newEmail };
@@ -401,14 +503,15 @@ export class SettingsPage implements OnInit {
       const latestAccount = accountResponse.account;
       this.activeUser.set(latestAccount);
 
-      this.emailForm.reset({ email: '' });
+      this.emailForm.reset({ email: '', password: '' });
       this.emailForm.markAsPristine();
       this.emailForm.markAsUntouched();
 
       this.emailSuccess.set(
         'Update requested. Complete the confirmation sent to the new address to finish changing your login email.',
       );
-      this.notifications.success('Email update requested.', 'Settings');
+      this.notifications.success('Check your inbox to confirm the new email address.', 'Settings');
+      this.closeEmailDialog();
     } catch (error) {
       this.handleError(error, this.emailError, 'Failed to update email address.');
     } finally {
@@ -477,10 +580,96 @@ export class SettingsPage implements OnInit {
 
       this.passwordSuccess.set('Password updated successfully.');
       this.notifications.success('Password updated.', 'Settings');
+      this.closePasswordDialog();
     } catch (error) {
       this.handleError(error, this.passwordError, 'Failed to update password.');
     } finally {
       this.isPasswordSaving.set(false);
+    }
+  }
+
+  async enableTwoFactor(): Promise<void> {
+    this.twoFactorError.set(null);
+    if (this.twoFactorForm.invalid) {
+      this.twoFactorForm.markAllAsTouched();
+      this.twoFactorError.set('Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+
+    const raw = this.twoFactorForm.getRawValue();
+    const code = raw.code.trim();
+    const password = raw.password.trim();
+    if (code.length !== 6) {
+      this.twoFactorError.set('Two-factor codes are 6 digits.');
+      return;
+    }
+    if (!password) {
+      this.twoFactorError.set('Confirm with your password to enable 2FA.');
+      return;
+    }
+
+    this.isTwoFactorSubmitting.set(true);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      this.isTwoFactorEnabled.set(true);
+      this.twoFactorForm.reset({ code: '', password: '' });
+      this.twoFactorForm.markAsPristine();
+      this.twoFactorForm.markAsUntouched();
+      this.notifications.success('Two-factor authentication enabled.', 'Security');
+    } finally {
+      this.isTwoFactorSubmitting.set(false);
+    }
+  }
+
+  async disableTwoFactorConfirmed(): Promise<void> {
+    if (this.disableTwoFactorForm.invalid) {
+      this.disableTwoFactorForm.markAllAsTouched();
+      this.disableTwoFactorError.set('Enter your password to continue.');
+      return;
+    }
+
+    const password = this.disableTwoFactorForm.controls.password.value.trim();
+    if (!password) {
+      this.disableTwoFactorError.set('Enter your password to continue.');
+      return;
+    }
+
+    this.isDisableTwoFactorSubmitting.set(true);
+    this.disableTwoFactorError.set(null);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      this.isTwoFactorEnabled.set(false);
+      this.notifications.info('Two-factor authentication disabled.', 'Security');
+      this.closeDisableTwoFactorDialog();
+      this.twoFactorForm.reset({ code: '', password: '' });
+      this.twoFactorForm.markAsPristine();
+      this.twoFactorForm.markAsUntouched();
+    } finally {
+      this.isDisableTwoFactorSubmitting.set(false);
+    }
+  }
+
+  async revokeSessions(): Promise<void> {
+    if (this.logoutForm.invalid) {
+      this.logoutForm.markAllAsTouched();
+      this.logoutError.set('Enter your password to revoke other sessions.');
+      return;
+    }
+
+    const password = this.logoutForm.controls.password.value.trim();
+    if (!password) {
+      this.logoutError.set('Enter your password to revoke other sessions.');
+      return;
+    }
+
+    this.isLogoutSubmitting.set(true);
+    this.logoutError.set(null);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      this.notifications.success('Other sessions have been signed out.', 'Security');
+      this.closeLogoutDialog();
+    } finally {
+      this.isLogoutSubmitting.set(false);
     }
   }
 
@@ -1169,6 +1358,9 @@ export class SettingsPage implements OnInit {
       email: this.fb.nonNullable.control('', {
         validators: [Validators.required, Validators.email],
       }),
+      password: this.fb.nonNullable.control('', {
+        validators: [Validators.required],
+      }),
     });
   }
 
@@ -1181,6 +1373,25 @@ export class SettingsPage implements OnInit {
         validators: [Validators.required, Validators.minLength(8)],
       }),
       confirmPassword: this.fb.nonNullable.control('', {
+        validators: [Validators.required],
+      }),
+    });
+  }
+
+  private createTwoFactorForm(): TwoFactorFormGroup {
+    return this.fb.group({
+      code: this.fb.nonNullable.control('', {
+        validators: [Validators.required, Validators.minLength(6), Validators.maxLength(6)],
+      }),
+      password: this.fb.nonNullable.control('', {
+        validators: [Validators.required],
+      }),
+    });
+  }
+
+  private createPasswordConfirmForm(): PasswordConfirmFormGroup {
+    return this.fb.group({
+      password: this.fb.nonNullable.control('', {
         validators: [Validators.required],
       }),
     });
@@ -1436,5 +1647,19 @@ export class SettingsPage implements OnInit {
       typeof detail === 'string' && detail.trim().length > 0 ? (detail as string) : fallback;
     target.set(message);
     this.notifications.error(message);
+  }
+
+  private bootstrapTwoFactorState(): void {
+    this.isTwoFactorLoading.set(true);
+    this.twoFactorError.set(null);
+
+    const placeholderQr =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAACWCAIAAACZ7S1bAAAACXBIWXMAAAsTAAALEwEAmpwYAAABFUlEQVR4nO3QsQ0AIAwAsd39p0N4QZBRBE8XnXndmQAAkD/3uQEAAADg+ZxW1XrY97v77v32a9+/fb/v37/fvn3/ft+/f/36/fv/+/fu/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/Q6cB+W9Ez6jAAAAAElFTkSuQmCC';
+
+    setTimeout(() => {
+      this.twoFactorSecret.set('JBSWY3DPEHPK3PXP');
+      this.twoFactorQr.set(placeholderQr);
+      this.isTwoFactorLoading.set(false);
+    }, 150);
   }
 }

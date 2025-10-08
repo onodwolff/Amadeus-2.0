@@ -4,393 +4,596 @@
       <p class="settings-page__eyebrow">Workspace</p>
       <h1 class="settings-page__title">Settings</h1>
       <p class="settings-page__subtitle">
-        Manage your Amadeus account preferences and provision encrypted exchange credentials for Nautilus Trader.
+        Manage your Amadeus account preferences, strengthen security, and provision encrypted exchange credentials for
+        Nautilus Trader.
       </p>
     </div>
   </header>
 
-  <section class="settings-section account-settings">
-    <header class="settings-section__header">
-      <div>
-        <h2 class="settings-section__title">Account</h2>
-        <p class="settings-section__subtitle">
-          Manage the email address you use to sign in and rotate your password in line with OWASP guidance.
-        </p>
-      </div>
-      <span class="settings-section__timestamp" *ngIf="activeUser() as user"
-        >Last updated {{ user.updated_at | date: 'medium' }}</span
-      >
-    </header>
+  <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
+    <button
+      type="button"
+      class="settings-tab"
+      id="tab-account"
+      role="tab"
+      [attr.aria-selected]="activeTab() === 'account'"
+      [attr.aria-controls]="'panel-account'"
+      [class.settings-tab--active]="activeTab() === 'account'"
+      (click)="setActiveTab('account')"
+    >
+      Account
+    </button>
+    <button
+      type="button"
+      class="settings-tab"
+      id="tab-security"
+      role="tab"
+      [attr.aria-selected]="activeTab() === 'security'"
+      [attr.aria-controls]="'panel-security'"
+      [class.settings-tab--active]="activeTab() === 'security'"
+      (click)="setActiveTab('security')"
+    >
+      Security
+    </button>
+    <button
+      type="button"
+      class="settings-tab"
+      id="tab-api"
+      role="tab"
+      [attr.aria-selected]="activeTab() === 'api-keys'"
+      [attr.aria-controls]="'panel-api-keys'"
+      [class.settings-tab--active]="activeTab() === 'api-keys'"
+      (click)="setActiveTab('api-keys')"
+    >
+      API keys
+    </button>
+  </nav>
 
+  <section
+    class="settings-panel"
+    id="panel-account"
+    role="tabpanel"
+    aria-labelledby="tab-account"
+    *ngIf="activeTab() === 'account'"
+  >
     <article class="settings-card">
       <header class="settings-card__header">
         <div>
-          <h3 class="settings-card__title">Email</h3>
+          <h2 class="settings-card__title">Email</h2>
           <p class="settings-card__description">
-            Your verified email doubles as your username. Updates require confirmation.
+            Your verified email doubles as your username. Updates require password confirmation and email verification.
           </p>
         </div>
+        <button type="button" class="btn btn--primary" (click)="openEmailDialog()">Change email</button>
       </header>
       <div class="account-email" *ngIf="activeUser() as user; else missingAccount">
         <span class="account-email__value">{{ user.email }}</span>
-        <p class="account-email__hint">We’ll email a verification link before the new address is activated.</p>
+        <p class="account-email__hint">Verified email addresses receive all workspace notifications.</p>
       </div>
       <ng-template #missingAccount>
         <p class="account-email__value">—</p>
       </ng-template>
     </article>
 
-    <form class="settings-card settings-card--form" [formGroup]="emailForm" (ngSubmit)="changeEmail()">
+    <article class="settings-card">
       <header class="settings-card__header">
         <div>
-          <h3 class="settings-card__title">Change email</h3>
+          <h2 class="settings-card__title">Password</h2>
           <p class="settings-card__description">
-            Enter the new address you’d like to use to sign in. We’ll guide you through re-verification.
+            Rotate your password regularly and choose a high-entropy passphrase to protect sensitive infrastructure.
           </p>
         </div>
+        <button type="button" class="btn btn--ghost" (click)="openPasswordDialog()">Change password</button>
       </header>
-
-      <label class="field">
-        <span class="field__label">New email address</span>
-        <input
-          class="field__control"
-          formControlName="email"
-          type="email"
-          placeholder="operator@example.com"
-          autocomplete="email"
-          required
-        />
-      </label>
-
-      <div class="settings-card__messages">
-        <p class="settings-message settings-message--error" *ngIf="emailError() as error">{{ error }}</p>
-        <p class="settings-message settings-message--success" *ngIf="emailSuccess() as success">{{ success }}</p>
-      </div>
-
-      <footer class="settings-card__actions">
-        <button
-          type="submit"
-          class="btn btn--primary"
-          [disabled]="isEmailSaving() || emailForm.invalid || emailForm.pristine"
-        >
-          <span *ngIf="isEmailSaving(); else emailLabel">Saving…</span>
-          <ng-template #emailLabel>Send confirmation</ng-template>
-        </button>
-      </footer>
-    </form>
-
-    <form class="settings-card settings-card--form" [formGroup]="passwordForm" (ngSubmit)="changePassword()">
-      <header class="settings-card__header">
-        <div>
-          <h3 class="settings-card__title">Change password</h3>
-          <p class="settings-card__description">
-            Use a unique, high-entropy passphrase and rotate it regularly per OWASP recommendations.
-          </p>
-        </div>
-      </header>
-
-      <div class="settings-card__grid">
-        <label class="field">
-          <span class="field__label">Current password</span>
-          <input
-            class="field__control"
-            formControlName="currentPassword"
-            type="password"
-            autocomplete="current-password"
-            required
-          />
-          <span class="field__hint">We’ll verify this before applying any change.</span>
-        </label>
-
-        <label class="field">
-          <span class="field__label">New password</span>
-          <input
-            class="field__control"
-            formControlName="password"
-            type="password"
-            autocomplete="new-password"
-            required
-          />
-          <span class="field__hint">Minimum eight characters; passphrases are recommended.</span>
-        </label>
-
-        <label class="field">
-          <span class="field__label">Confirm password</span>
-          <input
-            class="field__control"
-            formControlName="confirmPassword"
-            type="password"
-            autocomplete="new-password"
-            required
-          />
-        </label>
-      </div>
-
-      <div class="settings-card__messages">
-        <p class="settings-message settings-message--error" *ngIf="passwordError() as error">{{ error }}</p>
-        <p class="settings-message settings-message--success" *ngIf="passwordSuccess() as success">{{ success }}</p>
-      </div>
-
-      <footer class="settings-card__actions">
-        <button
-          type="submit"
-          class="btn btn--primary"
-          [disabled]="isPasswordSaving() || passwordForm.invalid || passwordForm.pristine"
-        >
-          <span *ngIf="isPasswordSaving(); else passwordLabel">Saving…</span>
-          <ng-template #passwordLabel>Update password</ng-template>
-        </button>
-      </footer>
-    </form>
+      <p class="settings-card__helper">
+        Password changes immediately revoke all refresh tokens; you’ll be prompted to sign in again across devices.
+      </p>
+    </article>
   </section>
 
-  <section class="settings-section security-settings">
-    <header class="settings-section__header">
-      <div>
-        <h2 class="settings-section__title">Security</h2>
-        <p class="settings-section__subtitle">
-          Strengthen account defenses with multi-factor authentication and session hygiene.
-        </p>
-      </div>
-    </header>
-
+  <section
+    class="settings-panel"
+    id="panel-security"
+    role="tabpanel"
+    aria-labelledby="tab-security"
+    *ngIf="activeTab() === 'security'"
+  >
     <article class="settings-card security-card">
       <header class="settings-card__header">
         <div>
-          <h3 class="settings-card__title">Two-factor authentication (TOTP)</h3>
+          <h2 class="settings-card__title">Two-factor authentication (TOTP)</h2>
           <p class="settings-card__description">
-            Generate one-time codes with an authenticator app to require a second factor at sign-in.
+            Require a one-time code from an authenticator application each time you sign in to the control plane.
           </p>
         </div>
       </header>
-      <footer class="settings-card__actions">
-        <button type="button" class="btn btn--ghost" (click)="manageTwoFactor()">
-          Manage 2FA
-        </button>
-      </footer>
+      <div class="two-factor" *ngIf="!isTwoFactorEnabled(); else twoFactorEnabled">
+        <div class="two-factor__loading" *ngIf="isTwoFactorLoading()" role="status" aria-live="polite">
+          <span class="credentials-spinner" aria-hidden="true"></span>
+          <span>Preparing your authenticator secret…</span>
+        </div>
+        <ng-container *ngIf="!isTwoFactorLoading()">
+          <div class="two-factor__qr" *ngIf="twoFactorQr() as qr">
+            <img [src]="qr" alt="Authenticator QR code" />
+          </div>
+          <p class="two-factor__secret" *ngIf="twoFactorSecret() as secret">
+            Secret: <code>{{ secret }}</code>
+          </p>
+          <form class="two-factor__form" [formGroup]="twoFactorForm" (ngSubmit)="enableTwoFactor()">
+            <label class="field">
+              <span class="field__label">6-digit code</span>
+              <input
+                class="field__control"
+                formControlName="code"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                maxlength="6"
+                required
+              />
+            </label>
+            <label class="field">
+              <span class="field__label">Account password</span>
+              <input
+                class="field__control"
+                formControlName="password"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+            <p class="settings-message settings-message--error" *ngIf="twoFactorError() as error">{{ error }}</p>
+            <button type="submit" class="btn btn--primary" [disabled]="isTwoFactorSubmitting()">
+              <span *ngIf="isTwoFactorSubmitting(); else enableLabel">Enabling…</span>
+              <ng-template #enableLabel>Enable 2FA</ng-template>
+            </button>
+          </form>
+        </ng-container>
+      </div>
+      <ng-template #twoFactorEnabled>
+        <div class="two-factor__enabled">
+          <p>
+            Two-factor authentication is active. Store your recovery codes securely and rotate the secret periodically.
+          </p>
+          <p class="two-factor__secret" *ngIf="twoFactorSecret() as secret">
+            Current secret: <code>{{ secret }}</code>
+          </p>
+          <button type="button" class="btn btn--ghost" (click)="openDisableTwoFactorDialog()">Disable 2FA</button>
+        </div>
+      </ng-template>
     </article>
 
     <article class="settings-card security-card">
       <header class="settings-card__header">
         <div>
-          <h3 class="settings-card__title">Log out of all sessions</h3>
+          <h2 class="settings-card__title">Active sessions</h2>
           <p class="settings-card__description">
-            Revoke browser sessions across devices to enforce re-authentication everywhere.
+            Revoke refresh tokens on other browsers and devices to force re-authentication for every operator.
           </p>
         </div>
       </header>
       <footer class="settings-card__actions">
-        <button type="button" class="btn btn--ghost" (click)="logOutAllSessions()">
-          Log out everywhere
-        </button>
+        <button type="button" class="btn btn--ghost" (click)="openLogoutDialog()">Log out of all sessions</button>
       </footer>
     </article>
   </section>
 
-  <section class="credentials-section">
-    <header class="credentials-section__header">
-      <div>
-        <h2 class="credentials-section__title">API keys</h2>
-        <p class="credentials-section__subtitle">
-          Store encrypted exchange credentials and manage adapter access across Nautilus Trader bots.
-        </p>
+  <section
+    class="settings-panel"
+    id="panel-api-keys"
+    role="tabpanel"
+    aria-labelledby="tab-api"
+    *ngIf="activeTab() === 'api-keys'"
+  >
+    <section class="credentials-section">
+      <header class="credentials-section__header">
+        <div>
+          <h2 class="credentials-section__title">API keys</h2>
+          <p class="credentials-section__subtitle">
+            Store encrypted exchange credentials and manage adapter access across Nautilus Trader bots.
+          </p>
+        </div>
+        <div class="credentials-section__actions">
+          <button
+            type="button"
+            class="btn btn--ghost"
+            (click)="refresh()"
+            [disabled]="isLoading() || isRefreshing()"
+            aria-label="Refresh API keys"
+          >
+            <span *ngIf="isRefreshing(); else refreshLabel">Refreshing…</span>
+            <ng-template #refreshLabel>Refresh</ng-template>
+          </button>
+          <button type="button" class="btn btn--primary" (click)="openCreateDialog()">New key</button>
+        </div>
+      </header>
+
+      <p class="credentials-section__notice" *ngIf="exchangesError() as exchangeError">{{ exchangeError }}</p>
+
+      <section class="credentials-meta" *ngIf="lastUpdated() as updated">
+        <div class="meta-card">
+          <span class="meta-card__label">Last synced</span>
+          <span class="meta-card__value">{{ updated | date: 'medium' }}</span>
+        </div>
+        <div class="meta-card" *ngIf="keys().length">
+          <span class="meta-card__label">Provisioned</span>
+          <span class="meta-card__value">{{ keys().length }}</span>
+        </div>
+      </section>
+
+      <p class="credentials-error" *ngIf="errorText() as error">{{ error }}</p>
+
+      <div class="credentials-loading" *ngIf="isLoading()" role="status" aria-live="polite">
+        <span class="credentials-spinner" aria-hidden="true"></span>
+        <span>Loading API keys…</span>
       </div>
-      <div class="credentials-section__actions">
+
+      <ng-container *ngIf="!isLoading()">
+        <section class="credentials-table" *ngIf="keys().length > 0; else emptyState">
+          <table>
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>Venue</th>
+                <th>Access key</th>
+                <th>Scopes</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let key of keys(); trackBy: trackByKeyId">
+                <td data-label="Label">
+                  <div class="cell-main">{{ key.label || key.key_id }}</div>
+                  <div class="cell-sub"><code>{{ key.key_id }}</code></div>
+                </td>
+                <td data-label="Venue">
+                  <div class="cell-main">{{ key.venue }}</div>
+                </td>
+                <td data-label="Access key">
+                  <div class="cell-main">{{ maskSecret(key) }}</div>
+                  <div class="cell-sub" *ngIf="key.fingerprint">Fingerprint {{ key.fingerprint }}</div>
+                </td>
+                <td data-label="Scopes">
+                  <ul class="scope-list">
+                    <li *ngFor="let scope of key.scopes">{{ scope }}</li>
+                  </ul>
+                </td>
+                <td data-label="Status">
+                  <ng-container *ngIf="keyStatus(key) as status">
+                    <span
+                      class="status"
+                      [class.status--active]="status.tone === 'active'"
+                      [class.status--stale]="status.tone === 'stale'"
+                      [class.status--idle]="status.tone === 'idle'"
+                      [class.status--expiring]="status.tone === 'expiring'"
+                      [class.status--expired]="status.tone === 'expired'"
+                    >
+                      {{ status.label }}
+                    </span>
+                    <div class="cell-sub">{{ status.description }}</div>
+                  </ng-container>
+                </td>
+                <td data-label="Created">
+                  <div class="cell-main">{{ key.created_at | date: 'medium' }}</div>
+                  <div class="cell-sub" *ngIf="key.last_used_at">Last used {{ key.last_used_at | date: 'medium' }}</div>
+                </td>
+                <td data-label="Actions" class="credentials-table__actions">
+                  <button type="button" class="btn btn--ghost" (click)="openEditDialog(key)">Edit</button>
+                  <button type="button" class="btn btn--ghost" (click)="openDeleteDialog(key)">Delete</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </ng-container>
+
+      <ng-template #emptyState>
+        <div class="credentials-empty">
+          <h3>Securely manage your credentials</h3>
+          <p>
+            Provision encrypted API keys for each venue to unlock trading, data collection, and withdrawal workflows
+            across your Nautilus Trader infrastructure.
+          </p>
+          <button type="button" class="btn btn--primary" (click)="openCreateDialog()">Create your first key</button>
+        </div>
+      </ng-template>
+    </section>
+
+    <section class="assignments-section" aria-label="Credential assignments">
+      <header class="assignments-section__header">
+        <div>
+          <h2 class="assignments-section__title">Adapter credential assignments</h2>
+          <p class="assignments-section__subtitle">
+            Link provisioned API keys to node adapters and execution strategies to ensure venue access.
+          </p>
+        </div>
         <button
           type="button"
           class="btn btn--ghost"
-          (click)="refresh()"
-          [disabled]="isLoading() || isRefreshing()"
-          aria-label="Refresh API keys"
+          (click)="reloadAssignments()"
+          [disabled]="isAssignmentsLoading()"
         >
-          <span *ngIf="isRefreshing(); else refreshLabel">Refreshing…</span>
-          <ng-template #refreshLabel>Refresh</ng-template>
+          <span *ngIf="isAssignmentsLoading(); else syncLabel">Syncing…</span>
+          <ng-template #syncLabel>Sync context</ng-template>
         </button>
-        <button type="button" class="btn btn--primary" (click)="openCreateDialog()">New key</button>
+      </header>
+
+      <p class="assignments-section__error" *ngIf="assignmentsError() as assignError">{{ assignError }}</p>
+
+      <div class="assignments-section__loading" *ngIf="isAssignmentsLoading()" role="status" aria-live="polite">
+        Loading node context…
       </div>
-    </header>
 
-    <p class="credentials-section__notice" *ngIf="exchangesError() as exchangeError">{{ exchangeError }}</p>
+      <ng-container *ngIf="assignmentsView().length > 0; else noAssignments">
+        <article
+          class="assignment-card"
+          *ngFor="let assignment of assignmentsView()"
+          [class.assignment-card--warning]="assignment.hasWarnings"
+        >
+          <header class="assignment-card__header">
+            <div>
+              <h3 class="assignment-card__title">Bot {{ assignment.nodeId }}</h3>
+              <p class="assignment-card__subtitle">
+                {{ assignment.strategyName }} • {{ formatMode(assignment.nodeMode) }}
+              </p>
+            </div>
+            <span class="assignment-card__badge" *ngIf="assignment.hasWarnings">Attention</span>
+          </header>
 
-    <section class="credentials-meta" *ngIf="lastUpdated() as updated">
-      <div class="meta-card">
-        <span class="meta-card__label">Last synced</span>
-        <span class="meta-card__value">{{ updated | date: 'medium' }}</span>
-      </div>
-      <div class="meta-card" *ngIf="keys().length">
-        <span class="meta-card__label">Provisioned</span>
-        <span class="meta-card__value">{{ keys().length }}</span>
-      </div>
-    </section>
+          <div class="assignment-card__body" *ngIf="assignment.adapters.length; else noAdapters">
+            <section class="adapter-card" *ngFor="let adapter of assignment.adapters">
+              <header class="adapter-card__header">
+                <div>
+                  <h4 class="adapter-card__title">{{ adapter.label }}</h4>
+                  <p class="adapter-card__meta">
+                    Venue: {{ formatVenue(adapter.venue) }} •
+                    Environment: {{ formatEnvironment(adapter.environment) }} •
+                    Mode: {{ formatMode(adapter.mode) }}
+                  </p>
+                </div>
+              </header>
 
-    <p class="credentials-error" *ngIf="errorText() as error">{{ error }}</p>
-
-    <div class="credentials-loading" *ngIf="isLoading()" role="status" aria-live="polite">
-      <span class="credentials-spinner" aria-hidden="true"></span>
-      <span>Loading API keys…</span>
-    </div>
-
-    <ng-container *ngIf="!isLoading()">
-      <section class="credentials-table" *ngIf="keys().length > 0; else emptyState">
-        <table>
-          <thead>
-            <tr>
-              <th>Label</th>
-              <th>Venue</th>
-              <th>Access key</th>
-              <th>Scopes</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let key of keys(); trackBy: trackByKeyId">
-              <td data-label="Label">
-                <div class="cell-main">{{ key.label || key.key_id }}</div>
-                <div class="cell-sub"><code>{{ key.key_id }}</code></div>
-              </td>
-              <td data-label="Venue">
-                <div class="cell-main">{{ key.venue }}</div>
-              </td>
-              <td data-label="Access key">
-                <div class="cell-main">{{ maskSecret(key) }}</div>
-                <div class="cell-sub" *ngIf="key.fingerprint">Fingerprint {{ key.fingerprint }}</div>
-              </td>
-              <td data-label="Scopes">
-                <ul class="scope-list">
-                  <li *ngFor="let scope of key.scopes">{{ scope }}</li>
-                </ul>
-              </td>
-              <td data-label="Status">
-                <ng-container *ngIf="keyStatus(key) as status">
-                  <span
-                    class="status"
-                    [class.status--active]="status.tone === 'active'"
-                    [class.status--stale]="status.tone === 'stale'"
-                    [class.status--idle]="status.tone === 'idle'"
-                    [class.status--expiring]="status.tone === 'expiring'"
-                    [class.status--expired]="status.tone === 'expired'"
+              <div class="adapter-card__controls">
+                <label class="field">
+                  <span class="field__label">Assigned key</span>
+                  <select
+                    class="field__control field__control--select"
+                    [value]="adapter.assignedKeyId || ''"
+                    (change)="onAssignmentChange(adapter.selectionKey, $any($event.target).value)"
                   >
-                    {{ status.label }}
-                  </span>
-                  <div class="cell-sub">{{ status.description }}</div>
-                </ng-container>
-              </td>
-              <td data-label="Created">
-                <div class="cell-main">{{ key.created_at | date: 'medium' }}</div>
-                <div class="cell-sub" *ngIf="key.last_used_at">Last used {{ key.last_used_at | date: 'medium' }}</div>
-              </td>
-              <td data-label="Actions" class="credentials-table__actions">
-                <button type="button" class="btn btn--ghost" (click)="openEditDialog(key)">Edit</button>
-                <button type="button" class="btn btn--ghost" (click)="openDeleteDialog(key)">Delete</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-    </ng-container>
+                    <option value="">Not assigned</option>
+                    <option *ngFor="let option of adapter.options" [value]="option.key.key_id">
+                      {{ adapterOptionLabel(option) }}
+                    </option>
+                  </select>
+                </label>
+              </div>
 
-    <ng-template #emptyState>
-      <div class="credentials-empty">
-        <h3>Securely manage your credentials</h3>
-        <p>
-          Provision encrypted API keys for each venue to unlock trading, data collection and withdrawal workflows across your
-          Nautilus Trader infrastructure.
+              <ul class="adapter-card__warnings" *ngIf="adapter.warnings.length">
+                <li *ngFor="let warning of adapter.warnings">{{ warning }}</li>
+              </ul>
+            </section>
+          </div>
+
+          <ng-template #noAdapters>
+            <p class="assignment-card__empty">No adapters reported for this node.</p>
+          </ng-template>
+        </article>
+      </ng-container>
+
+      <ng-template #noAssignments>
+        <p class="assignments-section__empty">
+          No active bots require credential assignments. Launch a bot to begin mapping API keys.
         </p>
-        <button type="button" class="btn btn--primary" (click)="openCreateDialog()">Create your first key</button>
-      </div>
-    </ng-template>
+      </ng-template>
+    </section>
   </section>
 
-  <section class="assignments-section" aria-label="Credential assignments">
-    <header class="assignments-section__header">
-      <div>
-        <h2 class="assignments-section__title">Adapter credential assignments</h2>
-        <p class="assignments-section__subtitle">
-          Link provisioned API keys to node adapters and execution strategies to ensure venue access.
-        </p>
-      </div>
-      <button
-        type="button"
-        class="btn btn--ghost"
-        (click)="reloadAssignments()"
-        [disabled]="isAssignmentsLoading()"
-      >
-        <span *ngIf="isAssignmentsLoading(); else syncLabel">Syncing…</span>
-        <ng-template #syncLabel>Sync context</ng-template>
-      </button>
-    </header>
-
-    <p class="assignments-section__error" *ngIf="assignmentsError() as assignError">{{ assignError }}</p>
-
-    <div class="assignments-section__loading" *ngIf="isAssignmentsLoading()" role="status" aria-live="polite">
-      Loading node context…
-    </div>
-
-    <ng-container *ngIf="assignmentsView().length > 0; else noAssignments">
-      <article
-        class="assignment-card"
-        *ngFor="let assignment of assignmentsView()"
-        [class.assignment-card--warning]="assignment.hasWarnings"
-      >
-        <header class="assignment-card__header">
+  <ng-container *ngIf="isEmailDialogOpen()">
+    <div class="dialog" role="presentation">
+      <div class="dialog__backdrop" (click)="closeEmailDialog()" aria-hidden="true"></div>
+      <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="emailDialogTitle">
+        <header class="dialog__header">
           <div>
-            <h3 class="assignment-card__title">Bot {{ assignment.nodeId }}</h3>
-            <p class="assignment-card__subtitle">
-              {{ assignment.strategyName }} • {{ formatMode(assignment.nodeMode) }}
+            <h2 class="dialog__title" id="emailDialogTitle">Change email</h2>
+            <p class="dialog__subtitle">
+              Enter the new email address and confirm with your current password. We’ll send a verification link before
+              activating it.
             </p>
           </div>
-          <span class="assignment-card__badge" *ngIf="assignment.hasWarnings">Attention</span>
+          <button type="button" class="dialog__close" (click)="closeEmailDialog()" aria-label="Close change email">×</button>
         </header>
 
-        <div class="assignment-card__body" *ngIf="assignment.adapters.length; else noAdapters">
-          <section class="adapter-card" *ngFor="let adapter of assignment.adapters">
-            <header class="adapter-card__header">
-              <div>
-                <h4 class="adapter-card__title">{{ adapter.label }}</h4>
-                <p class="adapter-card__meta">
-                  Venue: {{ formatVenue(adapter.venue) }} •
-                  Environment: {{ formatEnvironment(adapter.environment) }} •
-                  Mode: {{ formatMode(adapter.mode) }}
-                </p>
-              </div>
-            </header>
+        <form class="dialog__form" [formGroup]="emailForm" (ngSubmit)="changeEmail()">
+          <div class="dialog__body dialog__body--stacked">
+            <label class="field">
+              <span class="field__label">New email</span>
+              <input
+                class="field__control"
+                formControlName="email"
+                type="email"
+                autocomplete="email"
+                placeholder="operator@example.com"
+                required
+              />
+            </label>
 
-            <div class="adapter-card__controls">
-              <label class="field">
-                <span class="field__label">Assigned key</span>
-                <select
-                  class="field__control field__control--select"
-                  [value]="adapter.assignedKeyId || ''"
-                  (change)="onAssignmentChange(adapter.selectionKey, $any($event.target).value)"
-                >
-                  <option value="">Not assigned</option>
-                  <option *ngFor="let option of adapter.options" [value]="option.key.key_id">
-                    {{ adapterOptionLabel(option) }}
-                  </option>
-                </select>
-              </label>
-            </div>
+            <label class="field">
+              <span class="field__label">Account password</span>
+              <input
+                class="field__control"
+                formControlName="password"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+          </div>
 
-            <ul class="adapter-card__warnings" *ngIf="adapter.warnings.length">
-              <li *ngFor="let warning of adapter.warnings">{{ warning }}</li>
-            </ul>
-          </section>
-        </div>
+          <p class="dialog__error" *ngIf="emailError() as error">{{ error }}</p>
 
-        <ng-template #noAdapters>
-          <p class="assignment-card__empty">No adapters reported for this node.</p>
-        </ng-template>
-      </article>
-    </ng-container>
+          <footer class="dialog__footer">
+            <button type="button" class="btn btn--ghost" (click)="closeEmailDialog()">Cancel</button>
+            <button type="submit" class="btn btn--primary" [disabled]="isEmailSaving()">
+              <span *ngIf="isEmailSaving(); else emailLabel">Saving…</span>
+              <ng-template #emailLabel>Send confirmation</ng-template>
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </ng-container>
 
-    <ng-template #noAssignments>
-      <p class="assignments-section__empty">
-        No active bots require credential assignments. Launch a bot to begin mapping API keys.
-      </p>
-    </ng-template>
-  </section>
+  <ng-container *ngIf="isPasswordDialogOpen()">
+    <div class="dialog" role="presentation">
+      <div class="dialog__backdrop" (click)="closePasswordDialog()" aria-hidden="true"></div>
+      <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="passwordDialogTitle">
+        <header class="dialog__header">
+          <div>
+            <h2 class="dialog__title" id="passwordDialogTitle">Update password</h2>
+            <p class="dialog__subtitle">
+              Choose a strong passphrase with at least eight characters. All existing sessions will be revoked.
+            </p>
+          </div>
+          <button type="button" class="dialog__close" (click)="closePasswordDialog()" aria-label="Close password dialog">×</button>
+        </header>
+
+        <form class="dialog__form" [formGroup]="passwordForm" (ngSubmit)="changePassword()">
+          <div class="dialog__body">
+            <label class="field">
+              <span class="field__label">Current password</span>
+              <input
+                class="field__control"
+                formControlName="currentPassword"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+
+            <label class="field">
+              <span class="field__label">New password</span>
+              <input
+                class="field__control"
+                formControlName="password"
+                type="password"
+                autocomplete="new-password"
+                required
+              />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Confirm password</span>
+              <input
+                class="field__control"
+                formControlName="confirmPassword"
+                type="password"
+                autocomplete="new-password"
+                required
+              />
+            </label>
+          </div>
+
+          <p class="dialog__error" *ngIf="passwordError() as error">{{ error }}</p>
+
+          <footer class="dialog__footer">
+            <button type="button" class="btn btn--ghost" (click)="closePasswordDialog()">Cancel</button>
+            <button type="submit" class="btn btn--primary" [disabled]="isPasswordSaving()">
+              <span *ngIf="isPasswordSaving(); else passwordLabel">Updating…</span>
+              <ng-template #passwordLabel>Update password</ng-template>
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="isDisableTwoFactorDialogOpen()">
+    <div class="dialog" role="presentation">
+      <div class="dialog__backdrop" (click)="closeDisableTwoFactorDialog()" aria-hidden="true"></div>
+      <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="disableTwoFactorTitle">
+        <header class="dialog__header dialog__header--danger">
+          <div>
+            <p class="dialog__eyebrow">Disable protection</p>
+            <h2 class="dialog__title" id="disableTwoFactorTitle">Turn off two-factor authentication?</h2>
+            <p class="dialog__subtitle">
+              Disabling 2FA removes the extra layer of security on sign-in. Confirm with your password to continue.
+            </p>
+          </div>
+          <button type="button" class="dialog__close" (click)="closeDisableTwoFactorDialog()" aria-label="Close disable 2FA">×</button>
+        </header>
+
+        <form class="dialog__form" [formGroup]="disableTwoFactorForm" (ngSubmit)="disableTwoFactorConfirmed()">
+          <div class="dialog__body dialog__body--stacked">
+            <label class="field">
+              <span class="field__label">Account password</span>
+              <input
+                class="field__control"
+                formControlName="password"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+          </div>
+
+          <p class="dialog__error" *ngIf="disableTwoFactorError() as error">{{ error }}</p>
+
+          <footer class="dialog__footer">
+            <button type="button" class="btn btn--ghost" (click)="closeDisableTwoFactorDialog()">Cancel</button>
+            <button type="submit" class="btn btn--primary btn--danger" [disabled]="isDisableTwoFactorSubmitting()">
+              <span *ngIf="isDisableTwoFactorSubmitting(); else disableLabel">Disabling…</span>
+              <ng-template #disableLabel>Disable 2FA</ng-template>
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </ng-container>
+
+  <ng-container *ngIf="isLogoutDialogOpen()">
+    <div class="dialog" role="presentation">
+      <div class="dialog__backdrop" (click)="closeLogoutDialog()" aria-hidden="true"></div>
+      <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="logoutSessionsTitle">
+        <header class="dialog__header">
+          <div>
+            <h2 class="dialog__title" id="logoutSessionsTitle">Log out of all sessions</h2>
+            <p class="dialog__subtitle">
+              This signs out every device except the current browser once your password is confirmed.
+            </p>
+          </div>
+          <button type="button" class="dialog__close" (click)="closeLogoutDialog()" aria-label="Close logout dialog">×</button>
+        </header>
+
+        <form class="dialog__form" [formGroup]="logoutForm" (ngSubmit)="revokeSessions()">
+          <div class="dialog__body dialog__body--stacked">
+            <label class="field">
+              <span class="field__label">Account password</span>
+              <input
+                class="field__control"
+                formControlName="password"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+          </div>
+
+          <p class="dialog__error" *ngIf="logoutError() as error">{{ error }}</p>
+
+          <footer class="dialog__footer">
+            <button type="button" class="btn btn--ghost" (click)="closeLogoutDialog()">Cancel</button>
+            <button type="submit" class="btn btn--primary" [disabled]="isLogoutSubmitting()">
+              <span *ngIf="isLogoutSubmitting(); else revokeLabel">Revoking…</span>
+              <ng-template #revokeLabel>Log out everywhere</ng-template>
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  </ng-container>
 
   <ng-container *ngIf="isCreateDialogOpen()">
     <div class="dialog" role="presentation">
@@ -403,29 +606,23 @@
               Encrypt your secret with a passphrase before sending it to the credential vault.
             </p>
           </div>
-          <button type="button" class="dialog__close" (click)="closeCreateDialog()" aria-label="Close create dialog">
-            ×
-          </button>
+          <button type="button" class="dialog__close" (click)="closeCreateDialog()" aria-label="Close create dialog">×</button>
         </header>
 
         <form class="dialog__form" [formGroup]="createForm" (ngSubmit)="createKey()">
           <div class="dialog__body">
             <label class="field">
-              <span class="field__label">API key name (Название ключа)</span>
+              <span class="field__label">API key name</span>
               <input
                 class="field__control"
                 formControlName="label"
                 type="text"
-                placeholder="Например: Основной торговый ключ"
+                placeholder="Primary trading key"
               />
-              <span class="field__hint">
-                Use this name to recognise the key in Amadeus — the technical identifier will be generated
-                automatically.
-              </span>
             </label>
 
             <label class="field field--full">
-              <span class="field__label">Exchange (Биржа)</span>
+              <span class="field__label">Exchange</span>
               <select
                 class="field__control field__control--select"
                 [value]="isCreateCustomVenue() ? '__custom__' : createForm.controls.venue.value"
@@ -443,21 +640,12 @@
 
             <label class="field field--full" *ngIf="isCreateCustomVenue()">
               <span class="field__label">Custom venue</span>
-              <input
-                class="field__control"
-                type="text"
-                formControlName="venue"
-                placeholder="BINANCE"
-                required
-              />
+              <input class="field__control" type="text" formControlName="venue" placeholder="BINANCE" required />
             </label>
 
             <label class="field field--full">
               <span class="field__label">API key</span>
               <input class="field__control" formControlName="apiKey" type="text" autocomplete="off" required />
-              <span class="field__hint" *ngIf="createForm.controls.apiKey.invalid && createForm.controls.apiKey.touched">
-                API key is required.
-              </span>
             </label>
 
             <label class="field field--full">
@@ -469,38 +657,7 @@
                 autocomplete="off"
                 required
               ></textarea>
-              <span class="field__hint" *ngIf="createForm.controls.apiSecret.invalid && createForm.controls.apiSecret.touched">
-                API secret is required.
-              </span>
             </label>
-
-            <fieldset class="field field--fieldset field--full">
-              <legend class="field__label">Scopes</legend>
-              <div class="scope-options">
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="scopeRead" />
-                  <span>Read</span>
-                </label>
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="scopeTrade" />
-                  <span>Trade</span>
-                </label>
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="scopeWithdraw" />
-                  <span>Withdraw</span>
-                </label>
-              </div>
-              <label class="field field--inline">
-                <span class="field__label">Additional scopes (Дополнительные права)</span>
-                <input
-                  class="field__control"
-                  type="text"
-                  formControlName="scopeCustom"
-                  placeholder="Например: trade:write, withdraw:read"
-                />
-                <span class="field__hint">List any exchange-specific permissions, separated by commas.</span>
-              </label>
-            </fieldset>
 
             <label class="field">
               <span class="field__label">Passphrase</span>
@@ -512,15 +669,51 @@
                 required
                 minlength="8"
               />
-              <span class="field__hint" *ngIf="createForm.controls.passphrase.invalid && createForm.controls.passphrase.touched">
-                Passphrase must be at least 8 characters.
-              </span>
             </label>
 
             <label class="field">
               <span class="field__label">Passphrase hint (optional)</span>
-              <input class="field__control" formControlName="passphraseHint" type="text" placeholder="Production wallet" />
+              <input class="field__control" formControlName="passphraseHint" type="text" />
             </label>
+
+            <button
+              type="button"
+              class="dialog__toggle"
+              (click)="toggleCreateAdvanced()"
+              [attr.aria-expanded]="isCreateAdvancedOpen()"
+            >
+              Advanced scopes
+            </button>
+
+            <div class="dialog__advanced" *ngIf="isCreateAdvancedOpen()">
+              <fieldset class="field field--fieldset field--full">
+                <legend class="field__label">Scopes</legend>
+                <div class="scope-options">
+                  <label class="checkbox">
+                    <input type="checkbox" formControlName="scopeRead" />
+                    <span>Read</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" formControlName="scopeTrade" />
+                    <span>Trade</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" formControlName="scopeWithdraw" />
+                    <span>Withdraw</span>
+                  </label>
+                </div>
+                <label class="field field--inline">
+                  <span class="field__label">Additional scopes</span>
+                  <input
+                    class="field__control"
+                    type="text"
+                    formControlName="scopeCustom"
+                    placeholder="trade:write, withdraw:read"
+                  />
+                  <span class="field__hint">List any exchange-specific permissions, separated by commas.</span>
+                </label>
+              </fieldset>
+            </div>
           </div>
 
           <p class="dialog__error" *ngIf="createError() as error">{{ error }}</p>
@@ -528,8 +721,8 @@
           <footer class="dialog__footer">
             <button type="button" class="btn btn--ghost" (click)="closeCreateDialog()">Cancel</button>
             <button type="submit" class="btn btn--primary" [disabled]="isCreateSubmitting()">
-              <span *ngIf="isCreateSubmitting(); else createLabel">Encrypt &amp; save</span>
-              <ng-template #createLabel>Encrypt &amp; save</ng-template>
+              <span *ngIf="isCreateSubmitting(); else createLabel">Encrypting…</span>
+              <ng-template #createLabel>Encrypt &amp; store</ng-template>
             </button>
           </footer>
         </form>
@@ -543,10 +736,9 @@
       <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="editKeyTitle">
         <header class="dialog__header">
           <div>
-            <p class="dialog__eyebrow">Update credential</p>
-            <h2 class="dialog__title" id="editKeyTitle">{{ key.label || key.key_id }}</h2>
+            <h2 class="dialog__title" id="editKeyTitle">Edit {{ key.label || key.key_id }}</h2>
             <p class="dialog__subtitle">
-              Adjust metadata or rotate secrets by submitting a newly encrypted payload with your passphrase.
+              Update labels, rotate credentials, or adjust encrypted passphrases without exposing secrets.
             </p>
           </div>
           <button type="button" class="dialog__close" (click)="closeEditDialog()" aria-label="Close edit dialog">×</button>
@@ -555,24 +747,19 @@
         <form class="dialog__form" [formGroup]="editForm" (ngSubmit)="updateKey()">
           <div class="dialog__body">
             <label class="field">
-              <span class="field__label">Key identifier</span>
-              <input class="field__control" formControlName="keyId" type="text" readonly />
-            </label>
-
-            <label class="field">
-              <span class="field__label">Label</span>
+              <span class="field__label">API key name</span>
               <input class="field__control" formControlName="label" type="text" />
             </label>
 
             <label class="field field--full">
-              <span class="field__label">Exchange (Биржа)</span>
+              <span class="field__label">Exchange</span>
               <select
                 class="field__control field__control--select"
                 [value]="isEditCustomVenue() ? '__custom__' : editForm.controls.venue.value"
                 (change)="onEditVenueSelected($any($event.target).value)"
                 required
               >
-                <option value="" disabled>Select a venue</option>
+                <option value="" disabled>Select an exchange</option>
                 <option *ngFor="let exchange of venueOptions()" [value]="exchange.code">
                   {{ exchange.name }} ({{ exchange.code }})
                 </option>
@@ -582,36 +769,8 @@
 
             <label class="field field--full" *ngIf="isEditCustomVenue()">
               <span class="field__label">Custom venue</span>
-              <input class="field__control" formControlName="venue" type="text" required />
+              <input class="field__control" type="text" formControlName="venue" placeholder="BINANCE" required />
             </label>
-
-            <fieldset class="field field--fieldset field--full">
-              <legend class="field__label">Scopes</legend>
-              <div class="scope-options">
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="scopeRead" />
-                  <span>Read</span>
-                </label>
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="scopeTrade" />
-                  <span>Trade</span>
-                </label>
-                <label class="checkbox">
-                  <input type="checkbox" formControlName="scopeWithdraw" />
-                  <span>Withdraw</span>
-                </label>
-              </div>
-              <label class="field field--inline">
-                <span class="field__label">Additional scopes (Дополнительные права)</span>
-                <input
-                  class="field__control"
-                  type="text"
-                  formControlName="scopeCustom"
-                  placeholder="Например: trade:write, withdraw:read"
-                />
-                <span class="field__hint">List any exchange-specific permissions, separated by commas.</span>
-              </label>
-            </fieldset>
 
             <label class="checkbox checkbox--inline">
               <input type="checkbox" formControlName="rotateSecret" />
@@ -646,6 +805,39 @@
               <span class="field__label">Passphrase hint (optional)</span>
               <input class="field__control" formControlName="passphraseHint" type="text" />
             </label>
+
+            <button
+              type="button"
+              class="dialog__toggle"
+              (click)="toggleEditAdvanced()"
+              [attr.aria-expanded]="isEditAdvancedOpen()"
+            >
+              Advanced scopes
+            </button>
+
+            <div class="dialog__advanced" *ngIf="isEditAdvancedOpen()">
+              <fieldset class="field field--fieldset field--full">
+                <legend class="field__label">Scopes</legend>
+                <div class="scope-options">
+                  <label class="checkbox">
+                    <input type="checkbox" formControlName="scopeRead" />
+                    <span>Read</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" formControlName="scopeTrade" />
+                    <span>Trade</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" formControlName="scopeWithdraw" />
+                    <span>Withdraw</span>
+                  </label>
+                </div>
+                <label class="field field--inline">
+                  <span class="field__label">Additional scopes</span>
+                  <input class="field__control" type="text" formControlName="scopeCustom" />
+                </label>
+              </fieldset>
+            </div>
           </div>
 
           <p class="dialog__error" *ngIf="editError() as error">{{ error }}</p>
@@ -653,7 +845,7 @@
           <footer class="dialog__footer">
             <button type="button" class="btn btn--ghost" (click)="closeEditDialog()">Cancel</button>
             <button type="submit" class="btn btn--primary" [disabled]="isEditSubmitting()">
-              <span *ngIf="isEditSubmitting(); else updateLabel">Encrypt &amp; update</span>
+              <span *ngIf="isEditSubmitting(); else updateLabel">Encrypting…</span>
               <ng-template #updateLabel>Encrypt &amp; update</ng-template>
             </button>
           </footer>
@@ -671,16 +863,15 @@
             <p class="dialog__eyebrow">Delete credential</p>
             <h2 class="dialog__title" id="deleteKeyTitle">Remove {{ key.label || key.key_id }}?</h2>
             <p class="dialog__subtitle">
-              Deleting a key immediately revokes adapter access. Confirm the identifier and provide your passphrase to continue.
+              Deleting a key immediately revokes adapter access. Confirm the identifier and provide your passphrase to
+              continue.
             </p>
           </div>
-          <button type="button" class="dialog__close" (click)="closeDeleteDialog()" aria-label="Close delete dialog">
-            ×
-          </button>
+          <button type="button" class="dialog__close" (click)="closeDeleteDialog()" aria-label="Close delete dialog">×</button>
         </header>
 
         <form class="dialog__form" [formGroup]="deleteForm" (ngSubmit)="deleteKeyConfirmed()">
-          <div class="dialog__body">
+          <div class="dialog__body dialog__body--stacked">
             <label class="field">
               <span class="field__label">Type <code>{{ key.key_id }}</code> to confirm</span>
               <input class="field__control" formControlName="confirmation" type="text" autocomplete="off" required />
@@ -704,7 +895,7 @@
           <footer class="dialog__footer">
             <button type="button" class="btn btn--ghost" (click)="closeDeleteDialog()">Cancel</button>
             <button type="submit" class="btn btn--primary btn--danger" [disabled]="isDeleteSubmitting()">
-              <span *ngIf="isDeleteSubmitting(); else deleteLabel">Delete permanently</span>
+              <span *ngIf="isDeleteSubmitting(); else deleteLabel">Deleting…</span>
               <ng-template #deleteLabel>Delete permanently</ng-template>
             </button>
           </footer>
