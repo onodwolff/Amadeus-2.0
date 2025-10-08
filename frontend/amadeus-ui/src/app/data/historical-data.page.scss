@@ -119,6 +119,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
 }
 
 .field label {
@@ -126,13 +127,70 @@
   color: rgba(226, 232, 240, 0.9);
 }
 
-.field input {
+.field__control-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.field__control-wrapper input {
+  width: 100%;
   border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.85);
   color: #f8fafc;
-  padding: 10px 12px;
+  padding: 10px 40px 10px 12px;
   font-size: 0.95rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.field__control-wrapper input:focus-visible {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.65);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+
+.field__help-button {
+  position: absolute;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.9);
+  color: rgba(226, 232, 240, 0.95);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.field__help-button:hover,
+.field__help-button:focus-visible {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.55);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.field__help-tooltip {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 8px;
+  max-width: 280px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.95);
+  color: rgba(226, 232, 240, 0.95);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.45);
+  z-index: 2;
 }
 
 .form-status {
