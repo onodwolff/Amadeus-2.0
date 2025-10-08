@@ -87,16 +87,19 @@ export class HistoricalDataPage {
     this.submissionError.set(null);
     this.submissionSuccess.set(null);
 
+    const trimmedLabel = value.label?.trim();
+    const request = {
+      venue: value.venue,
+      instrument: value.instrument,
+      timeframe: value.timeframe,
+      start: this.toIso(value.start),
+      end: this.toIso(value.end),
+      ...(trimmedLabel ? { label: trimmedLabel } : {}),
+      source: 'ui' as const,
+    };
+
     this.dataApi
-      .requestDownload({
-        venue: value.venue,
-        instrument: value.instrument,
-        timeframe: value.timeframe,
-        start: this.toIso(value.start),
-        end: this.toIso(value.end),
-        label: value.label ?? undefined,
-        source: 'ui',
-      })
+      .requestDownload(request)
       .pipe(finalize(() => this.isSubmitting.set(false)))
       .subscribe({
         next: response => {

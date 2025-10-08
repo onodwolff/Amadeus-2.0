@@ -129,10 +129,16 @@ export class PositionSparklineComponent implements AfterViewInit, OnChanges {
     });
     context.stroke();
 
+    const firstPoint = points[0];
+    const lastPoint = points.at(-1);
+    if (!firstPoint || !lastPoint) {
+      return;
+    }
+
     context.beginPath();
-    context.moveTo(points[0].x, padding.top + chartHeight);
+    context.moveTo(firstPoint.x, padding.top + chartHeight);
     points.forEach(point => context.lineTo(point.x, point.y));
-    context.lineTo(points[points.length - 1].x, padding.top + chartHeight);
+    context.lineTo(lastPoint.x, padding.top + chartHeight);
     context.closePath();
     context.fillStyle = fillColor;
     context.fill();
@@ -150,7 +156,10 @@ export class PositionSparklineComponent implements AfterViewInit, OnChanges {
       context.restore();
     }
 
-    const latest = points[points.length - 1];
+    const latest = points.at(-1);
+    if (!latest) {
+      return;
+    }
     context.fillStyle = '#e2e8f0';
     context.beginPath();
     context.arc(latest.x, latest.y, 2.4, 0, Math.PI * 2);

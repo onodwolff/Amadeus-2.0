@@ -159,7 +159,7 @@ export class NodeLaunchDialogComponent {
     },
   ] as const;
 
-  readonly currentStepDescriptor = computed(() => this.steps[this.currentStep()]);
+  readonly currentStepDescriptor = computed(() => this.steps[this.currentStep()] ?? this.steps[0]!);
   readonly selectedStrategyDescription = computed(() => {
     const id = this.form.controls.strategy.controls.id.value;
     const template = this.strategyTemplates.find((item) => item.id === id);
@@ -569,20 +569,25 @@ export class NodeLaunchDialogComponent {
       })),
     };
 
-    const adapters: NodeLaunchAdapterSelection[] = this.adaptersArray().controls.map(
-      (group) => {
-        const alias = group.controls.alias.value?.trim() ?? '';
-        const keyId = group.controls.keyId.value?.trim() ?? '';
-        return {
-          venue: group.controls.venue.value,
-          alias: alias || undefined,
-          keyId: keyId || undefined,
-          enableData: group.controls.enableData.value,
-          enableTrading: group.controls.enableTrading.value,
-          sandbox: group.controls.sandbox.value,
-        };
-      },
-    );
+    const adapters: NodeLaunchAdapterSelection[] = this.adaptersArray().controls.map((group) => {
+      const aliasValue = group.controls.alias.value?.trim();
+      const keyIdValue = group.controls.keyId.value?.trim();
+      const base: NodeLaunchAdapterSelection = {
+        venue: group.controls.venue.value,
+        enableData: group.controls.enableData.value,
+        enableTrading: group.controls.enableTrading.value,
+        sandbox: group.controls.sandbox.value,
+      };
+
+      const alias = aliasValue && aliasValue.length > 0 ? aliasValue : null;
+      const keyId = keyIdValue && keyIdValue.length > 0 ? keyIdValue : null;
+
+      return {
+        ...base,
+        ...(alias ? { alias } : {}),
+        ...(keyId ? { keyId } : {}),
+      };
+    });
 
     const constraints: NodeLaunchConstraints = {
       maxRuntimeMinutes: formValue.constraints.maxRuntimeMinutes ?? null,

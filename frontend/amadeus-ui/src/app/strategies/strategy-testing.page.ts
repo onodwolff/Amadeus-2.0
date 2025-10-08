@@ -147,8 +147,8 @@ export class StrategyTestingPage implements OnDestroy {
     },
   ];
 
-  private readonly initialTemplate = this.strategyTemplates[0];
-  private readonly initialDataset = this.datasetOptions[0];
+  private readonly initialTemplate = this.ensureTemplate(this.strategyTemplates[0]);
+  private readonly initialDataset = this.ensureDataset(this.datasetOptions[0]);
 
   readonly form = this.fb.nonNullable.group({
     name: this.fb.nonNullable.control('Strategy optimisation run', [
@@ -410,19 +410,39 @@ export class StrategyTestingPage implements OnDestroy {
       baseConfig,
       parameterSpace,
       plan,
-      optimisationMetric: formValue.optimisationMetric || undefined,
       optimisationDirection: formValue.optimisationDirection,
-      randomSeed: formValue.randomSeed ?? undefined,
+      ...(formValue.optimisationMetric
+        ? { optimisationMetric: formValue.optimisationMetric }
+        : {}),
+      ...(formValue.randomSeed !== null && formValue.randomSeed !== undefined
+        ? { randomSeed: formValue.randomSeed }
+        : {}),
     };
 
     if (plan === 'random') {
-      payload.sampleCount = formValue.sampleCount ?? undefined;
+      if (formValue.sampleCount != null) {
+        payload.sampleCount = formValue.sampleCount;
+      }
     }
-    if (formValue.maxParallel) {
+    if (formValue.maxParallel != null) {
       payload.maxParallel = formValue.maxParallel;
     }
 
     return payload;
+  }
+
+  private ensureTemplate(template: StrategyTemplate | undefined): StrategyTemplate {
+    if (!template) {
+      throw new Error('Strategy templates are not configured.');
+    }
+    return template;
+  }
+
+  private ensureDataset(dataset: DatasetOption | undefined): DatasetOption {
+    if (!dataset) {
+      throw new Error('Dataset options are not configured.');
+    }
+    return dataset;
   }
 
   startPolling(runId: string): void {

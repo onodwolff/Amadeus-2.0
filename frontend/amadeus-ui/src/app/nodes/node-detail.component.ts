@@ -78,10 +78,8 @@ export class NodeDetailComponent implements AfterViewInit, OnChanges {
   }
 
   get latestPnl(): number | null {
-    if (!this._pnlHistory.length) {
-      return null;
-    }
-    return this._pnlHistory[this._pnlHistory.length - 1];
+    const latest = this._pnlHistory.at(-1);
+    return latest ?? null;
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -224,7 +222,10 @@ export class NodeDetailComponent implements AfterViewInit, OnChanges {
       context.restore();
     }
 
-    const latest = values[values.length - 1];
+    const latest = values.at(-1);
+    if (latest == null) {
+      return;
+    }
     const latestX = padding.left + chartWidth;
     const latestY =
       padding.top + chartHeight - ((latest - min) / range) * chartHeight;

@@ -63,11 +63,21 @@ export class PortfolioMetricsPanelComponent implements OnInit {
     if (rows.length === 0) {
       return;
     }
-    const columns = Object.keys(rows[0].values);
+    const [firstRow] = rows;
+    if (!firstRow) {
+      return;
+    }
+    const columns = Object.keys(firstRow.values);
     if (columns.length === 0) {
       return;
     }
-    const data = rows.map(entry => [entry.timestamp, ...columns.map(column => entry.values[column].toFixed(2))]);
+    const data = rows.map(entry => [
+      entry.timestamp,
+      ...columns.map(column => {
+        const value = entry.values[column] ?? 0;
+        return value.toFixed(2);
+      }),
+    ]);
     this.downloadCsv('portfolio-exposure.csv', ['Timestamp', ...columns], data);
   }
 

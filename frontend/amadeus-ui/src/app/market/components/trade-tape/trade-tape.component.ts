@@ -34,7 +34,8 @@ export class TradeTapeComponent implements OnChanges, OnDestroy {
   readonly pricePrecision = signal(2);
   readonly volumePrecision = signal(4);
   readonly windowOptions = [25, 50, 100];
-  readonly selectedWindow = signal(this.windowOptions[1]);
+  private readonly defaultWindow = this.windowOptions[1] ?? this.windowOptions[0] ?? 25;
+  readonly selectedWindow = signal<number>(this.defaultWindow);
 
   private readonly instrumentId = signal<string | null>(null);
   private readonly dataService = inject(TradeTapeDataService);
@@ -45,8 +46,8 @@ export class TradeTapeComponent implements OnChanges, OnDestroy {
     hour12: false,
   });
 
-  private messagesSubscription?: Subscription;
-  private stateSubscription?: Subscription;
+  private messagesSubscription: Subscription | null = null;
+  private stateSubscription: Subscription | null = null;
 
   constructor() {
     effect(() => {
@@ -110,9 +111,9 @@ export class TradeTapeComponent implements OnChanges, OnDestroy {
 
   private teardown(): void {
     this.messagesSubscription?.unsubscribe();
-    this.messagesSubscription = undefined;
+    this.messagesSubscription = null;
     this.stateSubscription?.unsubscribe();
-    this.stateSubscription = undefined;
+    this.stateSubscription = null;
     this.wsState.set('disconnected');
   }
 
