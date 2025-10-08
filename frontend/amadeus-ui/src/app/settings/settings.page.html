@@ -285,7 +285,6 @@
       <div class="dialog__panel" role="dialog" aria-modal="true" aria-labelledby="createKeyTitle">
         <header class="dialog__header">
           <div>
-            <p class="dialog__eyebrow">Create credential</p>
             <h2 class="dialog__title" id="createKeyTitle">New API key</h2>
             <p class="dialog__subtitle">
               Encrypt your secret with a passphrase before sending it to the credential vault.
@@ -299,9 +298,17 @@
         <form class="dialog__form" [formGroup]="createForm" (ngSubmit)="createKey()">
           <div class="dialog__body">
             <label class="field">
-              <span class="field__label">Key label</span>
-              <input class="field__control" formControlName="label" type="text" placeholder="Primary trading key" />
-              <span class="field__hint">A key identifier will be generated automatically from this label.</span>
+              <span class="field__label">API key name (Название ключа)</span>
+              <input
+                class="field__control"
+                formControlName="label"
+                type="text"
+                placeholder="Например: Основной торговый ключ"
+              />
+              <span class="field__hint">
+                Use this name to recognise the key in Amadeus — the technical identifier will be generated
+                automatically.
+              </span>
             </label>
 
             <label class="field field--full">
@@ -371,13 +378,14 @@
                 </label>
               </div>
               <label class="field field--inline">
-                <span class="field__label">Additional scopes</span>
+                <span class="field__label">Additional scopes (Дополнительные права)</span>
                 <input
                   class="field__control"
                   type="text"
                   formControlName="scopeCustom"
-                  placeholder="Separate custom scopes with commas"
+                  placeholder="Например: trade:write, withdraw:read"
                 />
+                <span class="field__hint">List any exchange-specific permissions, separated by commas.</span>
               </label>
             </fieldset>
 
@@ -481,13 +489,14 @@
                 </label>
               </div>
               <label class="field field--inline">
-                <span class="field__label">Additional scopes</span>
+                <span class="field__label">Additional scopes (Дополнительные права)</span>
                 <input
                   class="field__control"
                   type="text"
                   formControlName="scopeCustom"
-                  placeholder="Separate custom scopes with commas"
+                  placeholder="Например: trade:write, withdraw:read"
                 />
+                <span class="field__hint">List any exchange-specific permissions, separated by commas.</span>
               </label>
             </fieldset>
 
