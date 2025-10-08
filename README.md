@@ -33,6 +33,11 @@ The primary administrator account is seeded automatically during startup using t
 After signing in you can rotate the password from the **Settings → Password** panel.
 Two-factor authentication (TOTP) is disabled by default for every account and can be enabled later from the security settings.
 
+To change the bootstrap credentials, edit the `.env` file (or export the variables in your deployment environment) with
+`AUTH__ADMIN_EMAIL` and `AUTH__ADMIN_PASSWORD`. The gateway reads those values on boot and either creates the administrator
+if no matching user exists yet or updates the stored password for the existing admin. See [docs/bootstrap-admin.md](docs/bootstrap-admin.md)
+for a detailed walkthrough of the process.
+
 When the Nautilus engine is unavailable while `AMAD_USE_MOCK=false`, engine-dependent API calls respond with HTTP 501 and a hint to install `nautilus-trader` or toggle the mock profile.
 
 To reset the database while Compose is running, stop the stack and remove the named volume:
