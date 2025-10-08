@@ -2,23 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import json
 import logging
 import pkgutil
-from copy import deepcopy
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
-from pathlib import Path
-from copy import deepcopy
-import itertools
 import random
 import sys
 import threading
 import uuid
 from copy import deepcopy
-from typing import Any, Coroutine, Dict, List, Optional, Tuple, Literal, Union
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional, Tuple, Union
 
 from .config import settings
+from .data_service import HistoricalDataUnavailable, data_service as historical_data_service
 from .nautilus_engine_service import (
     EngineConfigError,
     EngineEventBus,
@@ -31,6 +30,9 @@ from .state_sync import EngineStateSync
 from .storage import CacheFacade, build_cache
 
 
+if TYPE_CHECKING:  # pragma: no cover - typing helpers
+    from .data_service import DataService
+
 LOGGER = logging.getLogger("gateway.nautilus_service")
 
 
@@ -40,6 +42,21 @@ def _utcnow_iso() -> str:
 
 def _isoformat(dt: datetime) -> str:
     return dt.replace(microsecond=0).isoformat() + "Z"
+
+
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _hash_password(password: str) -> str:
@@ -282,6 +299,7 @@ class MockNautilusService:
         storage: Optional[NullStorage] = None,
         cache: Optional[CacheFacade] = None,
         cache_ttl: int = 60,
+        data: Optional["DataService"] = None,
     ) -> None:
         engine_service = engine or build_engine_service()
         self._engine_service: NautilusEngineService = engine_service
@@ -291,6 +309,7 @@ class MockNautilusService:
         self._storage: NullStorage = storage or NullStorage()
         self._cache: Optional[CacheFacade] = cache or CacheFacade()
         self._cache_ttl = max(0, cache_ttl)
+        self._data_service = data or historical_data_service
 
         self._nodes: Dict[str, NodeState] = {}
         self._config_versions: Dict[str, int] = {}
@@ -2738,11 +2757,24 @@ class MockNautilusService:
                     "label": f"{venue} {symbol} {bar}",
                     "type": "historical",
                     "mode": "read",
+                    "parameters": {},
                 }
             ],
             "keyReferences": [],
             "constraints": {"maxRuntimeMinutes": 480, "autoStopOnError": True},
         }
+        now_utc = datetime.now(timezone.utc)
+        date_range = {
+            "start": (now_utc - timedelta(days=30)).isoformat(),
+            "end": now_utc.isoformat(),
+        }
+        config_data.setdefault("dateRange", date_range)
+        data_params = config_data["dataSources"][0].setdefault("parameters", {})
+        data_params.setdefault("instrument", symbol)
+        data_params.setdefault("venue", venue)
+        data_params.setdefault("barInterval", bar)
+        data_params.setdefault("dateRange", config_data["dateRange"])
+
         engine_mode = EngineMode.BACKTEST
         handle = self._create_node(
             mode="backtest",
@@ -2765,6 +2797,19 @@ class MockNautilusService:
                     for key, value in config_metadata.items()
                     if value is not None
                 }
+            )
+
+        try:
+            dataset_record = self._data_service.ensure_backtest_dataset_sync(config_data)
+            config_data["datasetId"] = dataset_record.dataset_id
+            if dataset_record.path:
+                data_params["path"] = dataset_record.path
+            meta_payload["dataset_record_id"] = dataset_record.id
+        except HistoricalDataUnavailable as exc:
+            return self._mark_node_error(
+                node_id,
+                f"Historical data unavailable: {exc}",
+                source="data",
             )
 
         self._persist_node_config(
@@ -2831,6 +2876,30 @@ class MockNautilusService:
     ) -> NodeHandle:
         engine_mode = EngineMode.BACKTEST
         config_data, config_metadata, detail = self._build_backtest_config(payload)
+
+        data_sources = config_data.get("dataSources") or []
+        data_params = data_sources[0].setdefault("parameters", {}) if data_sources else {}
+        try:
+            dataset_record = self._data_service.ensure_backtest_dataset_sync(config_data)
+            config_data["datasetId"] = dataset_record.dataset_id
+            if dataset_record.path:
+                data_params["path"] = dataset_record.path
+            if isinstance(config_metadata, dict):
+                config_metadata = dict(config_metadata)
+                config_metadata["dataset_record_id"] = dataset_record.id
+        except HistoricalDataUnavailable as exc:
+            # Create a lightweight node for tracking before returning error
+            handle = self._create_node(
+                mode=engine_mode.value,
+                detail=detail or "Historical data unavailable",
+                config=config_data,
+                config_metadata=config_metadata,
+            )
+            return self._mark_node_error(
+                handle.id,
+                f"Historical data unavailable: {exc}",
+                source="data",
+            )
 
         handle = self._create_node(
             mode=engine_mode.value,
@@ -3224,6 +3293,29 @@ class MockNautilusService:
             node_id, "info", "Node received stop signal", source="orchestrator"
         )
         self._persist_node_handle(handle)
+
+        if handle.mode == "backtest":
+            metrics_summary = self._summarise_backtest_metrics(state)
+            dataset_ref = None
+            dataset_identifier = state.config.get("datasetId")
+            if dataset_identifier:
+                try:
+                    dataset_ref = self._data_service.get_dataset_sync(dataset_identifier)
+                except Exception:  # pragma: no cover - best effort
+                    dataset_ref = None
+            if metrics_summary:
+                try:
+                    self._data_service.record_backtest_result_sync(
+                        node_key=node_id,
+                        dataset=dataset_ref,
+                        metrics=metrics_summary,
+                    )
+                except Exception:  # pragma: no cover - defensive logging
+                    LOGGER.debug(
+                        "backtest_result_persist_failed",
+                        extra={"node_id": node_id},
+                        exc_info=True,
+                    )
         return handle
 
     def restart_node(self, node_id: str) -> NodeHandle:
@@ -3511,6 +3603,57 @@ class MockNautilusService:
             "memory_mb": sample.memory_mb,
         }
 
+    def _summarise_backtest_metrics(self, state: NodeState) -> Dict[str, Any]:
+        samples = list(state.metrics)
+        if not samples:
+            return {}
+
+        equities = [sample.equity for sample in samples if sample.equity is not None]
+        pnl_series = [sample.pnl for sample in samples if sample.pnl is not None]
+        timestamps = [sample.timestamp for sample in samples]
+
+        total_return = None
+        max_drawdown = None
+        if equities:
+            start_equity = equities[0]
+            end_equity = equities[-1]
+            if start_equity and start_equity != 0:
+                total_return = (end_equity - start_equity) / start_equity
+
+            peak = equities[0]
+            drawdown = 0.0
+            for equity in equities:
+                if equity > peak:
+                    peak = equity
+                drawdown = min(drawdown, equity - peak)
+            if peak:
+                max_drawdown = drawdown / peak
+
+        returns: list[float] = []
+        equity_pairs = [sample.equity for sample in samples if sample.equity is not None]
+        for previous, current in zip(equity_pairs, equity_pairs[1:]):
+            if previous and previous != 0:
+                returns.append((current - previous) / previous)
+
+        sharpe_ratio = None
+        if returns:
+            average = sum(returns) / len(returns)
+            variance = sum((value - average) ** 2 for value in returns) / len(returns)
+            std_dev = variance ** 0.5
+            if std_dev > 0:
+                sharpe_ratio = (average / std_dev) * (len(returns) ** 0.5)
+
+        return {
+            "started_at": _parse_iso(state.handle.created_at),
+            "completed_at": _parse_iso(state.handle.updated_at),
+            "total_return": total_return,
+            "sharpe_ratio": sharpe_ratio,
+            "max_drawdown": max_drawdown,
+            "timestamps": timestamps,
+            "pnl": pnl_series,
+            "equity": equities,
+        }
+
     def _maybe_append_runtime_activity(self, node_id: str) -> None:
         message = random.choice(
             [
@@ -3589,6 +3732,7 @@ class NautilusService:
             storage=self._storage,
             cache=self._cache,
             cache_ttl=settings.data.cache_ttl_seconds,
+            data=historical_data_service,
         )
         self._bus_tasks: List[asyncio.Task] = []
         self._start_bus_consumers()

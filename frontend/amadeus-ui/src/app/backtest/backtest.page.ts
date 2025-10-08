@@ -13,10 +13,11 @@ import {
 } from '@angular/forms';
 import { Router } from '@angular/router';
 import { finalize } from 'rxjs';
-import { BacktestsApi } from '../api/clients';
+import { BacktestsApi, DataApi } from '../api/clients';
 import {
   BacktestRunCreateRequest,
   BacktestStrategyParameterDto,
+  HistoricalDatasetDto,
 } from '../api/models';
 
 type StrategyParameterGroup = FormGroup<{ key: FormControl<string>; value: FormControl<string> }>;
@@ -26,7 +27,11 @@ type DatasetOption = {
   name: string;
   venue: string;
   barInterval: string;
+  instrument: string;
   description: string;
+  start: string;
+  end: string;
+  status?: string;
 };
 
 type StrategyTemplate = {
@@ -69,6 +74,7 @@ export class BacktestPage {
 
   private readonly fb = inject(FormBuilder);
   private readonly api = inject(BacktestsApi);
+  private readonly dataApi = inject(DataApi);
   private readonly router = inject(Router);
 
   readonly isSubmitting = signal(false);
@@ -107,35 +113,51 @@ export class BacktestPage {
     },
   ];
 
-  readonly datasetOptions: DatasetOption[] = [
+  private readonly fallbackDatasets: DatasetOption[] = [
     {
       id: 'binance-btcusdt-1m-2023',
       name: 'Binance BTC/USDT (1m, 2023)',
       venue: 'BINANCE',
       barInterval: '1m',
+      instrument: 'BTCUSDT',
       description: 'Full year of 1 minute klines for BTC/USDT captured from Binance spot.',
+      start: new Date('2023-01-01T00:00:00Z').toISOString(),
+      end: new Date('2023-12-31T23:59:00Z').toISOString(),
+      status: 'ready',
     },
     {
       id: 'binance-ethusdt-5m-2022',
       name: 'Binance ETH/USDT (5m, 2022)',
       venue: 'BINANCE',
       barInterval: '5m',
+      instrument: 'ETHUSDT',
       description: 'ETH/USDT historical candles (5 minute) covering 2022.',
+      start: new Date('2022-01-01T00:00:00Z').toISOString(),
+      end: new Date('2022-12-31T23:59:00Z').toISOString(),
+      status: 'ready',
     },
     {
       id: 'okx-btcusdt-1m-q1-2024',
       name: 'OKX BTC/USDT (1m, Q1 2024)',
       venue: 'OKX',
       barInterval: '1m',
+      instrument: 'BTCUSDT',
       description: 'Quarter one 2024 sample with depth enriched bars from OKX.',
+      start: new Date('2024-01-01T00:00:00Z').toISOString(),
+      end: new Date('2024-03-31T23:59:00Z').toISOString(),
+      status: 'ready',
     },
   ];
 
-  private readonly initialDataset = this.datasetOptions[0];
+  private readonly initialDataset = this.fallbackDatasets[0];
   private readonly initialStrategy = this.strategyTemplates[0];
 
-  private readonly defaultStart = this.formatDateTimeLocal(this.shiftDate(new Date(), -30));
-  private readonly defaultEnd = this.formatDateTimeLocal(new Date());
+  readonly datasets = signal<DatasetOption[]>([]);
+  readonly datasetLoadError = signal<string | null>(null);
+  readonly isLoadingDatasets = signal(false);
+
+  private readonly defaultStart = this.formatDateTimeLocal(new Date(this.initialDataset.start));
+  private readonly defaultEnd = this.formatDateTimeLocal(new Date(this.initialDataset.end));
 
   readonly form = this.fb.nonNullable.group({
     name: this.fb.nonNullable.control<string>('New backtest run', {
@@ -153,7 +175,11 @@ export class BacktestPage {
       name: this.fb.nonNullable.control<string>(this.initialDataset.name, Validators.required),
       venue: this.fb.nonNullable.control<string>(this.initialDataset.venue, Validators.required),
       barInterval: this.fb.nonNullable.control<string>(this.initialDataset.barInterval, Validators.required),
-      description: this.fb.nonNullable.control<string>(this.initialDataset.description),
+      instrument: this.fb.nonNullable.control<string>(this.initialDataset.instrument, Validators.required),
+      start: this.fb.nonNullable.control<string>(this.initialDataset.start, Validators.required),
+      end: this.fb.nonNullable.control<string>(this.initialDataset.end, Validators.required),
+      status: this.fb.control<string | null>(this.initialDataset.status ?? null),
+      description: this.fb.control<string>(this.initialDataset.description),
     }),
     dateRange: this.fb.nonNullable.group(
       {
@@ -180,6 +206,11 @@ export class BacktestPage {
     }),
   });
 
+  constructor() {
+    this.applyDatasetOptions(this.fallbackDatasets);
+    this.refreshDatasets();
+  }
+
   get strategyParameters(): FormArray<StrategyParameterGroup> {
     return this.form.controls.strategy.controls.parameters;
   }
@@ -190,6 +221,28 @@ export class BacktestPage {
 
   removeStrategyParameter(index: number): void {
     this.strategyParameters.removeAt(index);
+  }
+
+  refreshDatasets(): void {
+    this.isLoadingDatasets.set(true);
+    this.datasetLoadError.set(null);
+    this.dataApi
+      .listDatasets()
+      .pipe(finalize(() => this.isLoadingDatasets.set(false)))
+      .subscribe({
+        next: response => {
+          const remote = (response.datasets ?? []).map(item => this.mapDataset(item));
+          if (remote.length) {
+            this.applyDatasetOptions(remote);
+          } else {
+            this.applyDatasetOptions(this.fallbackDatasets);
+          }
+        },
+        error: () => {
+          this.datasetLoadError.set('Unable to load cached datasets. Showing defaults.');
+          this.applyDatasetOptions(this.fallbackDatasets);
+        },
+      });
   }
 
   onStrategyTemplateSelect(templateId: string): void {
@@ -209,18 +262,12 @@ export class BacktestPage {
   }
 
   onDatasetSelect(datasetId: string): void {
-    const option = this.datasetOptions.find(item => item.id === datasetId);
+    const option = this.datasets().find(item => item.id === datasetId);
     if (!option) {
       return;
     }
 
-    this.form.controls.dataset.patchValue({
-      id: option.id,
-      name: option.name,
-      venue: option.venue,
-      barInterval: option.barInterval,
-      description: option.description,
-    });
+    this.setDataset(option);
   }
 
   submit(): void {
@@ -256,6 +303,52 @@ export class BacktestPage {
     return index;
   }
 
+  trackByDatasetId(_index: number, option: DatasetOption): string {
+    return option.id;
+  }
+
+  private applyDatasetOptions(options: DatasetOption[]): void {
+    const currentId = this.form.controls.dataset.controls.id.value;
+    this.datasets.set(options);
+    const nextOption = options.find(item => item.id === currentId) ?? options[0];
+    if (nextOption) {
+      this.setDataset(nextOption);
+    }
+  }
+
+  private setDataset(option: DatasetOption): void {
+    this.form.controls.dataset.patchValue({
+      id: option.id,
+      name: option.name,
+      venue: option.venue,
+      barInterval: option.barInterval,
+      instrument: option.instrument,
+      start: this.normalizeDateValue(option.start),
+      end: this.normalizeDateValue(option.end),
+      status: option.status ?? null,
+      description: option.description,
+    });
+
+    this.form.controls.dateRange.patchValue({
+      start: this.formatDateTimeLocal(new Date(option.start)),
+      end: this.formatDateTimeLocal(new Date(option.end)),
+    });
+  }
+
+  private mapDataset(dataset: HistoricalDatasetDto): DatasetOption {
+    return {
+      id: dataset.datasetId,
+      name: `${dataset.venue} ${dataset.instrument} (${dataset.timeframe})`,
+      venue: dataset.venue,
+      barInterval: dataset.timeframe,
+      instrument: dataset.instrument,
+      description: dataset.source ? `${dataset.source} dataset` : 'Cached dataset',
+      start: dataset.start,
+      end: dataset.end,
+      status: dataset.status,
+    };
+  }
+
   private buildPayload(): BacktestRunCreateRequest {
     const value = this.form.getRawValue();
 
@@ -274,7 +367,11 @@ export class BacktestPage {
         name: value.dataset.name,
         venue: value.dataset.venue,
         barInterval: value.dataset.barInterval,
-        description: value.dataset.description,
+        description: value.dataset.description ?? '',
+        instrument: value.dataset.instrument,
+        start: this.normalizeDateValue(value.dataset.start),
+        end: this.normalizeDateValue(value.dataset.end),
+        status: value.dataset.status ?? undefined,
       },
       dateRange: {
         start: this.normalizeDateValue(value.dateRange.start),
@@ -303,12 +400,6 @@ export class BacktestPage {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
       date.getMinutes(),
     )}`;
-  }
-
-  private shiftDate(date: Date, days: number): Date {
-    const shifted = new Date(date);
-    shifted.setDate(shifted.getDate() + days);
-    return shifted;
   }
 
   private normalizeDateValue(value: string): string {

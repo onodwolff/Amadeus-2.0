@@ -31,6 +31,14 @@ class DataSettings(BaseModel):
     provider: str = "mock"
     cache_ttl_seconds: int = Field(default=60, ge=0)
     cache_backend: Literal["memory", "lfu"] = "memory"
+    base_path: Path = Field(default=_ROOT_DIR / "data")
+
+    @field_validator("base_path", mode="before")
+    @classmethod
+    def _normalise_base_path(cls, value: str | Path) -> Path:
+        if isinstance(value, Path):
+            return value.expanduser().resolve()
+        return Path(value).expanduser().resolve()
 
 
 class RiskSettings(BaseModel):

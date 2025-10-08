@@ -1,0 +1,82 @@
+<section class="historical-data">
+  <header class="historical-data__header">
+    <div>
+      <h1>Historical datasets</h1>
+      <p>Inspect cached market data snapshots and request new downloads for backtesting.</p>
+    </div>
+    <button type="button" class="btn btn--secondary" (click)="refreshDatasets()" [disabled]="isLoading()">
+      {{ isLoading() ? 'Refreshing…' : 'Refresh list' }}
+    </button>
+  </header>
+
+  <section class="historical-data__section">
+    <div class="section-heading">
+      <h2>Available datasets</h2>
+      <span class="status" *ngIf="loadError() as error">{{ error }}</span>
+    </div>
+    <div class="dataset-table" *ngIf="datasets().length; else emptyState">
+      <div class="dataset-table__header">
+        <span>Dataset</span>
+        <span>Instrument</span>
+        <span>Interval</span>
+        <span>Range</span>
+        <span>Status</span>
+      </div>
+      <div class="dataset-table__row" *ngFor="let dataset of datasets(); trackBy: trackByDatasetId">
+        <div>
+          <strong>{{ dataset.datasetId }}</strong>
+          <div class="dataset-table__meta">Created {{ dataset.createdAt | date: 'medium' }}</div>
+        </div>
+        <div>{{ dataset.venue }} · {{ dataset.instrument }}</div>
+        <div>{{ dataset.timeframe }}</div>
+        <div>{{ dataset.start | date: 'mediumDate' }} → {{ dataset.end | date: 'mediumDate' }}</div>
+        <div class="dataset-table__status" [class.dataset-table__status--pending]="dataset.status !== 'ready'">
+          {{ dataset.status | titlecase }}
+        </div>
+      </div>
+    </div>
+    <ng-template #emptyState>
+      <p class="empty-state">No cached datasets yet. Submit a download request to populate the catalog.</p>
+    </ng-template>
+  </section>
+
+  <section class="historical-data__section">
+    <div class="section-heading">
+      <h2>Request new download</h2>
+      <p>Provide the venue, trading pair, timeframe, and the date range to enqueue a background download task.</p>
+    </div>
+    <form [formGroup]="form" (ngSubmit)="submit()" class="request-form">
+      <div class="form-grid">
+        <div class="field">
+          <label for="venue">Venue</label>
+          <input id="venue" type="text" formControlName="venue" />
+        </div>
+        <div class="field">
+          <label for="instrument">Instrument</label>
+          <input id="instrument" type="text" formControlName="instrument" />
+        </div>
+        <div class="field">
+          <label for="timeframe">Timeframe</label>
+          <input id="timeframe" type="text" formControlName="timeframe" />
+        </div>
+        <div class="field">
+          <label for="start">Start</label>
+          <input id="start" type="datetime-local" formControlName="start" />
+        </div>
+        <div class="field">
+          <label for="end">End</label>
+          <input id="end" type="datetime-local" formControlName="end" />
+        </div>
+        <div class="field">
+          <label for="label">Label (optional)</label>
+          <input id="label" type="text" formControlName="label" />
+        </div>
+      </div>
+      <p class="form-status form-status--error" *ngIf="submissionError() as error">{{ error }}</p>
+      <p class="form-status form-status--success" *ngIf="submissionSuccess() as success">{{ success }}</p>
+      <button class="btn btn--primary" type="submit" [disabled]="form.invalid || isSubmitting()">
+        {{ isSubmitting() ? 'Submitting…' : 'Request download' }}
+      </button>
+    </form>
+  </section>
+</section>
