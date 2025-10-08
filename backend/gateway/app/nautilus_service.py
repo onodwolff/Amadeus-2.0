@@ -3302,7 +3302,6 @@ class MockNautilusService:
 
     def list_nodes(self) -> List[NodeHandle]:
         for node_id in list(self._nodes.keys()):
-            self._ensure_metrics_seeded(node_id)
             self._update_handle_metrics(node_id)
             self._sync_node_adapters(node_id)
         return [state.handle for state in self._nodes.values()]
@@ -3327,7 +3326,6 @@ class MockNautilusService:
         self._nodes[node_id] = state
         self._config_versions[node_id] = 0
         self._record_lifecycle(node_id, "created", "Node registered")
-        self._ensure_metrics_seeded(node_id)
         self._publish(
             "engine.nodes",
             {"event": "created", "node": self.as_dict(handle)},
@@ -3416,54 +3414,32 @@ class MockNautilusService:
         )
         self._persist_node_log_file(node_id, state)
 
-    def _ensure_metrics_seeded(self, node_id: str) -> None:
-        state = self._require_node(node_id)
-        if state.metrics:
+    def ingest_engine_metrics(
+        self, node_id: str, metrics: Dict[str, Any], *, timestamp: Optional[str] = None
+    ) -> None:
+        if not metrics:
+            return
+        try:
+            self._record_node_metrics(node_id, metrics, timestamp)
+        except ValueError:
             return
 
-        base_time = datetime.utcnow() - timedelta(minutes=179)
-        pnl = random.uniform(-25.0, 25.0)
-        equity = random.uniform(80_000.0, 120_000.0)
-        latency = random.uniform(4.0, 16.0)
-        cpu = random.uniform(20.0, 55.0)
-        memory = random.uniform(480.0, 640.0)
-
-        for step in range(180):
-            pnl += random.gauss(0, 0.6)
-            equity = max(10_000.0, equity + random.gauss(0, max(350.0, equity * 0.0008)))
-            latency = max(1.0, latency + random.uniform(-1.2, 1.2))
-            cpu = max(3.0, min(97.0, cpu + random.uniform(-3.5, 3.5)))
-            memory = max(256.0, memory + random.uniform(-6.0, 6.0))
-            timestamp = (base_time + timedelta(minutes=step)).isoformat() + "Z"
-            state.metrics.append(
-                NodeMetricsSample(
-                    timestamp=timestamp,
-                    pnl=round(pnl, 2),
-                    equity=round(equity, 2),
-                    latency_ms=round(latency, 2),
-                    cpu_percent=round(cpu, 2),
-                    memory_mb=round(memory, 2),
-                )
-            )
-
-        self._update_handle_metrics(node_id)
-
-    def _advance_metrics(self, node_id: str) -> NodeMetricsSample:
-        self._ensure_metrics_seeded(node_id)
+    def _record_node_metrics(
+        self,
+        node_id: str,
+        metrics: Dict[str, Any],
+        timestamp: Optional[str] = None,
+    ) -> None:
         state = self._require_node(node_id)
-        previous = state.metrics[-1]
-        pnl = previous.pnl + random.gauss(0, 1.2)
-        equity = max(10_000.0, previous.equity + random.gauss(0, max(420.0, previous.equity * 0.0009)))
-        latency = max(0.8, previous.latency_ms + random.uniform(-1.5, 1.5))
-        cpu = max(2.5, min(98.0, previous.cpu_percent + random.uniform(-4.5, 4.5)))
-        memory = max(240.0, previous.memory_mb + random.uniform(-9.0, 9.0))
+        if not metrics:
+            return
         sample = NodeMetricsSample(
-            timestamp=_utcnow_iso(),
-            pnl=round(pnl, 2),
-            equity=round(equity, 2),
-            latency_ms=round(latency, 2),
-            cpu_percent=round(cpu, 2),
-            memory_mb=round(memory, 2),
+            timestamp=(timestamp or _utcnow_iso()),
+            pnl=self._coerce_metric(metrics.get("pnl")),
+            equity=self._coerce_metric(metrics.get("equity")),
+            latency_ms=self._coerce_metric(metrics.get("latency_ms")),
+            cpu_percent=self._coerce_metric(metrics.get("cpu_percent")),
+            memory_mb=self._coerce_metric(metrics.get("memory_mb")),
         )
         state.metrics.append(sample)
         if len(state.metrics) > 720:
@@ -3480,7 +3456,6 @@ class MockNautilusService:
                 "memory_mb": sample.memory_mb,
             }
         )
-        return sample
 
     def _update_handle_metrics(self, node_id: str) -> None:
         state = self._require_node(node_id)
@@ -3499,24 +3474,9 @@ class MockNautilusService:
             "equity_history": [round(sample.equity, 2) for sample in history_window],
         }
         state.handle.updated_at = _utcnow_iso()
-        self._publish(
-            f"engine.nodes.{node_id}.metrics",
-            {
-                "node_id": node_id,
-                "metrics": {
-                    "pnl": latest.pnl,
-                    "latency_ms": latest.latency_ms,
-                    "cpu_percent": latest.cpu_percent,
-                    "memory_mb": latest.memory_mb,
-                    "equity": latest.equity,
-                },
-                "timestamp": latest.timestamp,
-            },
-        )
         self._persist_node_handle(state.handle)
 
     def metrics_series(self, node_id: str, limit: int = 360) -> dict:
-        self._advance_metrics(node_id)
         state = self._require_node(node_id)
         history = state.metrics[-limit:]
 
@@ -3539,7 +3499,10 @@ class MockNautilusService:
         }
 
     def metrics_snapshot(self, node_id: str) -> Dict[str, float]:
-        sample = self._advance_metrics(node_id)
+        state = self._require_node(node_id)
+        if not state.metrics:
+            raise ValueError(f"Node '{node_id}' has no telemetry samples")
+        sample = state.metrics[-1]
         return {
             "pnl": sample.pnl,
             "equity": sample.equity,
@@ -3574,6 +3537,17 @@ class MockNautilusService:
         if state is None:
             raise ValueError(f"Node '{node_id}' not found")
         return state
+
+    @staticmethod
+    def _coerce_metric(value: Any) -> float:
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
 
 
 class NautilusService:
@@ -3616,6 +3590,8 @@ class NautilusService:
             cache=self._cache,
             cache_ttl=settings.data.cache_ttl_seconds,
         )
+        self._bus_tasks: List[asyncio.Task] = []
+        self._start_bus_consumers()
         self._engine_orders: Dict[str, Dict[str, Any]] = {}
         self._config_versions: Dict[str, int] = {}
 
@@ -3649,6 +3625,34 @@ class NautilusService:
             return False
         running = getattr(self._engine, "_nodes_running", {})
         return bool(running)
+
+    def _start_bus_consumers(self) -> None:
+        loop = self._engine.bus.loop
+
+        async def consume_metrics() -> None:
+            async with self._engine.bus.subscribe("engine.nodes.metrics") as subscription:
+                async for payload in subscription:
+                    node_id = payload.get("node_id")
+                    metrics = payload.get("metrics", {})
+                    timestamp = payload.get("timestamp")
+                    if not node_id:
+                        continue
+                    try:
+                        self._mock.ingest_engine_metrics(
+                            node_id, dict(metrics or {}), timestamp=timestamp
+                        )
+                    except Exception:  # pragma: no cover - defensive guard
+                        LOGGER.debug(
+                            "metrics_ingest_failed",
+                            extra={"node_id": node_id},
+                            exc_info=True,
+                        )
+
+        def start_metrics() -> None:
+            task = loop.create_task(consume_metrics())
+            self._bus_tasks.append(task)
+
+        loop.call_soon_threadsafe(start_metrics)
 
     def _build_engine_order_summary(
         self,
