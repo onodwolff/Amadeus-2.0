@@ -24,6 +24,15 @@ export AMAD_USE_MOCK=false
 docker compose up --build
 ```
 
+The primary administrator account is seeded automatically during startup using the credentials below:
+
+| Email                     | Password   |
+|---------------------------|------------|
+| `volkov.zheka@gmail.com`  | `volkov650`|
+
+After signing in you can rotate the password from the **Settings → Password** panel.
+Two-factor authentication (TOTP) is disabled by default for every account and can be enabled later from the security settings.
+
 When the Nautilus engine is unavailable while `AMAD_USE_MOCK=false`, engine-dependent API calls respond with HTTP 501 and a hint to install `nautilus-trader` or toggle the mock profile.
 
 To reset the database while Compose is running, stop the stack and remove the named volume:
