@@ -1,34 +1,19 @@
 """FastAPI routes for managing user account settings."""
 from __future__ import annotations
 
-import hashlib
-import hmac
 from datetime import datetime, timezone
-from typing import AsyncIterator
 
-from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHash, VerifyMismatchError
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.db.base import create_session
+from gateway.app.dependencies import get_session
+from gateway.app.security import hash_password, verify_password
 from gateway.db.models import User
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-_password_hasher = PasswordHasher()
-
-
-async def get_session() -> AsyncIterator[AsyncSession]:
-    """Provide an async database session dependency."""
-
-    session = create_session()
-    try:
-        yield session
-    finally:  # pragma: no cover - cleanup
-        await session.close()
 
 
 class AccountResource(BaseModel):
@@ -99,20 +84,6 @@ async def _load_primary_user(session: AsyncSession) -> User:
     return user
 
 
-def _hash_password(password: str) -> str:
-    return _password_hasher.hash(password)
-
-
-def _verify_password(stored_hash: str, candidate: str) -> bool:
-    try:
-        return _password_hasher.verify(stored_hash, candidate)
-    except VerifyMismatchError:
-        return False
-    except InvalidHash:
-        legacy = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
-        return hmac.compare_digest(stored_hash, legacy)
-
-
 @router.get("/account", response_model=AccountResponse)
 async def get_account_settings(session: AsyncSession = Depends(get_session)) -> AccountResponse:
     user = await _load_primary_user(session)
@@ -161,10 +132,10 @@ async def update_password(
 ) -> AccountResponse:
     user = await _load_primary_user(session)
 
-    if not _verify_password(user.pwd_hash, payload.current_password):
+    if not verify_password(user.password_hash, payload.current_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
-    user.pwd_hash = _hash_password(payload.new_password)
+    user.password_hash = hash_password(payload.new_password)
     user.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(user)

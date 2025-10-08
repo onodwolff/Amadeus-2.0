@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from starlette.datastructures import UploadFile
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import settings
@@ -39,7 +39,9 @@ from gateway.db.models import (
     NodeMode as DbNodeMode,
     NodeStatus as DbNodeStatus,
     User as DbUser,
+    UserRole,
 )
+from gateway.db.base import create_session
 from .db import engine, get_session
 from .nautilus_service import (
     EngineUnavailableError,
@@ -51,12 +53,14 @@ from .nautilus_service import (
 )
 from .nautilus_engine_service import EngineConfigError, EngineMode, EngineNodeHandle
 from .logging import bind_contextvars, clear_contextvars, get_logger
+from .routes.auth import router as auth_router
 from .routes.data import router as data_router
 from .routes.keys import router as keys_router
 from .routes.orders import router as orders_router
 from .routes.strategies import router as strategies_router
 from .routes.users import router as users_router
 from .routes.risk import router as risk_router
+from .security import hash_password
 
 
 logger = get_logger("gateway.api")
@@ -70,6 +74,57 @@ async def _resolve_primary_user(session: AsyncSession) -> DbUser:
             status.HTTP_404_NOT_FOUND, detail="No user accounts available for launch"
         )
     return user
+
+
+async def _ensure_admin_user() -> None:
+    """Ensure that an administrator account seeded from environment variables exists."""
+
+    admin_email = (settings.auth.admin_email or "").strip()
+    admin_password = (settings.auth.admin_password or "").strip()
+    if not admin_email or not admin_password:
+        return
+
+    normalized_email = admin_email.lower()
+    session = create_session()
+    try:
+        result = await session.execute(
+            select(DbUser).where(func.lower(DbUser.email) == normalized_email)
+        )
+        user = result.scalars().first()
+        password_hash = hash_password(admin_password)
+
+        if user is None:
+            username_base = normalized_email.split("@")[0] or "admin"
+            candidate = username_base
+            suffix = 1
+            while True:
+                dup_stmt = select(DbUser.id).where(DbUser.username == candidate)
+                duplicate = await session.execute(dup_stmt)
+                if duplicate.scalars().first() is None:
+                    break
+                suffix += 1
+                candidate = f"{username_base}{suffix}"
+
+            user = DbUser(
+                email=normalized_email,
+                username=candidate,
+                name="Administrator",
+                password_hash=password_hash,
+                role=UserRole.ADMIN,
+                is_admin=True,
+                email_verified=True,
+            )
+            session.add(user)
+        else:
+            user.email = normalized_email
+            user.password_hash = password_hash
+            user.role = UserRole.ADMIN
+            user.is_admin = True
+            user.email_verified = True
+
+        await session.commit()
+    finally:  # pragma: no cover - defensive cleanup
+        await session.close()
 
 
 def _normalise_config_source(value: Optional[str]) -> ConfigSource:
@@ -608,6 +663,7 @@ async def _apply_launch_adapters(
             selection.model_dump(by_alias=True) for selection in selections
         ]
 app = FastAPI(title="Amadeus Gateway")
+app.include_router(auth_router, prefix="/api")
 app.include_router(risk_router)
 app.include_router(data_router, prefix="/api")
 app.include_router(keys_router, prefix="/api")
@@ -634,6 +690,8 @@ async def startup_event() -> None:
         logger.exception("database_connectivity_failed")
         raise RuntimeError("Database connectivity check failed") from exc
     logger.info("database_ready")
+
+    await _ensure_admin_user()
 
 
 @app.on_event("shutdown")
