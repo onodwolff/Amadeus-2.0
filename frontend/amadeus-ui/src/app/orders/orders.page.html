@@ -127,7 +127,17 @@
                   </span>
                   <span class="type-tag">{{ order.type | uppercase }}</span>
                 </div>
-                <div class="cell-sub" *ngIf="order.time_in_force">TIF {{ order.time_in_force }}</div>
+                <div
+                  class="order-flags"
+                  *ngIf="order.time_in_force || order.post_only || order.reduce_only || order.contingency_type"
+                >
+                  <span class="order-flag" *ngIf="order.time_in_force">TIF {{ order.time_in_force }}</span>
+                  <span class="order-flag order-flag--maker" *ngIf="order.post_only">Post</span>
+                  <span class="order-flag order-flag--reduce" *ngIf="order.reduce_only">Reduce</span>
+                  <span class="order-flag order-flag--contingency" *ngIf="order.contingency_type">
+                    {{ order.contingency_type }}
+                  </span>
+                </div>
               </td>
               <td data-label="Instrument">
                 <div class="cell-main">{{ order.symbol }}</div>
@@ -162,6 +172,15 @@
                 <ng-template #noExecutions>—</ng-template>
               </td>
               <td data-label="Actions" class="orders-table__actions">
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  (click)="onModify(order, $event)"
+                  [disabled]="!isOrderModifiable(order) || isModifying(order.order_id)"
+                >
+                  <span *ngIf="isModifying(order.order_id); else modifyText">Modifying…</span>
+                  <ng-template #modifyText>Modify</ng-template>
+                </button>
                 <button
                   type="button"
                   class="btn btn--ghost"
