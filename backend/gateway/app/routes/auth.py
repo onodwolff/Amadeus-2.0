@@ -154,6 +154,20 @@ class OperationStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SessionRevokePayload(BaseModel):
+    password: str = Field(min_length=1)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("password")
+    @classmethod
+    def _normalize_password(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Password is required")
+        return trimmed
+
+
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
 
@@ -529,9 +543,13 @@ async def list_sessions(
 
 @router.post("/me/sessions/revoke_all", response_model=OperationStatus)
 async def revoke_all_sessions(
+    payload: SessionRevokePayload,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
+    if not verify_password(current_user.password_hash, payload.password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Password verification failed")
+
     now = datetime.now(timezone.utc)
     await db.execute(
         update(AuthSession)

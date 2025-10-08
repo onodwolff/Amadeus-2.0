@@ -10,3 +10,4 @@ export * from './data.api';
 export * from './users.api';
 export * from './integrations.api';
 export * from './strategy-tests.api';
+export * from './auth.api';

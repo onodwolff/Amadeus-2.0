@@ -16,6 +16,8 @@ import {
   Validators,
 } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
+import { toDataURL } from 'qrcode';
+import { AuthApi } from '../api/clients/auth.api';
 import { KeysApi } from '../api/clients/keys.api';
 import { MarketApi } from '../api/clients/market.api';
 import { NodesApi } from '../api/clients/nodes.api';
@@ -31,7 +33,7 @@ import {
   NodeMode,
   ExchangeDescriptor,
   UserProfile,
-  AccountUpdateRequest,
+  AuthUser,
   PasswordUpdateRequest,
 } from '../api/models';
 import { NotificationService } from '../shared/notifications/notification.service';
@@ -83,7 +85,6 @@ type PasswordFormGroup = FormGroup<{
 
 type TwoFactorFormGroup = FormGroup<{
   code: FormControl<string>;
-  password: FormControl<string>;
 }>;
 
 type PasswordConfirmFormGroup = FormGroup<{
@@ -142,6 +143,7 @@ interface NodeAssignmentView extends NodeAssignmentContext {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SettingsPage implements OnInit {
+  private readonly authApi = inject(AuthApi);
   private readonly keysApi = inject(KeysApi);
   private readonly nodesApi = inject(NodesApi);
   private readonly marketApi = inject(MarketApi);
@@ -186,6 +188,10 @@ export class SettingsPage implements OnInit {
   readonly exchangesError = signal<string | null>(null);
 
   readonly activeUser = signal<UserProfile | null>(null);
+  readonly authUser = signal<AuthUser | null>(null);
+  readonly workspaceUsers = signal<UserProfile[]>([]);
+  readonly isUsersLoading = signal(false);
+  readonly usersError = signal<string | null>(null);
 
   readonly isEmailDialogOpen = signal(false);
   readonly isPasswordDialogOpen = signal(false);
@@ -197,6 +203,7 @@ export class SettingsPage implements OnInit {
   readonly isTwoFactorEnabled = signal(false);
   readonly isTwoFactorLoading = signal(false);
   readonly twoFactorError = signal<string | null>(null);
+  readonly twoFactorSetupError = signal<string | null>(null);
   readonly isTwoFactorSubmitting = signal(false);
   readonly twoFactorSecret = signal<string | null>(null);
   readonly twoFactorQr = signal<string | null>(null);
@@ -234,6 +241,7 @@ export class SettingsPage implements OnInit {
     void this.loadAssignmentContext();
     this.loadExchangeCatalog();
     this.loadAccountProfile();
+    this.loadWorkspaceUsers();
     this.bootstrapTwoFactorState();
   }
 
@@ -354,6 +362,23 @@ export class SettingsPage implements OnInit {
       },
       error: (error) => {
         this.handleError(error, this.emailError, 'Unable to load account profile.');
+      },
+    });
+  }
+
+  private loadWorkspaceUsers(): void {
+    this.isUsersLoading.set(true);
+    this.usersError.set(null);
+    this.usersApi.listUsers().subscribe({
+      next: (response) => {
+        const members = [...(response.users ?? [])];
+        members.sort((a, b) => a.email.localeCompare(b.email));
+        this.workspaceUsers.set(members);
+        this.isUsersLoading.set(false);
+      },
+      error: (error) => {
+        this.handleError(error, this.usersError, 'Unable to load workspace members.');
+        this.isUsersLoading.set(false);
       },
     });
   }
@@ -498,17 +523,19 @@ export class SettingsPage implements OnInit {
 
     this.isEmailSaving.set(true);
     try {
-      const payload: AccountUpdateRequest = { email: newEmail };
-      const accountResponse = await firstValueFrom(this.usersApi.updateAccount(payload));
-      const latestAccount = accountResponse.account;
-      this.activeUser.set(latestAccount);
+      await firstValueFrom(
+        this.authApi.requestEmailChange({
+          newEmail,
+          password,
+        }),
+      );
 
       this.emailForm.reset({ email: '', password: '' });
       this.emailForm.markAsPristine();
       this.emailForm.markAsUntouched();
 
       this.emailSuccess.set(
-        'Update requested. Complete the confirmation sent to the new address to finish changing your login email.',
+        'Confirmation sent. Follow the verification link delivered to the new address to finish updating your login email.',
       );
       this.notifications.success('Check your inbox to confirm the new email address.', 'Settings');
       this.closeEmailDialog();
@@ -596,26 +623,26 @@ export class SettingsPage implements OnInit {
       return;
     }
 
-    const raw = this.twoFactorForm.getRawValue();
-    const code = raw.code.trim();
-    const password = raw.password.trim();
-    if (code.length !== 6) {
+    const code = this.twoFactorForm.controls.code.value.trim();
+    if (!/^\d{6}$/.test(code)) {
       this.twoFactorError.set('Two-factor codes are 6 digits.');
-      return;
-    }
-    if (!password) {
-      this.twoFactorError.set('Confirm with your password to enable 2FA.');
       return;
     }
 
     this.isTwoFactorSubmitting.set(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      this.isTwoFactorEnabled.set(true);
-      this.twoFactorForm.reset({ code: '', password: '' });
+      await firstValueFrom(this.authApi.enableMfa({ code }));
+      this.twoFactorForm.reset({ code: '' });
       this.twoFactorForm.markAsPristine();
       this.twoFactorForm.markAsUntouched();
+      this.twoFactorSecret.set(null);
+      this.twoFactorQr.set(null);
+      this.twoFactorSetupError.set(null);
+      this.isTwoFactorEnabled.set(true);
       this.notifications.success('Two-factor authentication enabled.', 'Security');
+      this.bootstrapTwoFactorState();
+    } catch (error) {
+      this.handleError(error, this.twoFactorError, 'Failed to enable two-factor authentication.');
     } finally {
       this.isTwoFactorSubmitting.set(false);
     }
@@ -637,13 +664,22 @@ export class SettingsPage implements OnInit {
     this.isDisableTwoFactorSubmitting.set(true);
     this.disableTwoFactorError.set(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      this.isTwoFactorEnabled.set(false);
+      await firstValueFrom(this.authApi.disableMfa({ password }));
       this.notifications.info('Two-factor authentication disabled.', 'Security');
+      this.isTwoFactorEnabled.set(false);
       this.closeDisableTwoFactorDialog();
-      this.twoFactorForm.reset({ code: '', password: '' });
+      this.disableTwoFactorForm.reset({ password: '' });
+      this.disableTwoFactorForm.markAsPristine();
+      this.disableTwoFactorForm.markAsUntouched();
+      this.twoFactorForm.reset({ code: '' });
       this.twoFactorForm.markAsPristine();
       this.twoFactorForm.markAsUntouched();
+      this.twoFactorSecret.set(null);
+      this.twoFactorQr.set(null);
+      this.twoFactorSetupError.set(null);
+      this.bootstrapTwoFactorState();
+    } catch (error) {
+      this.handleError(error, this.disableTwoFactorError, 'Unable to disable two-factor authentication.');
     } finally {
       this.isDisableTwoFactorSubmitting.set(false);
     }
@@ -665,9 +701,14 @@ export class SettingsPage implements OnInit {
     this.isLogoutSubmitting.set(true);
     this.logoutError.set(null);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await firstValueFrom(this.authApi.revokeAllSessions({ password }));
       this.notifications.success('Other sessions have been signed out.', 'Security');
+      this.logoutForm.reset({ password: '' });
+      this.logoutForm.markAsPristine();
+      this.logoutForm.markAsUntouched();
       this.closeLogoutDialog();
+    } catch (error) {
+      this.handleError(error, this.logoutError, 'Unable to revoke other sessions.');
     } finally {
       this.isLogoutSubmitting.set(false);
     }
@@ -1381,10 +1422,7 @@ export class SettingsPage implements OnInit {
   private createTwoFactorForm(): TwoFactorFormGroup {
     return this.fb.group({
       code: this.fb.nonNullable.control('', {
-        validators: [Validators.required, Validators.minLength(6), Validators.maxLength(6)],
-      }),
-      password: this.fb.nonNullable.control('', {
-        validators: [Validators.required],
+        validators: [Validators.required, Validators.pattern(/^\d{6}$/)],
       }),
     });
   }
@@ -1652,14 +1690,64 @@ export class SettingsPage implements OnInit {
   private bootstrapTwoFactorState(): void {
     this.isTwoFactorLoading.set(true);
     this.twoFactorError.set(null);
+    this.twoFactorSetupError.set(null);
 
-    const placeholderQr =
-      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAACWCAIAAACZ7S1bAAAACXBIWXMAAAsTAAALEwEAmpwYAAABFUlEQVR4nO3QsQ0AIAwAsd39p0N4QZBRBE8XnXndmQAAkD/3uQEAAADg+ZxW1XrY97v77v32a9+/fb/v37/fvn3/ft+/f/36/fv/+/fu/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/fv36/fv/+/fv/Q6cB+W9Ez6jAAAAAElFTkSuQmCC';
+    this.authApi.getCurrentUser().subscribe({
+      next: (user) => {
+        this.authUser.set(user);
+        this.isTwoFactorEnabled.set(user.mfaEnabled);
+        if (user.mfaEnabled) {
+          this.twoFactorSecret.set(null);
+          this.twoFactorQr.set(null);
+          this.twoFactorForm.reset({ code: '' });
+          this.twoFactorForm.markAsPristine();
+          this.twoFactorForm.markAsUntouched();
+          this.isTwoFactorLoading.set(false);
+        } else {
+          this.startTwoFactorEnrollment();
+        }
+      },
+      error: (error) => {
+        this.handleError(error, this.twoFactorSetupError, 'Unable to load two-factor settings.');
+        this.isTwoFactorLoading.set(false);
+      },
+    });
+  }
 
-    setTimeout(() => {
-      this.twoFactorSecret.set('JBSWY3DPEHPK3PXP');
-      this.twoFactorQr.set(placeholderQr);
+  private startTwoFactorEnrollment(): void {
+    this.isTwoFactorLoading.set(true);
+    this.twoFactorSetupError.set(null);
+    this.twoFactorError.set(null);
+    this.twoFactorSecret.set(null);
+    this.twoFactorQr.set(null);
+    this.twoFactorForm.reset({ code: '' });
+    this.twoFactorForm.markAsPristine();
+    this.twoFactorForm.markAsUntouched();
+
+    this.authApi.setupMfa().subscribe({
+      next: (response) => {
+        this.twoFactorSecret.set(response.secret);
+        void this.renderTwoFactorQr(response.otpauthUrl);
+      },
+      error: (error) => {
+        this.handleError(error, this.twoFactorSetupError, 'Unable to prepare two-factor secret.');
+        this.isTwoFactorLoading.set(false);
+      },
+    });
+  }
+
+  private async renderTwoFactorQr(otpauthUrl: string): Promise<void> {
+    try {
+      const qr = await toDataURL(otpauthUrl, { margin: 1, width: 240 });
+      this.twoFactorQr.set(qr);
+      this.twoFactorSetupError.set(null);
+    } catch (error) {
+      console.error(error);
+      this.twoFactorSetupError.set(
+        'Unable to render the QR code. Enter the secret manually in your authenticator app.',
+      );
+    } finally {
       this.isTwoFactorLoading.set(false);
-    }, 150);
+    }
   }
 }

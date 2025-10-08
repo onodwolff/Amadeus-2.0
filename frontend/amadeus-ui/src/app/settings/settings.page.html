@@ -73,6 +73,39 @@
       <ng-template #missingAccount>
         <p class="account-email__value">—</p>
       </ng-template>
+      <p class="settings-message settings-message--success" *ngIf="emailSuccess() as emailMessage">
+        {{ emailMessage }}
+      </p>
+    </article>
+
+    <article class="settings-card">
+      <header class="settings-card__header">
+        <div>
+          <h2 class="settings-card__title">Workspace members</h2>
+          <p class="settings-card__description">
+            Manage operator access to the control plane. The primary administrator signs in with their email address.
+          </p>
+        </div>
+      </header>
+      <div class="members-loading" *ngIf="isUsersLoading()" role="status" aria-live="polite">
+        <span class="credentials-spinner" aria-hidden="true"></span>
+        <span>Loading workspace members…</span>
+      </div>
+      <p class="settings-message settings-message--error" *ngIf="usersError() as userError">{{ userError }}</p>
+      <ul class="members-list" *ngIf="!isUsersLoading() && !usersError() && workspaceUsers().length > 0; else noMembers">
+        <li class="members-list__item" *ngFor="let member of workspaceUsers()">
+          <div class="members-list__primary">{{ member.email }}</div>
+          <div class="members-list__meta">
+            <span class="members-list__badge">{{ member.role | titlecase }}</span>
+            <span class="members-list__status" [class.members-list__status--inactive]="!member.active">
+              {{ member.active ? 'Active' : 'Suspended' }}
+            </span>
+          </div>
+        </li>
+      </ul>
+      <ng-template #noMembers>
+        <p class="settings-card__helper">No workspace members have been added yet.</p>
+      </ng-template>
     </article>
 
     <article class="settings-card">
@@ -113,13 +146,21 @@
           <span>Preparing your authenticator secret…</span>
         </div>
         <ng-container *ngIf="!isTwoFactorLoading()">
+          <p class="settings-message settings-message--error" *ngIf="twoFactorSetupError() as setupError">
+            {{ setupError }}
+          </p>
           <div class="two-factor__qr" *ngIf="twoFactorQr() as qr">
             <img [src]="qr" alt="Authenticator QR code" />
           </div>
           <p class="two-factor__secret" *ngIf="twoFactorSecret() as secret">
             Secret: <code>{{ secret }}</code>
           </p>
-          <form class="two-factor__form" [formGroup]="twoFactorForm" (ngSubmit)="enableTwoFactor()">
+          <form
+            class="two-factor__form"
+            [formGroup]="twoFactorForm"
+            (ngSubmit)="enableTwoFactor()"
+            *ngIf="twoFactorSecret()"
+          >
             <label class="field">
               <span class="field__label">6-digit code</span>
               <input
@@ -132,18 +173,12 @@
                 required
               />
             </label>
-            <label class="field">
-              <span class="field__label">Account password</span>
-              <input
-                class="field__control"
-                formControlName="password"
-                type="password"
-                autocomplete="current-password"
-                required
-              />
-            </label>
             <p class="settings-message settings-message--error" *ngIf="twoFactorError() as error">{{ error }}</p>
-            <button type="submit" class="btn btn--primary" [disabled]="isTwoFactorSubmitting()">
+            <button
+              type="submit"
+              class="btn btn--primary"
+              [disabled]="isTwoFactorSubmitting() || isTwoFactorLoading()"
+            >
               <span *ngIf="isTwoFactorSubmitting(); else enableLabel">Enabling…</span>
               <ng-template #enableLabel>Enable 2FA</ng-template>
             </button>
