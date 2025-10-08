@@ -74,6 +74,22 @@ export interface CreateOrderPayload {
   client_order_id?: string;
 }
 
+export interface ModifyOrderPayload {
+  quantity?: number;
+  price?: number | null;
+  time_in_force?: TimeInForce | string | null;
+  expire_time?: string | null;
+  post_only?: boolean | null;
+  reduce_only?: boolean | null;
+  limit_offset?: number | null;
+  contingency_type?: 'OCO' | 'OTO' | string | null;
+  order_list_id?: string | null;
+  linked_order_ids?: string[];
+  parent_order_id?: string | null;
+  node_id?: string | null;
+  client_order_id?: string | null;
+}
+
 export interface OrdersStreamMessage {
   orders?: OrderSummary[];
   executions?: ExecutionReport[];

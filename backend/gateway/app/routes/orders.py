@@ -37,6 +37,13 @@ _SUPPORTED_TIFS = {"GTC", "IOC", "FOK", "GTD", "DAY"}
 _SUPPORTED_CONTINGENCIES = {"OCO", "OTO"}
 
 
+def _clean_optional_str(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
 def _parse_timestamp(value: Optional[str]) -> datetime:
     if not value:
         return datetime.now(tz=timezone.utc)
@@ -314,6 +321,152 @@ class OrderCreateRequest(BaseModel):
         return payload
 
 
+class OrderModifyRequest(BaseModel):
+    quantity: Optional[float] = None
+    price: Optional[float] = None
+    time_in_force: Optional[str] = Field(default=None)
+    expire_time: Optional[str] = None
+    post_only: Optional[bool] = None
+    reduce_only: Optional[bool] = None
+    limit_offset: Optional[float] = None
+    contingency_type: Optional[str] = None
+    order_list_id: Optional[str] = None
+    linked_order_ids: Optional[Iterable[str]] = None
+    parent_order_id: Optional[str] = None
+    node_id: Optional[str] = None
+    client_order_id: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @field_validator(
+        "client_order_id",
+        "node_id",
+        "order_list_id",
+        "parent_order_id",
+        mode="before",
+    )
+    @classmethod
+    def _normalise_identifiers(cls, value: Optional[str]) -> Optional[str]:
+        return _clean_optional_str(value)
+
+    @field_validator("time_in_force")
+    @classmethod
+    def _validate_tif(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        tif = str(value).strip().upper()
+        if tif and tif not in _SUPPORTED_TIFS:
+            raise ValueError(
+                "Unsupported time in force value. Supported values: "
+                + ", ".join(sorted(_SUPPORTED_TIFS))
+            )
+        return tif or None
+
+    @field_validator("contingency_type")
+    @classmethod
+    def _validate_contingency(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        contingency = str(value).strip().upper()
+        if contingency and contingency not in _SUPPORTED_CONTINGENCIES:
+            raise ValueError(
+                "Contingency type must be one of: "
+                + ", ".join(sorted(_SUPPORTED_CONTINGENCIES))
+            )
+        return contingency or None
+
+    @field_validator("linked_order_ids", mode="before")
+    @classmethod
+    def _normalise_links(
+        cls, value: Optional[Iterable[str]]
+    ) -> Optional[List[str]]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            tokens = value.replace(",", " ").split()
+        else:
+            tokens = list(value)
+        result: List[str] = []
+        for token in tokens:
+            cleaned = str(token).strip()
+            if cleaned and cleaned not in result:
+                result.append(cleaned)
+        return result or []
+
+    @field_validator("quantity")
+    @classmethod
+    def _validate_quantity(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            quantity = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("Quantity must be a number") from None
+        if quantity <= 0:
+            raise ValueError("Quantity must be greater than zero")
+        return quantity
+
+    @field_validator("price")
+    @classmethod
+    def _validate_price(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("Price must be a number") from None
+        if price <= 0:
+            raise ValueError("Price must be greater than zero")
+        return price
+
+    @field_validator("limit_offset")
+    @classmethod
+    def _validate_limit_offset(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise ValueError("Limit offset must be a number") from None
+
+    @model_validator(mode="after")
+    def _ensure_fields(self) -> "OrderModifyRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be provided for modification")
+        return self
+
+    def to_engine_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        fields = self.model_fields_set
+        if "quantity" in fields:
+            payload["quantity"] = self.quantity
+        if "price" in fields:
+            payload["price"] = self.price
+        if "time_in_force" in fields:
+            payload["time_in_force"] = self.time_in_force
+        if "expire_time" in fields:
+            payload["expire_time"] = self.expire_time
+        if "post_only" in fields:
+            payload["post_only"] = self.post_only
+        if "reduce_only" in fields:
+            payload["reduce_only"] = self.reduce_only
+        if "limit_offset" in fields:
+            payload["limit_offset"] = self.limit_offset
+        if "contingency_type" in fields:
+            payload["contingency_type"] = self.contingency_type
+        if "order_list_id" in fields:
+            payload["order_list_id"] = self.order_list_id
+        if "linked_order_ids" in fields:
+            payload["linked_order_ids"] = list(self.linked_order_ids or [])
+        if "parent_order_id" in fields:
+            payload["parent_order_id"] = self.parent_order_id
+        if "node_id" in fields:
+            payload["node_id"] = self.node_id
+        if "client_order_id" in fields:
+            payload["client_order_id"] = self.client_order_id
+        return payload
+
+
 async def _load_orders(
     session: AsyncSession,
     statement: Optional[Select[tuple[EngineOrder]]] = None,
@@ -411,6 +564,59 @@ async def _upsert_engine_order(session: AsyncSession, payload: Dict[str, Any]) -
     record.updated_at = updated_at
 
 
+def _build_order_resource(summary: Dict[str, Any]) -> OrderResource:
+    return OrderResource(
+        order_id=summary.get("order_id"),
+        client_order_id=summary.get("client_order_id"),
+        venue_order_id=summary.get("venue_order_id"),
+        symbol=summary.get("symbol"),
+        venue=summary.get("venue"),
+        side=summary.get("side"),
+        type=summary.get("type"),
+        quantity=_coerce_float(summary.get("quantity")),
+        filled_quantity=_coerce_float(summary.get("filled_quantity")),
+        price=_coerce_float(summary.get("price")),
+        average_price=_coerce_float(summary.get("average_price")),
+        status=summary.get("status"),
+        time_in_force=summary.get("time_in_force"),
+        expire_time=summary.get("expire_time"),
+        post_only=summary.get("post_only"),
+        reduce_only=summary.get("reduce_only"),
+        limit_offset=_coerce_float(summary.get("limit_offset")),
+        contingency_type=summary.get("contingency_type"),
+        order_list_id=summary.get("order_list_id"),
+        linked_order_ids=list(summary.get("linked_order_ids") or []),
+        parent_order_id=summary.get("parent_order_id"),
+        node_id=summary.get("node_id"),
+        instructions=summary.get("instructions"),
+        created_at=_parse_timestamp(summary.get("created_at")),
+        updated_at=_parse_timestamp(summary.get("updated_at")),
+    )
+
+
+async def _persist_and_fetch_order(
+    session: AsyncSession,
+    summary: Dict[str, Any],
+    log_code: str,
+) -> OrderResource:
+    normalised = _normalise_order_summary(summary)
+    try:
+        await _upsert_engine_order(session, normalised)
+        await session.commit()
+    except Exception:  # pragma: no cover - defensive guard
+        await session.rollback()
+        LOGGER.exception(log_code)
+    order_id = normalised.get("order_id")
+    if order_id:
+        orders = await _load_orders(
+            session,
+            select(EngineOrder).where(EngineOrder.order_id == order_id).limit(1),
+        )
+        if orders:
+            return orders[0]
+    return _build_order_resource(normalised)
+
+
 @router.get("/", response_model=OrdersResponse)
 async def list_orders(session: AsyncSession = Depends(get_session)) -> OrdersResponse:
     try:
@@ -503,53 +709,17 @@ async def create_order(payload: OrderCreateRequest, session: AsyncSession = Depe
     summary = response.get("order")
     if not isinstance(summary, dict):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Gateway returned no order summary")
-    normalised = _normalise_order_summary(summary)
-
-    try:
-        await _upsert_engine_order(session, normalised)
-        await session.commit()
-    except Exception:  # pragma: no cover - defensive guard
-        await session.rollback()
-        LOGGER.exception("order_persistence_failed")
-
-    orders = await _load_orders(
+    order_resource = await _persist_and_fetch_order(
         session,
-        select(EngineOrder).where(EngineOrder.order_id == normalised.get("order_id")).limit(1),
+        summary,
+        "order_persistence_failed",
     )
-    if orders:
-        return OrderResponse(order=orders[0])
-    fallback = OrderResource(
-        order_id=normalised.get("order_id"),
-        client_order_id=normalised.get("client_order_id"),
-        venue_order_id=normalised.get("venue_order_id"),
-        symbol=normalised.get("symbol"),
-        venue=normalised.get("venue"),
-        side=normalised.get("side"),
-        type=normalised.get("type"),
-        quantity=_coerce_float(normalised.get("quantity")),
-        filled_quantity=_coerce_float(normalised.get("filled_quantity")),
-        price=_coerce_float(normalised.get("price")),
-        average_price=_coerce_float(normalised.get("average_price")),
-        status=normalised.get("status"),
-        time_in_force=normalised.get("time_in_force"),
-        expire_time=normalised.get("expire_time"),
-        post_only=normalised.get("post_only"),
-        reduce_only=normalised.get("reduce_only"),
-        limit_offset=_coerce_float(normalised.get("limit_offset")),
-        contingency_type=normalised.get("contingency_type"),
-        order_list_id=normalised.get("order_list_id"),
-        linked_order_ids=list(normalised.get("linked_order_ids") or []),
-        parent_order_id=normalised.get("parent_order_id"),
-        node_id=normalised.get("node_id"),
-        instructions=normalised.get("instructions"),
-        created_at=_parse_timestamp(normalised.get("created_at")),
-        updated_at=_parse_timestamp(normalised.get("updated_at")),
-    )
-    return OrderResponse(order=fallback)
+    return OrderResponse(order=order_resource)
 
 
-@router.delete("/{order_id}", response_model=OrderResponse)
-async def cancel_order(order_id: str, session: AsyncSession = Depends(get_session)) -> OrderResponse:
+async def _cancel_order_action(
+    order_id: str, session: AsyncSession
+) -> OrderResponse:
     try:
         svc.require_engine()
     except EngineUnavailableError as exc:
@@ -579,49 +749,77 @@ async def cancel_order(order_id: str, session: AsyncSession = Depends(get_sessio
     summary = response.get("order")
     if not isinstance(summary, dict):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Gateway returned no order summary")
-    normalised = _normalise_order_summary(summary)
+    order_resource = await _persist_and_fetch_order(
+        session,
+        summary,
+        "order_cancel_persistence_failed",
+    )
+    return OrderResponse(order=order_resource)
+
+
+@router.post("/{order_id}/cancel", response_model=OrderResponse)
+async def cancel_order_post(
+    order_id: str, session: AsyncSession = Depends(get_session)
+) -> OrderResponse:
+    return await _cancel_order_action(order_id, session)
+
+
+@router.delete("/{order_id}", response_model=OrderResponse)
+async def cancel_order(order_id: str, session: AsyncSession = Depends(get_session)) -> OrderResponse:
+    return await _cancel_order_action(order_id, session)
+
+
+@router.post("/{order_id}/modify", response_model=OrderResponse)
+async def modify_order(
+    order_id: str,
+    payload: OrderModifyRequest,
+    session: AsyncSession = Depends(get_session),
+) -> OrderResponse:
+    try:
+        svc.require_engine()
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
+
+    engine_payload = payload.to_engine_payload()
 
     try:
-        await _upsert_engine_order(session, normalised)
-        await session.commit()
-    except Exception:  # pragma: no cover - defensive guard
-        await session.rollback()
-        LOGGER.exception("order_cancel_persistence_failed")
+        response = svc.modify_order(order_id, engine_payload)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in detail.lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "message": str(exc),
+                "hint": "Install nautilus-trader or enable AMAD_USE_MOCK.",
+            },
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive guard
+        LOGGER.exception("order_modify_failed")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Order modify failed") from exc
 
-    orders = await _load_orders(
+    summary = response.get("order")
+    if not isinstance(summary, dict):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Gateway returned no order summary")
+
+    order_resource = await _persist_and_fetch_order(
         session,
-        select(EngineOrder).where(EngineOrder.order_id == order_id).limit(1),
+        summary,
+        "order_modify_persistence_failed",
     )
-    if orders:
-        return OrderResponse(order=orders[0])
-    fallback = OrderResource(
-        order_id=normalised.get("order_id"),
-        client_order_id=normalised.get("client_order_id"),
-        venue_order_id=normalised.get("venue_order_id"),
-        symbol=normalised.get("symbol"),
-        venue=normalised.get("venue"),
-        side=normalised.get("side"),
-        type=normalised.get("type"),
-        quantity=_coerce_float(normalised.get("quantity")),
-        filled_quantity=_coerce_float(normalised.get("filled_quantity")),
-        price=_coerce_float(normalised.get("price")),
-        average_price=_coerce_float(normalised.get("average_price")),
-        status=normalised.get("status"),
-        time_in_force=normalised.get("time_in_force"),
-        expire_time=normalised.get("expire_time"),
-        post_only=normalised.get("post_only"),
-        reduce_only=normalised.get("reduce_only"),
-        limit_offset=_coerce_float(normalised.get("limit_offset")),
-        contingency_type=normalised.get("contingency_type"),
-        order_list_id=normalised.get("order_list_id"),
-        linked_order_ids=list(normalised.get("linked_order_ids") or []),
-        parent_order_id=normalised.get("parent_order_id"),
-        node_id=normalised.get("node_id"),
-        instructions=normalised.get("instructions"),
-        created_at=_parse_timestamp(normalised.get("created_at")),
-        updated_at=_parse_timestamp(normalised.get("updated_at")),
-    )
-    return OrderResponse(order=fallback)
+    return OrderResponse(order=order_resource)
 
 
 @router.post(
@@ -661,47 +859,9 @@ async def duplicate_order(order_id: str, session: AsyncSession = Depends(get_ses
     if not isinstance(summary, dict):
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Gateway returned no order summary")
 
-    normalised = _normalise_order_summary(summary)
-
-    try:
-        await _upsert_engine_order(session, normalised)
-        await session.commit()
-    except Exception:  # pragma: no cover - defensive guard
-        await session.rollback()
-        LOGGER.exception("order_duplicate_persistence_failed")
-
-    orders = await _load_orders(
+    order_resource = await _persist_and_fetch_order(
         session,
-        select(EngineOrder).where(EngineOrder.order_id == normalised.get("order_id")).limit(1),
+        summary,
+        "order_duplicate_persistence_failed",
     )
-    if orders:
-        return OrderResponse(order=orders[0])
-
-    fallback = OrderResource(
-        order_id=normalised.get("order_id"),
-        client_order_id=normalised.get("client_order_id"),
-        venue_order_id=normalised.get("venue_order_id"),
-        symbol=normalised.get("symbol"),
-        venue=normalised.get("venue"),
-        side=normalised.get("side"),
-        type=normalised.get("type"),
-        quantity=_coerce_float(normalised.get("quantity")),
-        filled_quantity=_coerce_float(normalised.get("filled_quantity")),
-        price=_coerce_float(normalised.get("price")),
-        average_price=_coerce_float(normalised.get("average_price")),
-        status=normalised.get("status"),
-        time_in_force=normalised.get("time_in_force"),
-        expire_time=normalised.get("expire_time"),
-        post_only=normalised.get("post_only"),
-        reduce_only=normalised.get("reduce_only"),
-        limit_offset=_coerce_float(normalised.get("limit_offset")),
-        contingency_type=normalised.get("contingency_type"),
-        order_list_id=normalised.get("order_list_id"),
-        linked_order_ids=list(normalised.get("linked_order_ids") or []),
-        parent_order_id=normalised.get("parent_order_id"),
-        node_id=normalised.get("node_id"),
-        instructions=normalised.get("instructions"),
-        created_at=_parse_timestamp(normalised.get("created_at")),
-        updated_at=_parse_timestamp(normalised.get("updated_at")),
-    )
-    return OrderResponse(order=fallback)
+    return OrderResponse(order=order_resource)

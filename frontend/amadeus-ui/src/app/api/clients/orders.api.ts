@@ -2,7 +2,12 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
-import { CreateOrderPayload, OrderResponse, OrdersResponse } from '../models/order.model';
+import {
+  CreateOrderPayload,
+  ModifyOrderPayload,
+  OrderResponse,
+  OrdersResponse,
+} from '../models/order.model';
 
 @Injectable({ providedIn: 'root' })
 export class OrdersApi {
@@ -21,7 +26,13 @@ export class OrdersApi {
   }
 
   cancelOrder(orderId: string): Observable<OrderResponse> {
-    return this.http.delete<OrderResponse>(buildApiUrl(`/api/orders/${encodeURIComponent(orderId)}`));
+    const path = `/api/orders/${encodeURIComponent(orderId)}/cancel`;
+    return this.http.post<OrderResponse>(buildApiUrl(path), {});
+  }
+
+  modifyOrder(orderId: string, payload: ModifyOrderPayload): Observable<OrderResponse> {
+    const path = `/api/orders/${encodeURIComponent(orderId)}/modify`;
+    return this.http.post<OrderResponse>(buildApiUrl(path), payload);
   }
 
   duplicateOrder(orderId: string): Observable<OrderResponse> {

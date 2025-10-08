@@ -2077,6 +2077,172 @@ class MockNautilusService:
 
         return translated
 
+    def _prepare_modification(
+        self, order: OrderRecord, updates: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        candidate = asdict(order)
+        candidate["symbol"] = (candidate.get("symbol") or "").upper()
+        candidate["venue"] = (candidate.get("venue") or "").upper()
+        candidate["side"] = (candidate.get("side") or "buy").upper()
+        candidate["type"] = (candidate.get("type") or "market").lower()
+        candidate["quantity"] = float(candidate.get("quantity") or 0.0)
+        candidate["filled_quantity"] = float(candidate.get("filled_quantity") or 0.0)
+        if candidate.get("price") is not None:
+            candidate["price"] = float(candidate.get("price"))
+        if candidate.get("limit_offset") is not None:
+            candidate["limit_offset"] = float(candidate.get("limit_offset"))
+        candidate["time_in_force"] = (
+            str(candidate.get("time_in_force") or "").strip().upper() or None
+        )
+        candidate["expire_time"] = self._clean_str(candidate.get("expire_time"))
+        candidate["post_only"] = (
+            None if candidate.get("post_only") is None else bool(candidate.get("post_only"))
+        )
+        candidate["reduce_only"] = (
+            None if candidate.get("reduce_only") is None else bool(candidate.get("reduce_only"))
+        )
+        candidate["contingency_type"] = (
+            str(candidate.get("contingency_type") or "").strip().upper() or None
+        )
+        candidate["order_list_id"] = self._clean_str(candidate.get("order_list_id"))
+        candidate["parent_order_id"] = self._clean_str(candidate.get("parent_order_id"))
+        candidate["node_id"] = self._clean_str(candidate.get("node_id"))
+        candidate["client_order_id"] = self._clean_str(candidate.get("client_order_id"))
+        existing_links = candidate.get("linked_order_ids") or []
+        candidate["linked_order_ids"] = [
+            item for item in (existing_links if isinstance(existing_links, list) else [])
+        ]
+
+        updates = dict(updates or {})
+
+        if "quantity" in updates:
+            quantity = self._coerce_float(updates.get("quantity"))
+            if quantity is None or quantity <= 0:
+                raise ValueError("Quantity must be greater than zero")
+            filled = candidate.get("filled_quantity") or 0.0
+            if quantity < filled - 1e-9:
+                raise ValueError("Quantity cannot be less than filled quantity")
+            candidate["quantity"] = quantity
+
+        if "price" in updates:
+            price_raw = updates.get("price")
+            if price_raw is None:
+                candidate["price"] = None
+            else:
+                price = self._coerce_float(price_raw)
+                if price is None or price <= 0:
+                    raise ValueError("Price must be greater than zero")
+                candidate["price"] = price
+
+        if "limit_offset" in updates:
+            offset_raw = updates.get("limit_offset")
+            if offset_raw is None:
+                candidate["limit_offset"] = None
+            else:
+                offset = self._coerce_float(offset_raw)
+                if offset is None:
+                    raise ValueError("Limit offset must be a number")
+                candidate["limit_offset"] = offset
+
+        previous_tif = order.time_in_force.upper() if order.time_in_force else None
+        if "time_in_force" in updates:
+            tif_raw = updates.get("time_in_force")
+            tif = (
+                str(tif_raw).strip().upper()
+                if tif_raw is not None
+                else None
+            )
+            candidate["time_in_force"] = tif or None
+
+        if "expire_time" in updates:
+            expire_raw = updates.get("expire_time")
+            candidate["expire_time"] = (
+                None if expire_raw is None else self._clean_str(expire_raw)
+            )
+        elif candidate.get("time_in_force") != "GTD" and previous_tif == "GTD":
+            candidate["expire_time"] = None
+
+        if "post_only" in updates:
+            post_value = updates.get("post_only")
+            candidate["post_only"] = None if post_value is None else bool(post_value)
+
+        if "reduce_only" in updates:
+            reduce_value = updates.get("reduce_only")
+            candidate["reduce_only"] = None if reduce_value is None else bool(reduce_value)
+
+        if "contingency_type" in updates:
+            contingency_raw = updates.get("contingency_type")
+            contingency = (
+                str(contingency_raw).strip().upper()
+                if contingency_raw is not None
+                else None
+            )
+            candidate["contingency_type"] = contingency or None
+
+        if "order_list_id" in updates:
+            candidate["order_list_id"] = self._clean_str(updates.get("order_list_id"))
+
+        if "parent_order_id" in updates:
+            candidate["parent_order_id"] = self._clean_str(updates.get("parent_order_id"))
+
+        if "linked_order_ids" in updates:
+            linked_raw = updates.get("linked_order_ids")
+            linked: List[str] = []
+            if isinstance(linked_raw, list):
+                for entry in linked_raw:
+                    cleaned = self._clean_str(entry)
+                    if cleaned and cleaned not in linked:
+                        linked.append(cleaned)
+            elif linked_raw is None:
+                linked = []
+            else:
+                cleaned = self._clean_str(linked_raw)
+                if cleaned:
+                    linked.append(cleaned)
+            candidate["linked_order_ids"] = linked
+
+        if "node_id" in updates:
+            candidate["node_id"] = self._clean_str(updates.get("node_id"))
+
+        if "client_order_id" in updates:
+            candidate["client_order_id"] = self._clean_str(updates.get("client_order_id"))
+
+        order_type = candidate.get("type") or "market"
+        if order_type in {"limit", "stop", "stop_limit"} and candidate.get("price") is None:
+            field = "Price" if order_type == "limit" else "Trigger price"
+            raise ValueError(f"{field} is required for {order_type.replace('_', ' ')} orders")
+        if order_type == "stop_limit" and candidate.get("limit_offset") is None:
+            raise ValueError("Limit offset is required for stop-limit orders")
+
+        tif = candidate.get("time_in_force")
+        if tif == "GTD" and not candidate.get("expire_time"):
+            raise ValueError("Expire time is required for GTD orders")
+
+        contingency = candidate.get("contingency_type")
+        if contingency == "OCO" and not candidate.get("order_list_id"):
+            raise ValueError("Order list ID is required for OCO contingency")
+        if contingency == "OTO" and not candidate.get("parent_order_id"):
+            raise ValueError("Parent order ID is required for OTO contingency")
+        if contingency in {"OCO", "OTO"} and not candidate.get("linked_order_ids"):
+            raise ValueError("Linked order IDs must be provided when using a contingency")
+
+        candidate["quantity"] = round(candidate.get("quantity") or 0.0, 8)
+        if candidate.get("price") is not None:
+            candidate["price"] = round(candidate["price"], 8)
+        if candidate.get("limit_offset") is not None:
+            candidate["limit_offset"] = round(candidate["limit_offset"], 8)
+
+        self.validate_order(candidate)
+
+        instructions = self._translate_order_payload(candidate)
+        instructions["order_id"] = order.order_id
+        if candidate.get("client_order_id"):
+            instructions.setdefault("client_order_id", candidate["client_order_id"])
+        if candidate.get("node_id"):
+            instructions.setdefault("node_id", candidate["node_id"])
+
+        return candidate, instructions
+
     def _submit_to_engine(self, instructions: Dict[str, Any]) -> None:
         if not self._engine:
             return
@@ -2205,6 +2371,45 @@ class MockNautilusService:
         self._publish_orders_snapshot()
         return {"order": asdict(order)}
 
+    def modify_order(self, order_id: str, updates: Dict[str, Any]) -> dict:
+        order = self._orders.get(order_id)
+        if order is None:
+            raise ValueError(f"Order '{order_id}' not found")
+        if order.status in {"filled", "cancelled", "rejected"}:
+            return {"order": asdict(order)}
+
+        candidate, instructions = self._prepare_modification(order, updates or {})
+
+        order.quantity = round(candidate.get("quantity") or 0.0, 4)
+        if candidate.get("price") is not None:
+            order.price = round(candidate.get("price") or 0.0, 4)
+        else:
+            order.price = None
+        order.time_in_force = candidate.get("time_in_force")
+        order.expire_time = candidate.get("expire_time")
+        order.post_only = candidate.get("post_only")
+        order.reduce_only = candidate.get("reduce_only")
+        order.limit_offset = candidate.get("limit_offset")
+        order.contingency_type = candidate.get("contingency_type")
+        order.order_list_id = candidate.get("order_list_id")
+        linked_ids = candidate.get("linked_order_ids") or []
+        order.linked_order_ids = linked_ids if linked_ids else None
+        order.parent_order_id = candidate.get("parent_order_id")
+        order.client_order_id = candidate.get("client_order_id")
+        order.node_id = candidate.get("node_id")
+        order.instructions = deepcopy(instructions)
+        order.updated_at = _utcnow_iso()
+        order.status = "pending"
+
+        self._orders[order_id] = order
+        self._publish(
+            "engine.orders",
+            {"event": "modify_requested", "order": asdict(order)},
+        )
+        self._persist_order(order)
+        self._publish_orders_snapshot()
+        return {"order": asdict(order)}
+
     def duplicate_order(self, order_id: str) -> dict:
         original = self._orders.get(order_id)
         if original is None:
@@ -2318,6 +2523,13 @@ class MockNautilusService:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _clean_str(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
 
     def _enforce_trade_locks(self, node_id: str, venue: str) -> None:
         module = self._risk_limits.get("trade_locks") or {}
@@ -4004,6 +4216,100 @@ class NautilusService:
         self._engine.publish(
             "engine.orders",
             {"event": "cancel_requested", "order": summary},
+        )
+
+        self._storage.record_order(summary)
+
+        return {"order": summary}
+
+    def modify_order(self, order_id: str, updates: Dict[str, Any]) -> dict:
+        if not self._engine_active():
+            if not self._engine_package_available():
+                self.require_engine()
+            return self._mock.modify_order(order_id, updates)
+
+        entry = self._engine_orders.get(order_id)
+        if entry is None:
+            return self._mock.modify_order(order_id, updates)
+
+        summary = dict(entry.get("summary", {}))
+        if not summary:
+            return self._mock.modify_order(order_id, updates)
+        if summary.get("status") in {"filled", "cancelled", "rejected"}:
+            return {"order": summary}
+
+        order = OrderRecord(
+            order_id=summary.get("order_id") or order_id,
+            client_order_id=summary.get("client_order_id"),
+            venue_order_id=summary.get("venue_order_id"),
+            symbol=summary.get("symbol") or "",
+            venue=summary.get("venue") or "",
+            side=summary.get("side") or "buy",
+            type=summary.get("type") or "market",
+            quantity=float(summary.get("quantity") or 0.0),
+            filled_quantity=float(summary.get("filled_quantity") or 0.0),
+            price=summary.get("price"),
+            average_price=summary.get("average_price"),
+            status=summary.get("status") or "pending",
+            time_in_force=summary.get("time_in_force"),
+            expire_time=summary.get("expire_time"),
+            post_only=summary.get("post_only"),
+            reduce_only=summary.get("reduce_only"),
+            limit_offset=summary.get("limit_offset"),
+            contingency_type=summary.get("contingency_type"),
+            order_list_id=summary.get("order_list_id"),
+            linked_order_ids=list(summary.get("linked_order_ids") or []),
+            parent_order_id=summary.get("parent_order_id"),
+            instructions=dict(entry.get("instructions") or {}),
+            node_id=summary.get("node_id"),
+            created_at=summary.get("created_at") or _utcnow_iso(),
+            updated_at=summary.get("updated_at") or _utcnow_iso(),
+        )
+
+        candidate, instructions = self._mock._prepare_modification(order, updates or {})
+
+        modify = getattr(self._engine, "modify_order", None)
+        if callable(modify):
+            try:
+                modify(instructions)
+            except TypeError:
+                try:
+                    modify(**instructions)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        linked_ids = candidate.get("linked_order_ids") or []
+        summary.update(
+            quantity=round(candidate.get("quantity") or 0.0, 4),
+            price=(
+                round(candidate.get("price"), 4)
+                if candidate.get("price") is not None
+                else None
+            ),
+            time_in_force=candidate.get("time_in_force"),
+            expire_time=candidate.get("expire_time"),
+            post_only=candidate.get("post_only"),
+            reduce_only=candidate.get("reduce_only"),
+            limit_offset=candidate.get("limit_offset"),
+            contingency_type=candidate.get("contingency_type"),
+            order_list_id=candidate.get("order_list_id"),
+            linked_order_ids=linked_ids,
+            parent_order_id=candidate.get("parent_order_id"),
+            client_order_id=candidate.get("client_order_id"),
+            node_id=candidate.get("node_id"),
+        )
+        summary["status"] = "pending_modify"
+        summary["updated_at"] = _utcnow_iso()
+
+        entry["summary"] = summary
+        entry["instructions"] = instructions
+        self._engine_orders[order_id] = entry
+
+        self._engine.publish(
+            "engine.orders",
+            {"event": "modify_requested", "order": summary},
         )
 
         self._storage.record_order(summary)
