@@ -63,7 +63,11 @@ export class PortfolioMetricsPanelComponent implements OnInit {
     if (!rows.length) {
       return;
     }
-    const columns = Object.keys(rows[0].values);
+    const firstRow = rows.at(0);
+    if (!firstRow) {
+      return;
+    }
+    const columns = Object.keys(firstRow.values ?? {});
     if (columns.length === 0) {
       return;
     }

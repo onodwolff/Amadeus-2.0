@@ -24,9 +24,9 @@ export interface WsChannelConfig {
   retryDelay?: number;
 }
 
-export interface WsChannelHandle {
+export interface WsChannelHandle<T = unknown> {
   readonly name: string;
-  readonly messages$: Observable<unknown>;
+  readonly messages$: Observable<T>;
   readonly state$: Observable<WsConnectionState>;
 }
 
@@ -37,20 +37,20 @@ interface ResolvedChannelConfig {
   retryDelay: number;
 }
 
-interface InternalChannelState {
+interface InternalChannelState<T = unknown> {
   config: ResolvedChannelConfig;
-  source$: Observable<unknown>;
+  source$: Observable<T>;
   statusSubject: BehaviorSubject<WsConnectionState>;
   refCount: number;
 }
 
 @Injectable({ providedIn: 'root' })
 export class WsService {
-  private readonly channels = new Map<string, InternalChannelState>();
+  private readonly channels = new Map<string, InternalChannelState<any>>();
 
-  channel(config: WsChannelConfig): WsChannelHandle {
+  channel<T = unknown>(config: WsChannelConfig): WsChannelHandle<T> {
     const resolved = this.resolveConfig(config);
-    const existing = this.channels.get(resolved.name);
+    const existing = this.channels.get(resolved.name) as InternalChannelState<T> | undefined;
 
     if (existing) {
       if (existing.config.url !== resolved.url) {
@@ -62,8 +62,8 @@ export class WsService {
     }
 
     const statusSubject = new BehaviorSubject<WsConnectionState>('connecting');
-    const source$ = this.createSourceObservable(resolved, statusSubject);
-    const state: InternalChannelState = {
+    const source$ = this.createSourceObservable<T>(resolved, statusSubject);
+    const state: InternalChannelState<T> = {
       config: resolved,
       source$,
       statusSubject,
@@ -88,12 +88,12 @@ export class WsService {
     };
   }
 
-  private createSourceObservable(
+  private createSourceObservable<T>(
     config: ResolvedChannelConfig,
     statusSubject: BehaviorSubject<WsConnectionState>,
-  ): Observable<unknown> {
-    return new Observable<unknown>((subscriber) => {
-      let socket: WebSocketSubject<unknown> | undefined;
+  ): Observable<T> {
+    return new Observable<T>((subscriber) => {
+      let socket: WebSocketSubject<T> | undefined;
       let subscription: Subscription | undefined;
       let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
       let attempt = 0;
@@ -144,7 +144,7 @@ export class WsService {
 
       const connect = () => {
         statusSubject.next('connecting');
-        socket = webSocket({
+        socket = webSocket<T>({
           url: config.url,
           openObserver: {
             next: () => {
@@ -172,7 +172,7 @@ export class WsService {
     });
   }
 
-  private createHandle(name: string, state: InternalChannelState): WsChannelHandle {
+  private createHandle<T>(name: string, state: InternalChannelState<T>): WsChannelHandle<T> {
     const messages$ = this.createManagedObservable(name, state, state.source$);
     const state$ = this.createManagedObservable(
       name,
@@ -187,12 +187,12 @@ export class WsService {
     };
   }
 
-  private createManagedObservable(
+  private createManagedObservable<T>(
     name: string,
-    state: InternalChannelState,
-    source$: Observable<unknown>,
-  ): Observable<unknown> {
-    return new Observable<unknown>((observer) => {
+    state: InternalChannelState<any>,
+    source$: Observable<T>,
+  ): Observable<T> {
+    return new Observable<T>((observer) => {
       state.refCount += 1;
       const subscription = source$.subscribe({
         next: (value) => observer.next(value),
@@ -210,7 +210,7 @@ export class WsService {
     });
   }
 
-  private disposeChannel(name: string, state: InternalChannelState): void {
+  private disposeChannel<T>(name: string, state: InternalChannelState<T>): void {
     const tracked = this.channels.get(name);
     if (tracked !== state) {
       return;
