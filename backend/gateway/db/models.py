@@ -629,8 +629,75 @@ class BacktestResult(Base):
     )
 
 
+class BacktestRunStatus(str, enum.Enum):
+    """Execution status for a strategy optimisation job."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class BacktestRun(Base):
+    """Persisted record of a single parameter combination backtest run."""
+
+    __tablename__ = "backtest_runs"
+    __table_args__ = (
+        UniqueConstraint("run_id", "position", name="uq_backtest_runs_run_id_position"),
+        Index("ix_backtest_runs_run_id", "run_id"),
+        Index("ix_backtest_runs_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    plan: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[BacktestRunStatus] = mapped_column(
+        Enum(BacktestRunStatus, name="backtest_run_status"),
+        nullable=False,
+        default=BacktestRunStatus.PENDING,
+        server_default=BacktestRunStatus.PENDING.value,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    parameters: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+    base_config: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+    metrics: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=JSON_EMPTY_OBJECT,
+    )
+    optimisation_metric: Mapped[Optional[str]] = mapped_column(String(64))
+    optimisation_direction: Mapped[Optional[str]] = mapped_column(String(16))
+    optimisation_score: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(precision=20, scale=10)
+    )
+    node_id: Mapped[Optional[str]] = mapped_column(String(64))
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 __all__ = [
     "ApiKey",
+    "BacktestRun",
+    "BacktestRunStatus",
     "BacktestResult",
     "Balance",
     "Config",
