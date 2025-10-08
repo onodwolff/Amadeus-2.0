@@ -124,7 +124,12 @@ class User(Base):
         default=UserRole.MEMBER,
         server_default=UserRole.MEMBER.value,
     )
-    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     mfa_secret: Mapped[Optional[str]] = mapped_column(Text)

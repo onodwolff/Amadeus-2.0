@@ -51,6 +51,7 @@ async def _seed_admin(
                 name=name,
                 pwd_hash=hashed,
                 role=UserRole.ADMIN,
+                is_admin=True,
             )
             session.add(user)
         else:
@@ -58,6 +59,7 @@ async def _seed_admin(
             user.name = name
             user.pwd_hash = hashed
             user.role = UserRole.ADMIN
+            user.is_admin = True
 
         await session.commit()
     except IntegrityError as exc:  # pragma: no cover - interactive script guard
