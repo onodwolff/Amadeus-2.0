@@ -63,9 +63,9 @@ export class PriceChartComponent implements OnInit, OnChanges, OnDestroy {
   private indicatorSeries: ISeriesApi<'Line'> | null = null;
   private resizeObserver?: ResizeObserver;
 
-  private barsSubscription?: Subscription;
-  private tickSubscription?: Subscription;
-  private stateSubscription?: Subscription;
+  private barsSubscription: Subscription | null = null;
+  private tickSubscription: Subscription | null = null;
+  private stateSubscription: Subscription | null = null;
 
   private candles: CandlestickData[] = [];
   private volumes: HistogramData[] = [];
@@ -95,8 +95,10 @@ export class PriceChartComponent implements OnInit, OnChanges, OnDestroy {
 
   ngOnDestroy(): void {
     this.teardownStreams();
-    this.barsSubscription?.unsubscribe();
-    this.barsSubscription = undefined;
+    if (this.barsSubscription) {
+      this.barsSubscription.unsubscribe();
+      this.barsSubscription = null;
+    }
     this.resizeObserver?.disconnect();
     this.chart?.remove();
     this.chart = null;
@@ -349,10 +351,14 @@ export class PriceChartComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   private teardownStreams(): void {
-    this.tickSubscription?.unsubscribe();
-    this.stateSubscription?.unsubscribe();
-    this.tickSubscription = undefined;
-    this.stateSubscription = undefined;
+    if (this.tickSubscription) {
+      this.tickSubscription.unsubscribe();
+      this.tickSubscription = null;
+    }
+    if (this.stateSubscription) {
+      this.stateSubscription.unsubscribe();
+      this.stateSubscription = null;
+    }
     this.wsState.set('disconnected');
   }
 

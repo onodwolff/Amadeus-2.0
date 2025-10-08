@@ -1,4 +1,4 @@
-import { map, Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import { OrdersStreamMessage } from '../api/models';
 import { WsConnectionState, WsService } from '../ws.service';
 
@@ -15,12 +15,8 @@ export function observeOrdersStream(ws: WsService): OrdersStreamObservables {
     retryDelay: 1000,
   });
 
-  const data$ = channel.messages$.pipe(
-    map((message) => (typeof message === 'object' && message ? message : {} as OrdersStreamMessage)),
-  );
-
   return {
-    data$,
+    data$: channel.messages$,
     state$: channel.state$,
   };
 }

@@ -85,8 +85,8 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
   });
 
   private instrumentId = signal<string | null>(null);
-  private messageSubscription?: Subscription;
-  private stateSubscription?: Subscription;
+  private messageSubscription: Subscription | null = null;
+  private stateSubscription: Subscription | null = null;
   private activeChannelKey: string | null = null;
   private bookState: InternalOrderBookState = {
     bids: new Map<number, number>(),
@@ -179,10 +179,14 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
 
   private teardown(): void {
     this.activeChannelKey = null;
-    this.messageSubscription?.unsubscribe();
-    this.messageSubscription = undefined;
-    this.stateSubscription?.unsubscribe();
-    this.stateSubscription = undefined;
+    if (this.messageSubscription) {
+      this.messageSubscription.unsubscribe();
+      this.messageSubscription = null;
+    }
+    if (this.stateSubscription) {
+      this.stateSubscription.unsubscribe();
+      this.stateSubscription = null;
+    }
     this.wsState.set('disconnected');
   }
 

@@ -1,4 +1,4 @@
-import { map, Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import {
   PortfolioBalancesStreamMessage,
   PortfolioMovementsStreamMessage,
@@ -21,10 +21,8 @@ export function observePortfolioBalances(
     retryDelay: 1000,
   });
 
-  const data$ = channel.messages$.pipe(map((message) => message ?? ({} as typeof message)));
-
   return {
-    data$,
+    data$: channel.messages$,
     state$: channel.state$,
   };
 }
@@ -39,10 +37,8 @@ export function observePortfolioPositions(
     retryDelay: 1000,
   });
 
-  const data$ = channel.messages$.pipe(map((message) => message ?? ({} as typeof message)));
-
   return {
-    data$,
+    data$: channel.messages$,
     state$: channel.state$,
   };
 }
@@ -57,10 +53,8 @@ export function observePortfolioMovements(
     retryDelay: 1500,
   });
 
-  const data$ = channel.messages$.pipe(map((message) => message ?? ({} as typeof message)));
-
   return {
-    data$,
+    data$: channel.messages$,
     state$: channel.state$,
   };
 }
