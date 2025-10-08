@@ -103,7 +103,11 @@
 
       <div class="field">
         <label for="dataset-id">Dataset</label>
-        <select id="dataset-id" formControlName="id" (change)="onDatasetChange($event.target.value)">
+        <select
+          id="dataset-id"
+          formControlName="id"
+          (change)="onDatasetChange(getSelectValue($event))"
+        >
           <option *ngFor="let dataset of datasetOptions" [value]="dataset.id">{{ dataset.name }}</option>
         </select>
       </div>

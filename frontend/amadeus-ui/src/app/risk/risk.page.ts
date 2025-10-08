@@ -31,6 +31,12 @@ import { RiskLimitBreachesWidgetComponent } from './components/limit-breaches-wi
 import { RiskCircuitBreakersWidgetComponent } from './components/circuit-breakers-widget/circuit-breakers-widget.component';
 import { RiskMarginCallsWidgetComponent } from './components/margin-calls-widget/margin-calls-widget.component';
 
+interface RiskEscalation {
+  warn_after?: number;
+  halt_after?: number;
+  reset_minutes?: number;
+}
+
 type PositionLimitFormGroup = FormGroup<{
   venue: FormControl<string>;
   node: FormControl<string>;
@@ -396,7 +402,7 @@ export class RiskPage implements OnInit {
   }
 
   private normalizeControls(module?: Partial<RiskLimits['controls']>): Required<RiskLimits['controls']> {
-    const escalation = module?.escalation ?? {};
+    const escalation: Partial<RiskEscalation> = (module?.escalation ?? {}) as Partial<RiskEscalation>;
     const warn = Number(escalation.warn_after ?? 1) || 1;
     const halt = Number(escalation.halt_after ?? Math.max(2, warn + 1)) || Math.max(2, warn + 1);
     const reset = Number(escalation.reset_minutes ?? 60) || 60;
