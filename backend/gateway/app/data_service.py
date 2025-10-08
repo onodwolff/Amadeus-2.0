@@ -148,6 +148,14 @@ class DataService:
     def dataset_path(self, dataset_id: str) -> Path:
         return self._base_path / f"{dataset_id}.csv"
 
+    def _create_rng(self, request: HistoricalDataRequest) -> random.Random:
+        """Return a deterministic random number generator for a request."""
+
+        seed_material = f"{request.fingerprint}|{request.source or 'mock'}"
+        digest = hashlib.sha256(seed_material.encode("utf-8")).digest()
+        seed = int.from_bytes(digest[:16], "big", signed=False)
+        return random.Random(seed)
+
     async def _find_dataset(self, session: AsyncSession, fingerprint: str) -> Optional[HistoricalDataset]:
         result = await session.execute(
             select(HistoricalDataset).where(HistoricalDataset.fingerprint == fingerprint)
@@ -274,7 +282,8 @@ class DataService:
             steps = max_rows
 
         path = self.dataset_path(request.dataset_id)
-        base_price = random.uniform(50, 500)
+        rng = self._create_rng(request)
+        base_price = rng.uniform(50, 500)
         timestamp = request.start
         rows_written = 0
         with path.open("w", newline="", encoding="utf-8") as handle:
@@ -282,12 +291,12 @@ class DataService:
             writer.writerow(["timestamp", "open", "high", "low", "close", "volume"])
             price = base_price
             for _ in range(steps + 1):
-                change = random.uniform(-0.75, 0.75)
+                change = rng.uniform(-0.75, 0.75)
                 open_price = price
                 close_price = max(0.1, price + change)
-                high_price = max(open_price, close_price) + random.uniform(0, 0.5)
-                low_price = min(open_price, close_price) - random.uniform(0, 0.5)
-                volume = max(0.01, abs(change) * random.uniform(50, 200))
+                high_price = max(open_price, close_price) + rng.uniform(0, 0.5)
+                low_price = min(open_price, close_price) - rng.uniform(0, 0.5)
+                volume = max(0.01, abs(change) * rng.uniform(50, 200))
                 writer.writerow(
                     [
                         timestamp.isoformat(),
