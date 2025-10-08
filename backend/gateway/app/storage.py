@@ -106,7 +106,7 @@ class AsyncDatabase:
     async def session(self) -> AsyncIterator[AsyncSession]:
         """Provide an ``async with`` ready session context manager."""
 
-        engine = await self._ensure_engine()
+        await self._ensure_engine()
         if self._session_factory is None:  # pragma: no cover - defensive
             raise DatabaseNotAvailable("Session factory missing despite engine initialised")
 

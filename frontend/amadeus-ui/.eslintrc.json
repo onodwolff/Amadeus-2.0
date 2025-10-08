@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/eslintrc",
   "root": true,
   "ignorePatterns": ["projects/**/*"],
   "overrides": [
@@ -9,14 +8,24 @@
         "plugin:@angular-eslint/recommended",
         "plugin:@angular-eslint/template/process-inline-templates"
       ],
-      "parserOptions": {
-        "project": [
-          "tsconfig.app.json",
-          "tsconfig.spec.json"
+      "rules": {
+        "@angular-eslint/component-selector": [
+          "error",
+          {
+            "type": "element",
+            "prefix": "app",
+            "style": "kebab-case"
+          }
         ],
-        "createDefaultProgram": true
-      },
-      "rules": {}
+        "@angular-eslint/directive-selector": [
+          "error",
+          {
+            "type": "attribute",
+            "prefix": "app",
+            "style": "camelCase"
+          }
+        ]
+      }
     },
     {
       "files": ["*.html"],

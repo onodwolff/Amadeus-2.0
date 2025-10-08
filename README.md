@@ -1,75 +1,88 @@
 # Amadeus 2.0
 
-## Frontend development
+## Run the full stack with one command
 
-Run frontend npm scripts from the `frontend/amadeus-ui` directory so the Angular CLI can find the workspace configuration. For example:
+The repository ships with a Compose setup that launches the API, Angular UI, PostgreSQL, and Redis in a single terminal. The API container runs database migrations on boot so you land on an operational dashboard without any manual prep.
+
+```bash
+docker compose up --build
+```
+
+The services become available on:
+
+| Service   | URL                  |
+|-----------|----------------------|
+| Frontend  | <http://localhost:4200> |
+| API       | <http://localhost:8000> |
+| Postgres  | `localhost:5432`      |
+| Redis     | `localhost:6379`      |
+
+By default the stack runs with `AMAD_USE_MOCK=true`, enabling the in-repo Nautilus mocks so you can explore the UI without installing the trading engine. Switch to the real integration by exporting the variable before starting Compose:
+
+```bash
+export AMAD_USE_MOCK=false
+docker compose up --build
+```
+
+When the Nautilus engine is unavailable while `AMAD_USE_MOCK=false`, engine-dependent API calls respond with HTTP 501 and a hint to install `nautilus-trader` or toggle the mock profile.
+
+To reset the database while Compose is running, stop the stack and remove the named volume:
+
+```bash
+docker compose down
+docker volume rm amadeus-2.0_db_data
+```
+
+## Development workflows
+
+### Frontend
+
+Run npm scripts from `frontend/amadeus-ui` so the Angular CLI resolves the workspace correctly:
 
 ```bash
 cd frontend/amadeus-ui
 npm run start
 ```
 
-Alternatively, you can run commands from the repository root using `npm --prefix frontend/amadeus-ui <command>`:
+You can also stay at the repository root and prefix commands:
 
 ```bash
 npm --prefix frontend/amadeus-ui run lint
 ```
 
-This prevents "missing package.json" errors that occur when running the scripts from the wrong folder.
+### Backend
 
-## Backend setup
+The `Makefile` offers shortcuts for installing dependencies and running the FastAPI gateway locally:
 
-Create a PostgreSQL role for the gateway services before running the backend:
-
-```sql
-CREATE USER amadeus WITH PASSWORD 'amadeus';
+```bash
+make dev           # install Python requirements
+make run           # start uvicorn in reload mode
+make test          # execute pytest
 ```
 
-## Setup DB/Redis & Run Nautilus Nodes
+Run migrations against your preferred database with:
 
-1. **Install dependencies.**
-   ```bash
-   pip install -r requirements.txt
-   npm --prefix frontend/amadeus-ui install
-   ```
+```bash
+python backend/gateway/scripts/apply_migrations.py --database-url <DATABASE_URL>
+```
 
-2. **Provision database and Redis services.** Use a local PostgreSQL instance for
-   relational storage and Redis for low-latency caching. Docker makes it easy to
-   spin up both services:
-   ```bash
-   docker run -d --name amadeus-postgres -e POSTGRES_DB=amadeus -e POSTGRES_USER=amadeus \
-     -e POSTGRES_PASSWORD=amadeus -p 5432:5432 postgres:16
-   docker run -d --name amadeus-redis -p 6379:6379 redis:7
-   ```
+### Linting and formatting
 
-3. **Run Alembic migrations.** The helper script configures the Python path and
-   applies compatibility shims so that migrations work against SQLite during
-   development and PostgreSQL in production.
-   ```bash
-   python backend/gateway/scripts/apply_migrations.py \
-     --database-url postgresql+asyncpg://amadeus:amadeus@localhost:5432/amadeus
-   ```
+Strong lint/format defaults are enabled for both the frontend and backend:
 
-4. **Export runtime settings.**
-   ```bash
-   export DATABASE_URL=postgresql+asyncpg://amadeus:amadeus@localhost:5432/amadeus
-   export REDIS_URL=redis://localhost:6379/0
-   # Enable real Nautilus integration once the engine package is installed.
-   export AMAD_USE_MOCK=false
-   ```
-   Leaving `AMAD_USE_MOCK=true` retains the fully featured mock service for local
-   experimentation.
+```bash
+make lint          # ruff + Angular ESLint
+make format        # ruff format + Prettier (TS/SCSS)
+```
 
-5. **Launch the gateway API and front-end.**
-   ```bash
-   uvicorn backend.gateway.app.main:app --reload
-   npm --prefix frontend/amadeus-ui run start
-   ```
+### End-to-end smoke test
 
-6. **Run Nautilus nodes.** With the API running and the Nautilus engine
-   available on the Python path (either installed from PyPI or via the `vendor`
-   bundle), open the dashboard at <http://localhost:4200>, configure credentials,
-   and use the *Launch node* wizard. The gateway will refuse engine-bound
-   actions with HTTP 501 responses if `nautilus-trader` is missing while mocks
-   are disabled, providing a clear hint to install the package or re-enable the
-   mock integration.
+The Playwright suite confirms that the dashboard boots.
+
+```bash
+cd frontend/amadeus-ui
+npx playwright install  # once per machine to download browsers
+npm run e2e
+```
+
+The test harness starts `ng serve` automatically and checks that the dashboard shell renders.
