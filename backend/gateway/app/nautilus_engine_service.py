@@ -28,6 +28,7 @@ from decimal import Decimal
 import uuid
 import threading
 from typing import IO, Any, AsyncIterator, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from urllib.parse import parse_qs, urlparse
 
 try:  # pragma: no cover - optional dependency during unit tests
     import nautilus_trader as nt  # type: ignore
@@ -294,6 +295,7 @@ class NautilusEngineService:
         *,
         database_url: Optional[str] = None,
         encryption_key: Optional[bytes] = None,
+        redis_url: Optional[str] = None,
     ) -> None:
         self._bus = bus or EngineEventBus()
         self._nt = nt
@@ -312,6 +314,7 @@ class NautilusEngineService:
         self._node_configs: Dict[str, Dict[str, Any]] = {}
         self._adapter_status: Dict[str, List[Dict[str, Any]]] = {}
         self._telemetry_threads: Dict[str, Tuple[threading.Thread, threading.Event]] = {}
+        self._redis_url = redis_url
 
     @property
     def bus(self) -> EngineEventBus:
@@ -1781,6 +1784,11 @@ class NautilusEngineService:
         try:
             from nautilus_trader.common import Environment  # type: ignore
             from nautilus_trader.config import TradingNodeConfig  # type: ignore
+            from nautilus_trader.cache.config import CacheConfig  # type: ignore
+            from nautilus_trader.common.config import (  # type: ignore
+                DatabaseConfig as NautilusDatabaseConfig,
+                MessageBusConfig,
+            )
         except Exception as exc:  # pragma: no cover - optional dependency
             raise RuntimeError(
                 "Unable to import Nautilus trading configuration"
@@ -1800,14 +1808,109 @@ class NautilusEngineService:
             EngineMode.BACKTEST: Environment.BACKTEST,
         }.get(mode, Environment.LIVE)
 
-        if not data_clients and not exec_clients:
-            return TradingNodeConfig(environment=environment)
+        cache_config = None
+        message_bus_config = None
+        load_state = False
+        save_state = False
 
-        return TradingNodeConfig(
-            environment=environment,
-            data_clients=data_clients,
-            exec_clients=exec_clients,
-        )
+        redis_config_params = self._parse_redis_url()
+        if redis_config_params is not None:
+            try:
+                cache_database = NautilusDatabaseConfig(
+                    type="redis",
+                    host=redis_config_params["host"],
+                    port=redis_config_params["port"],
+                    username=redis_config_params.get("username"),
+                    password=redis_config_params.get("password"),
+                    ssl=redis_config_params.get("ssl", False),
+                    timeout=redis_config_params.get("timeout"),
+                )
+                bus_database = NautilusDatabaseConfig(
+                    type="redis",
+                    host=redis_config_params["host"],
+                    port=redis_config_params["port"],
+                    username=redis_config_params.get("username"),
+                    password=redis_config_params.get("password"),
+                    ssl=redis_config_params.get("ssl", False),
+                    timeout=redis_config_params.get("timeout"),
+                )
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self._logger.debug(
+                    "Unable to construct Redis database config: %s", exc
+                )
+            else:
+                cache_config = CacheConfig(
+                    database=cache_database,
+                    timestamps_as_iso8601=True,
+                    flush_on_start=False,
+                )
+                message_bus_config = MessageBusConfig(
+                    database=bus_database,
+                    timestamps_as_iso8601=True,
+                )
+                load_state = True
+                save_state = True
+
+        config_kwargs: Dict[str, Any] = {"environment": environment}
+        if data_clients:
+            config_kwargs["data_clients"] = data_clients
+        if exec_clients:
+            config_kwargs["exec_clients"] = exec_clients
+        if cache_config is not None:
+            config_kwargs["cache"] = cache_config
+        if message_bus_config is not None:
+            config_kwargs["message_bus"] = message_bus_config
+        if load_state:
+            config_kwargs["load_state"] = load_state
+            config_kwargs["save_state"] = save_state
+
+        return TradingNodeConfig(**config_kwargs)
+
+    def _parse_redis_url(self) -> Optional[Dict[str, Any]]:
+        if not self._redis_url:
+            return None
+        try:
+            parsed = urlparse(self._redis_url)
+        except Exception:  # pragma: no cover - defensive guard
+            self._logger.debug(
+                "Invalid Redis URL provided for persistence: %s", self._redis_url
+            )
+            return None
+
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in {"redis", "rediss"}:
+            self._logger.debug(
+                "Unsupported Redis URL scheme '%s' – persistence disabled", scheme
+            )
+            return None
+
+        host = parsed.hostname or "localhost"
+        default_port = 6380 if scheme == "rediss" else 6379
+        port = parsed.port or default_port
+        username = parsed.username or None
+        password = parsed.password or None
+        ssl = scheme == "rediss"
+
+        timeout: Optional[int] = None
+        query = parse_qs(parsed.query)
+        raw_timeout = query.get("timeout")
+        if raw_timeout:
+            try:
+                timeout = int(raw_timeout[0])
+            except (TypeError, ValueError):
+                timeout = None
+
+        payload: Dict[str, Any] = {
+            "host": host,
+            "port": port,
+            "username": username,
+            "password": password,
+            "ssl": ssl,
+        }
+        if timeout is not None:
+            payload["timeout"] = timeout
+
+        return payload
 
     def _register_adapter_factories(
         self, node: Any, plan: List[AdapterPlanEntry], node_id: str
@@ -2660,7 +2763,12 @@ class NautilusEngineService:
         return config_path
 
 
-def build_engine_service(bus: Optional[EngineEventBus] = None) -> NautilusEngineService:
+def build_engine_service(
+    bus: Optional[EngineEventBus] = None,
+    *,
+    redis_url: Optional[str] = None,
+) -> NautilusEngineService:
     """Factory helper used across the gateway to construct the engine wrapper."""
 
-    return NautilusEngineService(bus=bus)
+    redis_value = redis_url if redis_url is not None else os.environ.get("REDIS_URL")
+    return NautilusEngineService(bus=bus, redis_url=redis_value)

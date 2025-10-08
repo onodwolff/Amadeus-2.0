@@ -6,6 +6,42 @@ from ..app.nautilus_engine_service import EngineEventBus, build_engine_service
 from ..app.nautilus_service import NautilusService
 
 
+def test_build_engine_service_propagates_redis_url():
+    loop = asyncio.get_event_loop()
+    bus = EngineEventBus(loop=loop)
+    redis_url = "rediss://user:pass@redis-host:6380/1?timeout=5"
+    engine = build_engine_service(bus=bus, redis_url=redis_url)
+
+    assert engine._redis_url == redis_url
+    params = engine._parse_redis_url()
+    assert params == {
+        "host": "redis-host",
+        "port": 6380,
+        "username": "user",
+        "password": "pass",
+        "ssl": True,
+        "timeout": 5,
+    }
+
+
+def test_build_engine_service_uses_env_default(monkeypatch):
+    loop = asyncio.get_event_loop()
+    bus = EngineEventBus(loop=loop)
+    monkeypatch.setenv("REDIS_URL", "redis://env-host:6379/0")
+
+    engine = build_engine_service(bus=bus)
+
+    assert engine._redis_url == "redis://env-host:6379/0"
+    params = engine._parse_redis_url()
+    assert params == {
+        "host": "env-host",
+        "port": 6379,
+        "username": None,
+        "password": None,
+        "ssl": False,
+    }
+
+
 @pytest.mark.asyncio
 async def test_node_stream_emits_after_launch():
     loop = asyncio.get_event_loop()
