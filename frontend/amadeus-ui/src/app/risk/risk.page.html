@@ -22,6 +22,43 @@
         <app-risk-margin-calls-widget></app-risk-margin-calls-widget>
       </section>
 
+      <section class="risk-usage-panel" *ngIf="riskUsage().length || drawdownUsage().length">
+        <header class="risk-usage-panel__header">
+          <h2>Current utilisation</h2>
+          <p>Latest engine metrics compared against configured hard limits.</p>
+        </header>
+        <div class="risk-usage-panel__columns">
+          <article class="risk-usage-panel__column" *ngIf="riskUsage().length">
+            <h3>Position limits</h3>
+            <ul>
+              <li *ngFor="let item of riskUsage()" [class.risk-usage-panel__item--breached]="item.breached">
+                <span class="risk-usage-panel__name">{{ item.name }}</span>
+                <span class="risk-usage-panel__value">
+                  {{ item.value | number: '1.0-0' }} / {{ item.limit ?? 0 | number: '1.0-0' }} {{ item.unit || 'USD' }}
+                </span>
+                <span class="risk-usage-panel__percent">
+                  {{ (item.limit && item.limit > 0 ? (item.value / item.limit) * 100 : 0) | number: '1.0-0' }}%
+                </span>
+              </li>
+            </ul>
+          </article>
+          <article class="risk-usage-panel__column" *ngIf="drawdownUsage().length">
+            <h3>Drawdown limits</h3>
+            <ul>
+              <li *ngFor="let item of drawdownUsage()" [class.risk-usage-panel__item--breached]="item.breached">
+                <span class="risk-usage-panel__name">{{ item.name }}</span>
+                <span class="risk-usage-panel__value">
+                  {{ item.value | number: '1.0-0' }} / {{ item.limit ?? 0 | number: '1.0-0' }} {{ item.unit || 'USD' }}
+                </span>
+                <span class="risk-usage-panel__percent">
+                  {{ (item.limit && item.limit > 0 ? (item.value / item.limit) * 100 : 0) | number: '1.0-0' }}%
+                </span>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
       <form class="risk-form" [formGroup]="form" (ngSubmit)="onSubmit()">
         <section class="risk-module" [formGroup]="positionLimitsGroup">
           <header class="risk-module__header">
@@ -194,6 +231,42 @@
             <div class="risk-table__footer">
               <button type="button" class="link" (click)="addTradeLock()">Add trade lock</button>
             </div>
+          </div>
+        </section>
+
+        <section class="risk-module" [formGroup]="controlsGroup">
+          <header class="risk-module__header">
+            <div class="risk-module__title">
+              <h2>Limit controls</h2>
+              <p class="risk-module__subtitle">Configure breach escalation and automated halts.</p>
+            </div>
+          </header>
+          <div class="risk-module__body risk-controls-grid">
+            <label class="module-toggle module-toggle--inline">
+              <input type="checkbox" formControlName="halt_on_breach" />
+              <span>Halt node automatically on critical breach</span>
+            </label>
+            <label class="module-toggle module-toggle--inline">
+              <input type="checkbox" formControlName="notify_on_recovery" />
+              <span>Send notification when the limit recovers</span>
+            </label>
+            <fieldset class="risk-controls-grid__fieldset" formGroupName="escalation">
+              <legend>Escalation thresholds</legend>
+              <div class="risk-controls-grid__inputs">
+                <label>
+                  Warn after
+                  <input type="number" formControlName="warn_after" min="1" step="1" />
+                </label>
+                <label>
+                  Halt after
+                  <input type="number" formControlName="halt_after" min="1" step="1" />
+                </label>
+                <label>
+                  Reset window (minutes)
+                  <input type="number" formControlName="reset_minutes" min="1" step="1" />
+                </label>
+              </div>
+            </fieldset>
           </div>
         </section>
 

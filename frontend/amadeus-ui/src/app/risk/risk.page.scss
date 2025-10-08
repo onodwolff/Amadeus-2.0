@@ -12,6 +12,84 @@
   gap: 1.5rem;
 }
 
+.risk-usage-panel {
+  border: 1px solid #dbeafe;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.45), rgba(248, 250, 252, 0.9));
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.risk-usage-panel__header h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.risk-usage-panel__header p {
+  margin: 0;
+  color: #475569;
+}
+
+.risk-usage-panel__columns {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.risk-usage-panel__column h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.risk-usage-panel__column ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.risk-usage-panel__column li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.risk-usage-panel__item--breached {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(254, 242, 242, 0.85);
+}
+
+.risk-usage-panel__name {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.risk-usage-panel__value {
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.risk-usage-panel__percent {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.risk-usage-panel__item--breached .risk-usage-panel__percent {
+  color: #dc2626;
+}
+
 .risk-page__header {
   display: flex;
   flex-direction: column;
@@ -109,6 +187,12 @@
   font-weight: 600;
 }
 
+.risk-module__subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
 .risk-module__body {
   display: flex;
   flex-direction: column;
@@ -144,6 +228,10 @@
   gap: 0.5rem;
   font-weight: 600;
   color: #1e293b;
+}
+
+.module-toggle--inline {
+  align-items: center;
 }
 
 .module-toggle input[type='checkbox'] {
@@ -199,6 +287,47 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.risk-controls-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.risk-controls-grid__fieldset {
+  border: 1px solid #cbd5f5;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.risk-controls-grid__fieldset legend {
+  padding: 0 0.5rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.risk-controls-grid__inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.risk-controls-grid__inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.risk-controls-grid__inputs input {
+  padding: 0.5rem;
+  border: 1px solid #cbd5f5;
+  border-radius: 0.5rem;
+  font: inherit;
 }
 
 .risk-table__field label {

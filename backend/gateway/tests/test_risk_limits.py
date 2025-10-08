@@ -80,6 +80,11 @@ async def test_risk_limits_save_and_load(db_session, session_factory, monkeypatc
                 risk.TradeLockConfig(venue="BINANCE", node="alpha", locked=False),
             ],
         ),
+        controls=risk.RiskControlsModule(
+            halt_on_breach=True,
+            notify_on_recovery=True,
+            escalation=risk.RiskEscalationModule(warn_after=1, halt_after=2, reset_minutes=15),
+        ),
     )
 
     updated = await risk.update_risk_limits(
@@ -96,6 +101,7 @@ async def test_risk_limits_save_and_load(db_session, session_factory, monkeypatc
         result = await verify_session.execute(select(RiskLimit))
         record = result.scalar_one()
         assert record.cfg["max_loss"]["daily"] == 2_500.0
+        assert record.cfg["controls"]["halt_on_breach"] is True
     finally:
         await verify_session.close()
 
@@ -103,4 +109,5 @@ async def test_risk_limits_save_and_load(db_session, session_factory, monkeypatc
 
     assert loaded.limits.max_loss.weekly == 10_000.0
     assert loaded.limits.trade_locks.locks[0].locked is False
+    assert loaded.limits.controls.escalation.halt_after == 2
     assert loaded.scope.user_id == str(user.id)

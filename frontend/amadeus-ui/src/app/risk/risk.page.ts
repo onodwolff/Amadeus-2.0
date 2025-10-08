@@ -21,6 +21,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RiskApi } from '../api/clients';
 import {
   PositionLimitConfig,
+  RiskLimit,
   RiskLimits,
   RiskModuleStatus,
   TradeLockConfig,
@@ -62,10 +63,23 @@ type TradeLocksModuleGroup = FormGroup<{
   locks: FormArray<TradeLockFormGroup>;
 }>;
 
+type RiskEscalationFormGroup = FormGroup<{
+  warn_after: FormControl<number>;
+  halt_after: FormControl<number>;
+  reset_minutes: FormControl<number>;
+}>;
+
+type RiskControlsModuleGroup = FormGroup<{
+  halt_on_breach: FormControl<boolean>;
+  notify_on_recovery: FormControl<boolean>;
+  escalation: RiskEscalationFormGroup;
+}>;
+
 type RiskFormGroup = FormGroup<{
   positionLimits: PositionLimitsModuleGroup;
   maxLoss: MaxLossModuleGroup;
   tradeLocks: TradeLocksModuleGroup;
+  controls: RiskControlsModuleGroup;
 }>;
 
 @Component({
@@ -123,6 +137,8 @@ export class RiskPage implements OnInit {
   readonly isLoading = signal(true);
   readonly isSaving = signal(false);
   readonly loadError = signal<string | null>(null);
+  readonly riskUsage = signal<RiskLimit[]>([]);
+  readonly drawdownUsage = signal<RiskLimit[]>([]);
 
   readonly moduleStatusOptions = RiskPage.allowedStatuses.map((value) => ({
     value,
@@ -157,6 +173,10 @@ export class RiskPage implements OnInit {
 
   get tradeLocksGroup(): TradeLocksModuleGroup {
     return this.form.controls.tradeLocks;
+  }
+
+  get controlsGroup(): RiskControlsModuleGroup {
+    return this.form.controls.controls;
   }
 
   get positionLimitEntries(): FormArray<PositionLimitFormGroup> {
@@ -255,6 +275,7 @@ export class RiskPage implements OnInit {
           }
           this.form.markAsPristine();
           this.notifications.success('Risk limits updated successfully.', 'Risk API');
+          this.loadRiskSnapshot();
         },
         error: (err) => {
           console.error('Failed to update risk limits', err);
@@ -277,6 +298,7 @@ export class RiskPage implements OnInit {
           }
           this.applyLimits(response.limits);
           this.form.markAsPristine();
+          this.loadRiskSnapshot();
         },
         error: (err) => {
           console.error('Failed to load risk limits', err);
@@ -289,6 +311,7 @@ export class RiskPage implements OnInit {
     const positionLimits = this.normalizePositionLimits(limits.position_limits);
     const maxLoss = this.normalizeMaxLoss(limits.max_loss);
     const tradeLocks = this.normalizeTradeLocks(limits.trade_locks);
+    const controls = this.normalizeControls(limits.controls);
 
     this.positionLimitsGroup.patchValue(
       {
@@ -317,6 +340,19 @@ export class RiskPage implements OnInit {
       { emitEvent: false },
     );
     this.syncTradeLockEntries(tradeLocks);
+
+    this.controlsGroup.patchValue(
+      {
+        halt_on_breach: controls.halt_on_breach,
+        notify_on_recovery: controls.notify_on_recovery,
+        escalation: {
+          warn_after: controls.escalation.warn_after,
+          halt_after: controls.escalation.halt_after,
+          reset_minutes: controls.escalation.reset_minutes,
+        },
+      },
+      { emitEvent: false },
+    );
 
     this.applyModuleEnabledState(this.positionLimitsGroup, positionLimits.enabled, ['enabled', 'status']);
     this.applyModuleEnabledState(this.maxLossGroup, maxLoss.enabled, ['enabled', 'status']);
@@ -357,6 +393,35 @@ export class RiskPage implements OnInit {
           }))
         : [],
     };
+  }
+
+  private normalizeControls(module?: Partial<RiskLimits['controls']>): Required<RiskLimits['controls']> {
+    const escalation = module?.escalation ?? {};
+    const warn = Number(escalation.warn_after ?? 1) || 1;
+    const halt = Number(escalation.halt_after ?? Math.max(2, warn + 1)) || Math.max(2, warn + 1);
+    const reset = Number(escalation.reset_minutes ?? 60) || 60;
+    return {
+      halt_on_breach: module?.halt_on_breach ?? true,
+      notify_on_recovery: module?.notify_on_recovery ?? true,
+      escalation: {
+        warn_after: Math.max(1, warn),
+        halt_after: Math.max(Math.max(1, warn), halt),
+        reset_minutes: Math.max(1, reset),
+      },
+    };
+  }
+
+  private loadRiskSnapshot(): void {
+    this.api.getRisk().subscribe({
+      next: (response) => {
+        const metrics = response?.risk;
+        this.riskUsage.set(metrics?.exposure_limits ?? []);
+        this.drawdownUsage.set(metrics?.drawdown_limits ?? []);
+      },
+      error: (err) => {
+        console.error('Failed to load risk snapshot', err);
+      },
+    });
   }
 
   private syncPositionLimitEntries(module: Required<RiskLimits['position_limits']>): void {
@@ -421,6 +486,15 @@ export class RiskPage implements OnInit {
         enabled: this.fb.nonNullable.control(false),
         status: this.fb.nonNullable.control<RiskModuleStatus>('stale', Validators.required),
         locks: this.fb.array<TradeLockFormGroup>([]),
+      }),
+      controls: this.fb.nonNullable.group({
+        halt_on_breach: this.fb.nonNullable.control(true),
+        notify_on_recovery: this.fb.nonNullable.control(true),
+        escalation: this.fb.nonNullable.group({
+          warn_after: this.fb.nonNullable.control(1, [Validators.required, Validators.min(1)]),
+          halt_after: this.fb.nonNullable.control(2, [Validators.required, Validators.min(1)]),
+          reset_minutes: this.fb.nonNullable.control(60, [Validators.required, Validators.min(1)]),
+        }) as RiskEscalationFormGroup,
       }),
     }) as RiskFormGroup;
   }
@@ -518,6 +592,18 @@ export class RiskPage implements OnInit {
           };
         }),
       },
+      controls: {
+        halt_on_breach: Boolean(raw.controls?.halt_on_breach ?? true),
+        notify_on_recovery: Boolean(raw.controls?.notify_on_recovery ?? true),
+        escalation: {
+          warn_after: Math.max(1, Number(raw.controls?.escalation?.warn_after ?? 1)),
+          halt_after: Math.max(
+            Math.max(1, Number(raw.controls?.escalation?.warn_after ?? 1)),
+            Number(raw.controls?.escalation?.halt_after ?? 2),
+          ),
+          reset_minutes: Math.max(1, Number(raw.controls?.escalation?.reset_minutes ?? 60)),
+        },
+      },
     };
   }
- }
+}

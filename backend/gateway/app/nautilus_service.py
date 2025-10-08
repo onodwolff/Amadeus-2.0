@@ -247,6 +247,17 @@ class RiskAlert:
 
 
 @dataclass
+class RiskBreachState:
+    """Track repeated breaches for a given risk control."""
+
+    count: int = 0
+    last_triggered: Optional[datetime] = None
+    alert_id: Optional[str] = None
+    severity: RiskAlertSeverity = "medium"
+    active: bool = False
+
+
+@dataclass
 class OrderRecord:
     order_id: str
     client_order_id: Optional[str]
@@ -337,6 +348,9 @@ class MockNautilusService:
             "circuit_breaker": [],
             "margin_call": [],
         }
+        self._risk_usage: Dict[str, Dict[str, Any]] = {}
+        self._last_exposure_entries: List[Dict[str, Any]] = []
+        self._breach_states: Dict[str, RiskBreachState] = {}
         self._users: Dict[str, UserProfile] = {}
         self._seed_users()
         self._publish_portfolio()
@@ -501,6 +515,13 @@ class MockNautilusService:
 
     def _publish_portfolio(self) -> None:
         snapshot = self.portfolio_snapshot()
+        try:
+            self._evaluate_risk_limits(snapshot)
+        except Exception:  # pragma: no cover - defensive guard
+            LOGGER.debug("risk_evaluation_failed", exc_info=True)
+        else:
+            # ensure risk snapshot reflects the latest evaluation
+            self._publish_risk_snapshot()
         self._publish(
             "engine.portfolio",
             {"event": "snapshot", **snapshot},
@@ -2457,63 +2478,467 @@ class MockNautilusService:
     def risk_snapshot(self) -> dict:
         timestamp = _utcnow_iso()
 
-        exposures: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        for position in self._portfolio_positions:
-            key = (position.symbol, position.venue)
-            mark = position.mark_price or position.average_price or 0.0
-            net = round(position.quantity * mark, 2)
-            entry = exposures.setdefault(
-                key,
-                {
-                    "symbol": position.symbol,
-                    "venue": position.venue,
-                    "net_exposure": 0.0,
-                    "notional_value": 0.0,
-                    "currency": "USD",
-                },
-            )
-            entry["net_exposure"] = round(entry["net_exposure"] + net, 2)
-            entry["notional_value"] = round(entry["notional_value"] + abs(net), 2)
-
-        exposure_list = list(exposures.values())
-        total_notional = sum(item["notional_value"] for item in exposure_list)
-
-        exposure_limits = [
-            {
-                "name": "Max order quantity",
-                "value": 0.0,
-                "limit": 250.0,
-                "unit": "units",
-                "breached": False,
-            },
-            {
-                "name": "Max order notional",
-                "value": round(total_notional, 2),
-                "limit": 250_000.0,
-                "unit": "USD",
-                "breached": total_notional > 250_000.0,
-            },
+        usage_entries = list(self._risk_usage.values())
+        position_limits = [
+            value
+            for key, value in self._risk_usage.items()
+            if key.startswith("position::")
         ]
+        loss_limits = [
+            value
+            for key, value in self._risk_usage.items()
+            if key.startswith("loss::")
+        ]
+
+        total_notional = sum(
+            entry.get("net_exposure", 0.0) for entry in self._last_exposure_entries
+        )
 
         return {
             "risk": {
                 "timestamp": timestamp,
                 "total_var": round(total_notional * 0.12, 2),
                 "stress_var": round(total_notional * 0.18, 2),
-                "exposure_limits": exposure_limits,
-                "exposures": exposure_list,
+                "exposure_limits": position_limits,
+                "drawdown_limits": loss_limits,
+                "usage": usage_entries,
+                "exposures": list(self._last_exposure_entries),
             },
             "limits": deepcopy(self._risk_limits),
         }
 
     def risk_limits_snapshot(self) -> dict:
-        return {"limits": deepcopy(self._risk_limits)}
+        return {
+            "limits": deepcopy(self._risk_limits),
+            "usage": list(self._risk_usage.values()),
+        }
 
     def update_risk_limits(self, payload: Dict[str, Any]) -> dict:
         self._risk_limits = deepcopy(payload)
+        # reset cached usage whenever configuration changes to avoid
+        # reporting stale utilisation values for removed limits.
+        self._risk_usage.clear()
+        # ensure escalation counters are reset for removed entries
+        max_loss_enabled = bool(
+            (self._risk_limits.get("max_loss") or {}).get("enabled", False)
+        )
+
+        def _keep_state(key: str) -> bool:
+            if key.startswith("position::"):
+                return self._resolve_limit_entry(key.partition("::")[2]) is not None
+            if key.startswith("loss::"):
+                return max_loss_enabled
+            return True
+
+        self._breach_states = {
+            key: state for key, state in self._breach_states.items() if _keep_state(key)
+        }
         snapshot = self.risk_limits_snapshot()
+        try:
+            self._evaluate_risk_limits(self.portfolio_snapshot())
+        except Exception:  # pragma: no cover - defensive guard
+            LOGGER.debug("risk_evaluation_failed_after_update", exc_info=True)
         self._publish_risk_snapshot()
         return snapshot
+
+    # --- Risk evaluation helpers -------------------------------------
+
+    def _resolve_limit_entry(self, identifier: str) -> Optional[Dict[str, Any]]:
+        modules = self._risk_limits.get("position_limits", {})
+        for entry in modules.get("limits", []):
+            key = self._limit_key(entry.get("node"), entry.get("venue"))
+            if key == identifier:
+                return entry
+        return None
+
+    def _limit_key(self, node: Optional[str], venue: Optional[str]) -> str:
+        node_id = (node or "*").strip() or "*"
+        venue_id = (venue or "*").strip().upper() or "*"
+        return f"{node_id}@{venue_id}"
+
+    def _controls_module(self) -> Dict[str, Any]:
+        module = self._risk_limits.get("controls") or {}
+        escalation = module.get("escalation") or {}
+        warn_after = max(1, int(escalation.get("warn_after") or 1))
+        halt_after = max(warn_after, int(escalation.get("halt_after") or 2))
+        reset_minutes = max(1, int(escalation.get("reset_minutes") or 60))
+        return {
+            "halt_on_breach": bool(module.get("halt_on_breach", True)),
+            "notify_on_recovery": bool(module.get("notify_on_recovery", True)),
+            "warn_after": warn_after,
+            "halt_after": halt_after,
+            "reset_minutes": reset_minutes,
+        }
+
+    def _record_usage(self, key: str, payload: Dict[str, Any]) -> None:
+        self._risk_usage[key] = {
+            **payload,
+            "updated_at": _utcnow_iso(),
+        }
+
+    def _resolve_escalation_state(self, key: str) -> RiskBreachState:
+        state = self._breach_states.get(key)
+        if state is None:
+            state = RiskBreachState()
+            self._breach_states[key] = state
+        return state
+
+    def _reset_state_if_stale(self, key: str, state: RiskBreachState) -> None:
+        controls = self._controls_module()
+        if state.last_triggered is None:
+            return
+        delta = datetime.utcnow() - state.last_triggered
+        if delta.total_seconds() >= controls["reset_minutes"] * 60:
+            state.count = 0
+            state.alert_id = None
+            state.active = False
+            state.severity = "medium"
+
+    def _raise_or_update_alert(
+        self,
+        *,
+        key: str,
+        state: RiskBreachState,
+        title: str,
+        message: str,
+        severity: RiskAlertSeverity,
+        context: Dict[str, Any],
+        category: RiskAlertCategory = "limit_breach",
+    ) -> RiskAlert:
+        if state.alert_id is not None:
+            alert = self._find_risk_alert(state.alert_id)
+            alert.title = title
+            alert.message = message
+            alert.severity = severity
+            alert.context.update(context)
+            self._publish_risk_alert("updated", alert)
+            state.severity = severity
+            return alert
+
+        alert = self._add_risk_alert(
+            category=category,
+            severity=severity,
+            title=title,
+            message=message,
+            context=context,
+        )
+        state.alert_id = alert.alert_id
+        state.severity = severity
+        return alert
+
+    def _resolve_limit_context(
+        self,
+        *,
+        node: Optional[str],
+        venue: Optional[str],
+        usage: float,
+        limit: float,
+    ) -> Dict[str, Any]:
+        context = {
+            "limit": limit,
+            "usage": usage,
+            "breach": max(0.0, usage - limit),
+        }
+        if node:
+            context["node"] = node
+        if venue:
+            context["venue"] = venue
+        return context
+
+    def _handle_limit_breach(
+        self,
+        *,
+        key: str,
+        node: Optional[str],
+        venue: Optional[str],
+        usage: float,
+        limit: float,
+    ) -> None:
+        state = self._resolve_escalation_state(key)
+        self._reset_state_if_stale(key, state)
+
+        state.count += 1
+        state.last_triggered = datetime.utcnow()
+        state.active = True
+
+        controls = self._controls_module()
+        warn_after = controls["warn_after"]
+        halt_after = controls["halt_after"]
+
+        severity: RiskAlertSeverity = "medium"
+        if state.count >= halt_after:
+            severity = "critical"
+        elif state.count >= warn_after:
+            severity = "high"
+
+        descriptor = node or "account"
+        venue_label = venue or "venue"
+        title = f"Limit breach for {descriptor}"
+        message = (
+            f"Exposure at {venue_label} reached {usage:,.0f} against a limit of {limit:,.0f}."
+        )
+        context = self._resolve_limit_context(
+            node=node,
+            venue=venue,
+            usage=usage,
+            limit=limit,
+        )
+        alert = self._raise_or_update_alert(
+            key=key,
+            state=state,
+            title=title,
+            message=message,
+            severity=severity,
+            context=context,
+        )
+
+        if (
+            controls["halt_on_breach"]
+            and state.count >= halt_after
+            and node
+        ):
+            try:
+                self.stop_node(node)
+            except Exception:  # pragma: no cover - defensive guard
+                LOGGER.debug("risk_halt_failed", extra={"node": node}, exc_info=True)
+        else:
+            LOGGER.debug(
+                "risk_limit_breach_detected",
+                extra={
+                    "limit_key": key,
+                    "alert_id": alert.alert_id,
+                    "severity": severity,
+                },
+            )
+
+    def _resolve_active_alert(self, key: str) -> Optional[RiskAlert]:
+        state = self._breach_states.get(key)
+        if state is None or state.alert_id is None:
+            return None
+        try:
+            return self._find_risk_alert(state.alert_id)
+        except ValueError:
+            return None
+
+    def _resolve_breach_recovery(self, key: str) -> None:
+        state = self._breach_states.get(key)
+        if state is None or not state.active:
+            return
+        state.active = False
+        alert = self._resolve_active_alert(key)
+        if alert is None:
+            state.alert_id = None
+            return
+
+        alert.resolved = True
+        alert.resolved_at = _utcnow_iso()
+        alert.resolved_by = "risk-manager"
+        if not alert.acknowledged:
+            alert.acknowledged = True
+            alert.acknowledged_at = alert.resolved_at
+            alert.acknowledged_by = "risk-manager"
+        self._publish_risk_alert("resolved", alert)
+
+    def _evaluate_position_limits(
+        self,
+        *,
+        exposures: Dict[Tuple[str, str], float],
+    ) -> None:
+        module = self._risk_limits.get("position_limits") or {}
+        if not module.get("enabled", False):
+            return
+
+        for entry in module.get("limits", []):
+            node = str(entry.get("node") or "").strip() or None
+            venue = str(entry.get("venue") or "").strip().upper() or None
+            try:
+                limit_value = float(entry.get("limit") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if limit_value <= 0.0:
+                continue
+
+            key = self._limit_key(node, venue)
+            usage = 0.0
+            for (ex_node, ex_venue), value in exposures.items():
+                if node and node != ex_node:
+                    continue
+                if venue and venue != ex_venue:
+                    continue
+                usage += value
+
+            breached = usage > limit_value
+            self._record_usage(
+                f"position::{key}",
+                {
+                    "name": f"Position limit {key}",
+                    "value": round(usage, 2),
+                    "limit": limit_value,
+                    "unit": "USD",
+                    "breached": breached,
+                },
+            )
+
+            if breached:
+                self._handle_limit_breach(
+                    key=key,
+                    node=node,
+                    venue=venue,
+                    usage=usage,
+                    limit=limit_value,
+                )
+            else:
+                self._resolve_breach_recovery(key)
+
+    def _evaluate_loss_limits(
+        self,
+        *,
+        pnl_by_node: Dict[str, float],
+    ) -> None:
+        module = self._risk_limits.get("max_loss") or {}
+        if not module.get("enabled", False):
+            return
+
+        try:
+            daily_limit = float(module.get("daily") or 0.0)
+        except (TypeError, ValueError):
+            daily_limit = 0.0
+        if daily_limit <= 0.0:
+            return
+
+        for node, pnl in pnl_by_node.items():
+            loss = max(0.0, -pnl)
+            key = f"loss::{node}"
+            breached = loss > daily_limit
+            self._record_usage(
+                key,
+                {
+                    "name": f"Daily loss {node}",
+                    "value": round(loss, 2),
+                    "limit": daily_limit,
+                    "unit": "USD",
+                    "breached": breached,
+                },
+            )
+            if not breached:
+                self._resolve_breach_recovery(key)
+                continue
+
+            state = self._resolve_escalation_state(key)
+            self._reset_state_if_stale(key, state)
+            state.count += 1
+            state.last_triggered = datetime.utcnow()
+            state.active = True
+
+            controls = self._controls_module()
+            warn_after = controls["warn_after"]
+            halt_after = controls["halt_after"]
+
+            severity: RiskAlertSeverity = "medium"
+            if state.count >= halt_after:
+                severity = "critical"
+            elif state.count >= warn_after:
+                severity = "high"
+
+            title = f"Drawdown limit breached for {node}"
+            message = (
+                f"Realised loss reached {loss:,.0f} against a limit of {daily_limit:,.0f}."
+            )
+            context = {
+                "node": node,
+                "loss": loss,
+                "limit": daily_limit,
+            }
+            alert = self._raise_or_update_alert(
+                key=key,
+                state=state,
+                title=title,
+                message=message,
+                severity=severity,
+                context=context,
+            )
+
+            if controls["halt_on_breach"] and state.count >= halt_after:
+                try:
+                    self.stop_node(node)
+                except Exception:  # pragma: no cover - defensive guard
+                    LOGGER.debug(
+                        "risk_loss_halt_failed",
+                        extra={"node": node},
+                        exc_info=True,
+                    )
+            else:
+                LOGGER.debug(
+                    "risk_loss_breach_detected",
+                    extra={
+                        "node": node,
+                        "alert_id": alert.alert_id,
+                        "severity": severity,
+                    },
+                )
+
+    def _evaluate_risk_limits(self, snapshot: Dict[str, Any]) -> None:
+        portfolio = snapshot.get("portfolio") or snapshot
+        positions = portfolio.get("positions") or []
+
+        exposures: Dict[Tuple[str, str], float] = {}
+        pnl_by_node: Dict[str, float] = {}
+        exposure_entries: List[Dict[str, Any]] = []
+
+        for raw in positions:
+            node = str(raw.get("node_id") or "account").strip()
+            venue = str(raw.get("venue") or "UNKNOWN").upper()
+            try:
+                quantity = abs(float(raw.get("quantity") or 0.0))
+            except (TypeError, ValueError):
+                quantity = 0.0
+            try:
+                mark_price = float(
+                    raw.get("mark_price")
+                    or raw.get("markPrice")
+                    or raw.get("average_price")
+                    or raw.get("avg_price")
+                    or 0.0
+                )
+            except (TypeError, ValueError):
+                mark_price = 0.0
+            notional = max(0.0, quantity * mark_price)
+
+            exposures[(node, venue)] = exposures.get((node, venue), 0.0) + notional
+            exposure_entries.append(
+                {
+                    "symbol": raw.get("symbol"),
+                    "venue": venue,
+                    "net_exposure": round(notional, 2),
+                    "currency": raw.get("currency") or "USD",
+                }
+            )
+
+            try:
+                realised = float(raw.get("realized_pnl") or raw.get("realised_pnl") or 0.0)
+            except (TypeError, ValueError):
+                realised = 0.0
+            try:
+                unrealised = float(raw.get("unrealized_pnl") or raw.get("unrealised_pnl") or 0.0)
+            except (TypeError, ValueError):
+                unrealised = 0.0
+            pnl_by_node[node] = pnl_by_node.get(node, 0.0) + realised + unrealised
+
+        self._evaluate_position_limits(exposures=exposures)
+        self._evaluate_loss_limits(pnl_by_node=pnl_by_node)
+
+        # update risk snapshot components
+        total_notional = sum(exposures.values())
+        self._record_usage(
+            "portfolio::notional",
+            {
+                "name": "Total portfolio notional",
+                "value": round(total_notional, 2),
+                "unit": "USD",
+                "breached": False,
+            },
+        )
+        self._last_exposure_entries = exposure_entries
 
     @staticmethod
     def _coerce_float(value: Any) -> Optional[float]:
@@ -2632,6 +3057,15 @@ class MockNautilusService:
                         "reason": "Pending compliance review",
                     },
                 ],
+            },
+            "controls": {
+                "halt_on_breach": True,
+                "notify_on_recovery": True,
+                "escalation": {
+                    "warn_after": 1,
+                    "halt_after": 2,
+                    "reset_minutes": 60,
+                },
             },
         }
 
@@ -4004,11 +4438,27 @@ class NautilusService:
                             exc_info=True,
                         )
 
+        async def consume_portfolio() -> None:
+            async with self._engine.bus.subscribe("engine.portfolio") as subscription:
+                async for payload in subscription:
+                    portfolio = payload.get("portfolio") or payload
+                    try:
+                        self._evaluate_risk_limits({"portfolio": portfolio})
+                    except Exception:  # pragma: no cover - defensive guard
+                        LOGGER.debug("risk_ingest_failed", exc_info=True)
+                        continue
+                    self._publish_risk_snapshot()
+
         def start_metrics() -> None:
             task = loop.create_task(consume_metrics())
             self._bus_tasks.append(task)
 
+        def start_portfolio() -> None:
+            task = loop.create_task(consume_portfolio())
+            self._bus_tasks.append(task)
+
         loop.call_soon_threadsafe(start_metrics)
+        loop.call_soon_threadsafe(start_portfolio)
 
     def _build_engine_order_summary(
         self,

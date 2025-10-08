@@ -48,10 +48,23 @@ export interface TradeLocksModule {
   locks: TradeLockConfig[];
 }
 
+export interface RiskEscalationConfig {
+  warn_after: number;
+  halt_after: number;
+  reset_minutes: number;
+}
+
+export interface RiskControlsModule {
+  halt_on_breach: boolean;
+  notify_on_recovery: boolean;
+  escalation: RiskEscalationConfig;
+}
+
 export interface RiskLimits {
   position_limits: PositionLimitsModule;
   max_loss: MaxLossModule;
   trade_locks: TradeLocksModule;
+  controls: RiskControlsModule;
 }
 
 export interface RiskLimitScope {
@@ -69,6 +82,8 @@ export interface RiskMetrics {
   total_var?: number;
   stress_var?: number;
   exposure_limits?: RiskLimit[];
+  drawdown_limits?: RiskLimit[];
+  usage?: RiskLimit[];
   exposures?: RiskExposure[];
 }
 
