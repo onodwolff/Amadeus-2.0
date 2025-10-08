@@ -113,6 +113,8 @@ async def _ensure_admin_user() -> None:
                 role=UserRole.ADMIN,
                 is_admin=True,
                 email_verified=True,
+                mfa_enabled=False,
+                mfa_secret=None,
             )
             session.add(user)
         else:
@@ -121,6 +123,8 @@ async def _ensure_admin_user() -> None:
             user.role = UserRole.ADMIN
             user.is_admin = True
             user.email_verified = True
+            user.mfa_enabled = False
+            user.mfa_secret = None
 
         await session.commit()
     finally:  # pragma: no cover - defensive cleanup
