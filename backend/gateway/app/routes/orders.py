@@ -481,7 +481,9 @@ async def get_order(order_id: str, session: AsyncSession = Depends(get_session))
 async def create_order(payload: OrderCreateRequest, session: AsyncSession = Depends(get_session)) -> OrderResponse:
     engine_payload = payload.to_engine_payload()
     try:
-        svc.require_engine()
+        ensure_engine = getattr(svc, "require_engine", None)
+        if callable(ensure_engine):
+            ensure_engine()
         response = svc.create_order(engine_payload)
     except ValueError as exc:
         LOGGER.debug("order_submission_rejected", exc_info=True)

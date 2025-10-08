@@ -9,7 +9,7 @@ from copy import deepcopy
 from datetime import timezone
 from functools import wraps
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Sequence, Tuple
 
 from fastapi import (
     FastAPI,
@@ -24,7 +24,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from starlette.datastructures import UploadFile
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ from gateway.db.base import (
     dispose_engine,
 )
 from gateway.db.models import (
+    ApiKey,
     Config as DbConfig,
     ConfigFormat,
     ConfigSource,
@@ -282,6 +283,50 @@ class NodeLaunchConstraints(BaseModel):
     concurrencyLimit: int | None = None
 
 
+class NodeLaunchAdapterSelection(BaseModel):
+    venue: str
+    alias: Optional[str] = None
+    key_id: Optional[str] = Field(default=None, alias="keyId")
+    enable_data: bool = Field(default=True, alias="enableData")
+    enable_trading: bool = Field(default=True, alias="enableTrading")
+    sandbox: bool = False
+    options: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("venue")
+    @classmethod
+    def _normalise_venue(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Venue is required")
+        return value.strip().upper()
+
+    @field_validator("alias")
+    @classmethod
+    def _normalise_alias(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip().lower()
+        return cleaned or None
+
+    @field_validator("key_id")
+    @classmethod
+    def _normalise_key_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _ensure_options(cls, value: Any) -> Dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return dict(value)
+        raise ValueError("Options must be an object")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class NodeLaunchEngineConfig(BaseModel):
     source: Optional[str] = Field(default=None, min_length=1)
     format: Optional[Literal["json", "yaml", "yml"]] = None
@@ -294,6 +339,7 @@ class NodeLaunchPayload(BaseModel):
     dataSources: List[NodeLaunchDataSource] = Field(default_factory=list)
     keyReferences: List[NodeLaunchKeyReference] = Field(default_factory=list)
     constraints: NodeLaunchConstraints = Field(default_factory=NodeLaunchConstraints)
+    adapters: List[NodeLaunchAdapterSelection] = Field(default_factory=list)
     engineConfig: Optional[NodeLaunchEngineConfig] = None
 
 
@@ -359,6 +405,19 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
         keys = ", ".join(key.alias for key in payload.keyReferences)
         parts.append(f"Keys: {keys}")
 
+    if payload.adapters:
+        adapter_bits: List[str] = []
+        for adapter in payload.adapters:
+            roles: List[str] = []
+            if adapter.enable_data:
+                roles.append("data")
+            if adapter.enable_trading:
+                roles.append("trading")
+            role_text = "/".join(roles) if roles else "disabled"
+            key_text = adapter.key_id or "no-key"
+            adapter_bits.append(f"{adapter.venue} [{role_text}] ({key_text})")
+        parts.append(f"Adapters: {', '.join(adapter_bits)}")
+
     constraint_bits: List[str] = []
     constraints = payload.constraints
     if constraints.maxRuntimeMinutes is not None:
@@ -377,6 +436,170 @@ def build_launch_detail(payload: NodeLaunchPayload) -> str:
     return " | ".join(parts)
 
 
+async def _fetch_user_api_key(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    key_id: str,
+    expected_venue: str,
+) -> ApiKey:
+    stmt = (
+        select(ApiKey)
+        .where(ApiKey.user_id == user_id)
+        .where(ApiKey.key_id == key_id)
+    )
+    result = await session.execute(stmt)
+    record = result.scalars().first()
+    if record is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"API key '{key_id}' is not registered for the current user.",
+        )
+
+    expected = expected_venue.upper()
+    actual = (record.venue or "").upper()
+    if actual != expected:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"API key '{key_id}' is registered for venue '{record.venue}', "
+                f"expected '{expected_venue}'."
+            ),
+        )
+    return record
+
+
+async def _apply_launch_adapters(
+    session: AsyncSession,
+    *,
+    user: DbUser,
+    mode: EngineMode,
+    config: Dict[str, Any],
+    selections: Sequence[NodeLaunchAdapterSelection],
+) -> None:
+    if mode not in {EngineMode.LIVE, EngineMode.SANDBOX}:
+        return
+
+    if not selections:
+        if mode == EngineMode.LIVE:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Live nodes require at least one configured exchange adapter.",
+            )
+        return
+
+    alias_set: set[str] = set()
+    data_sources: List[Dict[str, Any]] = []
+    key_reference_map: Dict[str, Dict[str, Any]] = {}
+
+    for selection in selections:
+        alias = (selection.alias or selection.venue.lower()).strip().lower()
+        if not alias:
+            alias = selection.venue.lower()
+        alias_set.add(alias)
+
+        if not selection.enable_data and not selection.enable_trading:
+            continue
+
+        key_id = selection.key_id
+        if mode == EngineMode.LIVE and not key_id:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Exchange {selection.venue} requires an API key for live mode.",
+            )
+
+        if selection.enable_trading and not key_id:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Trading access for {selection.venue} requires an API key.",
+            )
+
+        if key_id:
+            record = await _fetch_user_api_key(
+                session,
+                user_id=user.id,
+                key_id=key_id,
+                expected_venue=selection.venue,
+            )
+            key_reference_map[alias] = {
+                "alias": alias,
+                "keyId": record.key_id,
+                "required": selection.enable_trading or mode == EngineMode.LIVE,
+            }
+
+        base_options = dict(selection.options or {})
+        base_options.setdefault("venue", selection.venue)
+        if selection.sandbox or mode == EngineMode.SANDBOX:
+            base_options.setdefault("testnet", True)
+        base_options.setdefault("keyAlias", alias)
+
+        if selection.enable_data:
+            data_sources.append(
+                {
+                    "id": f"{alias}-data",
+                    "label": f"{selection.venue} market data",
+                    "type": "live",
+                    "mode": "read",
+                    "enabled": True,
+                    "options": base_options,
+                }
+            )
+
+        if selection.enable_trading:
+            data_sources.append(
+                {
+                    "id": f"{alias}-trading",
+                    "label": f"{selection.venue} trading",
+                    "type": "live",
+                    "mode": "write",
+                    "enabled": True,
+                    "options": base_options,
+                }
+            )
+
+    if mode == EngineMode.LIVE and not data_sources:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Live nodes require at least one enabled exchange adapter.",
+        )
+
+    existing_sources = []
+    raw_sources = config.get("dataSources")
+    if isinstance(raw_sources, list):
+        for source in raw_sources:
+            if isinstance(source, dict):
+                existing_sources.append(source)
+
+    filtered_sources = [
+        source
+        for source in existing_sources
+        if not any(
+            str(source.get("id") or "").lower().startswith(alias)
+            for alias in alias_set
+        )
+    ]
+    filtered_sources.extend(data_sources)
+    config["dataSources"] = filtered_sources
+
+    existing_refs = []
+    raw_refs = config.get("keyReferences")
+    if isinstance(raw_refs, list):
+        for ref in raw_refs:
+            if isinstance(ref, dict):
+                existing_refs.append(ref)
+
+    filtered_refs = [
+        ref
+        for ref in existing_refs
+        if str(ref.get("alias") or "").lower() not in alias_set
+    ]
+    filtered_refs.extend(key_reference_map.values())
+    config["keyReferences"] = filtered_refs
+
+    if selections:
+        config["adapters"] = [
+            selection.model_dump(by_alias=True) for selection in selections
+        ]
 app = FastAPI(title="Amadeus Gateway")
 app.include_router(risk_router)
 app.include_router(keys_router, prefix="/api")
@@ -530,6 +753,8 @@ async def launch_node(
     config_metadata: Dict[str, Any] = {}
     detail: Optional[str] = None
 
+    user: Optional[DbUser] = None
+
     if "multipart/form-data" in content_type:
         form = await request.form()
         raw_mode = str(form.get("mode") or form.get("type") or "").strip().lower()
@@ -618,6 +843,8 @@ async def launch_node(
 
         detail = build_launch_detail(payload)
 
+        user = await _resolve_primary_user(session)
+
         if payload.engineConfig is not None:
             config_input = payload.engineConfig
             config_metadata = {
@@ -636,11 +863,16 @@ async def launch_node(
                     detail_payload["errors"] = exc.errors
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail_payload)
         else:
+            config_payload = payload.model_dump(exclude={"engineConfig"})
+            await _apply_launch_adapters(
+                session,
+                user=user,
+                mode=engine_mode,
+                config=config_payload,
+                selections=payload.adapters,
+            )
             try:
-                config = svc.engine.validate_config(
-                    payload.model_dump(exclude={"engineConfig"}),
-                    mode=engine_mode,
-                )
+                config = svc.engine.validate_config(config_payload, mode=engine_mode)
             except EngineConfigError as exc:
                 detail_payload = {"message": str(exc)}
                 if exc.errors:
@@ -648,10 +880,13 @@ async def launch_node(
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail_payload)
             config_metadata = {"source": "payload", "format": "json"}
 
-    user = await _resolve_primary_user(session)
+    if user is None:
+        user = await _resolve_primary_user(session)
 
     try:
-        engine_handle = svc.engine.launch_node(config, engine_mode)
+        engine_handle = svc.engine.launch_node(
+            config, engine_mode, user_id=str(user.id)
+        )
     except EngineConfigError as exc:
         detail_payload = {"message": str(exc)}
         if exc.errors:

@@ -243,8 +243,12 @@ def _build_resource(record: ApiKey, secret_payload: Optional[Dict[str, Any]] = N
     )
 
 
-async def _get_key(session: AsyncSession, key_id: str) -> ApiKey:
+async def _get_key(
+    session: AsyncSession, key_id: str, *, user_id: Optional[int] = None
+) -> ApiKey:
     stmt: Select[ApiKey] = select(ApiKey).where(ApiKey.key_id == key_id)
+    if user_id is not None:
+        stmt = stmt.where(ApiKey.user_id == user_id)
     result = await session.execute(stmt)
     record = result.scalars().first()
     if record is None:
@@ -260,7 +264,13 @@ def _validate_known_venue(venue: str) -> None:
 
 @router.get("", response_model=ApiKeysResponse)
 async def list_api_keys(session: AsyncSession = Depends(get_session)) -> ApiKeysResponse:
-    stmt: Select[ApiKey] = select(ApiKey).order_by(ApiKey.created_at.asc())
+    user_id = await _resolve_user_id(session)
+
+    stmt: Select[ApiKey] = (
+        select(ApiKey)
+        .where(ApiKey.user_id == user_id)
+        .order_by(ApiKey.created_at.asc())
+    )
     result = await session.execute(stmt)
     records: Sequence[ApiKey] = result.scalars().all()
     items: List[ApiKeyResource] = []
@@ -290,8 +300,10 @@ async def create_api_key(
     }
     secret_enc = _encode_secret_payload(secret_payload)
 
+    user_id = await _resolve_user_id(session)
+
     record = ApiKey(
-        user_id=await _resolve_user_id(session),
+        user_id=user_id,
         venue=payload.venue,
         label=payload.label,
         key_id=payload.key_id,
@@ -317,7 +329,9 @@ async def update_api_key(
     payload: KeyUpdateRequest,
     session: AsyncSession = Depends(get_session),
 ) -> ApiKeyResource:
-    record = await _get_key(session, key_id)
+    user_id = await _resolve_user_id(session)
+
+    record = await _get_key(session, key_id, user_id=user_id)
     secret_payload = _decode_secret_payload(record.secret_enc)
 
     stored_hash = secret_payload.get("passphrase_hash")
@@ -351,7 +365,9 @@ async def delete_api_key(
     payload: KeyDeleteRequest,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    record = await _get_key(session, key_id)
+    user_id = await _resolve_user_id(session)
+
+    record = await _get_key(session, key_id, user_id=user_id)
     secret_payload = _decode_secret_payload(record.secret_enc)
     stored_hash = secret_payload.get("passphrase_hash")
     if not isinstance(stored_hash, str) or stored_hash != payload.passphrase_hash:

@@ -131,6 +131,16 @@ export interface NodeLaunchKeyReference {
   required: boolean;
 }
 
+export interface NodeLaunchAdapterSelection {
+  venue: string;
+  alias?: string;
+  keyId?: string;
+  enableData: boolean;
+  enableTrading: boolean;
+  sandbox?: boolean;
+  options?: Record<string, unknown>;
+}
+
 export interface NodeLaunchConstraints {
   maxRuntimeMinutes: number | null;
   maxDrawdownPercent: number | null;
@@ -141,7 +151,8 @@ export interface NodeLaunchConstraints {
 export interface NodeLaunchRequest {
   type: NodeMode;
   strategy: NodeLaunchStrategy;
-  dataSources: NodeLaunchDataSource[];
-  keyReferences: NodeLaunchKeyReference[];
+  adapters: NodeLaunchAdapterSelection[];
   constraints: NodeLaunchConstraints;
+  dataSources?: NodeLaunchDataSource[];
+  keyReferences?: NodeLaunchKeyReference[];
 }

@@ -1,5 +1,13 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, EventEmitter, Output, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  EventEmitter,
+  Output,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import {
   FormArray,
   FormBuilder,
@@ -9,28 +17,32 @@ import {
   Validators,
 } from '@angular/forms';
 import {
+  ApiKey,
+  ExchangeDescriptor,
+  NodeLaunchAdapterSelection,
   NodeLaunchConstraints,
-  NodeLaunchDataSource,
-  NodeLaunchKeyReference,
   NodeLaunchRequest,
   NodeLaunchStrategy,
   NodeLaunchStrategyParameter,
   NodeMode,
 } from '../api/models';
+import { KeysApi } from '../api/clients/keys.api';
+import { IntegrationsApi } from '../api/clients/integrations.api';
 
-type DataSourceFormGroup = FormGroup<{
-  id: FormControl<string>;
-  label: FormControl<string>;
-  type: FormControl<string>;
-  mode: FormControl<string>;
-  enabled: FormControl<boolean>;
-}>;
-
-type KeyReferenceFormGroup = FormGroup<{
+type AdapterFormGroup = FormGroup<{
+  venue: FormControl<string>;
   alias: FormControl<string>;
   keyId: FormControl<string>;
-  required: FormControl<boolean>;
+  enableData: FormControl<boolean>;
+  enableTrading: FormControl<boolean>;
+  sandbox: FormControl<boolean>;
 }>;
+
+interface LaunchVenueOption {
+  code: string;
+  name: string;
+  keys: ApiKey[];
+}
 
 @Component({
   selector: 'app-node-launch-dialog',
@@ -45,11 +57,23 @@ export class NodeLaunchDialogComponent {
   @Output() readonly closed = new EventEmitter<void>();
 
   private readonly fb = inject(FormBuilder);
+  private readonly keysApi = inject(KeysApi);
+  private readonly integrationsApi = inject(IntegrationsApi);
 
   readonly isOpen = signal(false);
   readonly currentStep = signal(0);
   readonly stepError = signal<string | null>(null);
   readonly submissionError = signal<string | null>(null);
+
+  readonly apiKeys = signal<ApiKey[]>([]);
+  readonly isKeysLoading = signal(false);
+  readonly keysError = signal<string | null>(null);
+
+  readonly exchanges = signal<ExchangeDescriptor[]>([]);
+  readonly isExchangesLoading = signal(false);
+  readonly exchangesError = signal<string | null>(null);
+
+  private hasLoadedExchanges = false;
 
   readonly nodeTypeOptions: Array<{ value: NodeMode; label: string; description: string }> = [
     {
@@ -107,20 +131,6 @@ export class NodeLaunchDialogComponent {
     },
   ];
 
-  readonly dataSourcePresets: Array<Partial<NodeLaunchDataSource>> = [
-    { id: 'binance-btcusdt-1m', label: 'Binance BTC/USDT 1m klines', type: 'historical', mode: 'read' },
-    { id: 'binance-btcusdt-live', label: 'Binance BTC/USDT live trades', type: 'live', mode: 'read' },
-    { id: 'binance-order-entry', label: 'Binance order entry', type: 'live', mode: 'write' },
-    { id: 'binance-sandbox-market', label: 'Binance sandbox market feed', type: 'synthetic', mode: 'read' },
-    { id: 'binance-sandbox-entry', label: 'Binance sandbox order entry', type: 'synthetic', mode: 'write' },
-  ];
-
-  readonly availableKeys: Array<{ id: string; alias: string; description: string }> = [
-    { id: 'binance-primary', alias: 'Binance primary key', description: 'Full trading permissions' },
-    { id: 'binance-readonly', alias: 'Binance readonly key', description: 'Market data only' },
-    { id: 'paper-trading', alias: 'Paper trading sandbox', description: 'Isolated API credentials' },
-  ];
-
   readonly steps = [
     {
       key: 'type',
@@ -133,14 +143,9 @@ export class NodeLaunchDialogComponent {
       description: 'Pick a strategy template and review its runtime parameters.',
     },
     {
-      key: 'dataSources',
-      title: 'Market data & adapters',
-      description: 'Select market data feeds and execution adapters required by the node.',
-    },
-    {
-      key: 'keys',
-      title: 'Credential references',
-      description: 'Link API keys or secrets provisioned in the key management module.',
+      key: 'adapters',
+      title: 'Exchanges & adapters',
+      description: 'Select venues and assign saved API keys to enable data and trading adapters.',
     },
     {
       key: 'constraints',
@@ -160,23 +165,19 @@ export class NodeLaunchDialogComponent {
     const template = this.strategyTemplates.find((item) => item.id === id);
     return template?.description ?? 'Select a template';
   });
+  readonly venueOptions = computed<LaunchVenueOption[]>(() => this.computeVenueOptions());
 
   readonly form = this.fb.nonNullable.group({
     nodeType: this.fb.nonNullable.control<NodeMode>('backtest'),
     strategy: this.fb.nonNullable.group({
       id: this.fb.nonNullable.control<string>(this.strategyTemplates[0]?.id ?? ''),
-      name: this.fb.nonNullable.control<string>('EMA Cross'),
+      name: this.fb.nonNullable.control<string>(this.strategyTemplates[0]?.name ?? ''),
       parameters: this.fb.array<FormGroup<{ key: FormControl<string>; value: FormControl<string> }>>([
         this.createStrategyParameterGroup('fast_window', '12'),
         this.createStrategyParameterGroup('slow_window', '26'),
       ]),
     }),
-    dataSources: this.fb.array<DataSourceFormGroup>([
-      this.createDataSourceGroup({ id: 'binance-btcusdt-1m', label: 'Binance BTC/USDT 1m klines', type: 'historical', mode: 'read' }),
-    ]),
-    keyReferences: this.fb.array<KeyReferenceFormGroup>([
-      this.createKeyReferenceGroup({ alias: 'Binance primary key', keyId: 'binance-primary', required: true }),
-    ]),
+    adapters: this.fb.array<AdapterFormGroup>([]),
     constraints: this.fb.group({
       maxRuntimeMinutes: this.fb.control<number | null>(480, { validators: [Validators.min(1)] }),
       maxDrawdownPercent: this.fb.control<number | null>(20, {
@@ -187,7 +188,16 @@ export class NodeLaunchDialogComponent {
     }),
   });
 
+  constructor() {
+    this.form.controls.nodeType.valueChanges.subscribe((mode) =>
+      this.onNodeModeChanged((mode as NodeMode) ?? 'backtest'),
+    );
+  }
+
   open(initialType?: NodeMode): void {
+    this.ensureExchangeCatalog();
+    this.refreshKeys();
+
     this.isOpen.set(true);
     this.currentStep.set(0);
     this.stepError.set(null);
@@ -237,12 +247,53 @@ export class NodeLaunchDialogComponent {
     return this.form.controls.strategy.controls.parameters;
   }
 
-  dataSourcesArray(): FormArray<DataSourceFormGroup> {
-    return this.form.controls.dataSources;
+  adaptersArray(): FormArray<AdapterFormGroup> {
+    return this.form.controls.adapters;
   }
 
-  keyReferencesArray(): FormArray<KeyReferenceFormGroup> {
-    return this.form.controls.keyReferences;
+  adapterGroup(venue: string): AdapterFormGroup | null {
+    return (
+      this.adaptersArray().controls.find(
+        (group) => group.controls.venue.value === venue,
+      ) || null
+    );
+  }
+
+  isVenueSelected(venue: string): boolean {
+    return this.adapterGroup(venue) !== null;
+  }
+
+  onVenueToggle(option: LaunchVenueOption, checked: boolean): void {
+    const existing = this.adapterGroup(option.code);
+    if (checked) {
+      if (existing) {
+        return;
+      }
+      const defaultKey = option.keys[0]?.key_id ?? '';
+      this.adaptersArray().push(
+        this.createAdapterGroup({
+          venue: option.code,
+          alias: option.code.toLowerCase(),
+          keyId: defaultKey,
+          enableData: true,
+          enableTrading: this.form.controls.nodeType.value === 'live',
+          sandbox: this.form.controls.nodeType.value === 'sandbox',
+        }),
+      );
+    } else if (existing) {
+      const index = this.adaptersArray().controls.indexOf(existing);
+      if (index >= 0) {
+        this.adaptersArray().removeAt(index);
+      }
+    }
+  }
+
+  onAdapterKeyChanged(venue: string, keyId: string): void {
+    const group = this.adapterGroup(venue);
+    if (!group) {
+      return;
+    }
+    group.controls.keyId.setValue(keyId ?? '');
   }
 
   addStrategyParameter(key = '', value = ''): void {
@@ -251,22 +302,6 @@ export class NodeLaunchDialogComponent {
 
   removeStrategyParameter(index: number): void {
     this.strategyParameters().removeAt(index);
-  }
-
-  addDataSource(preset?: Partial<NodeLaunchDataSource>): void {
-    this.dataSourcesArray().push(this.createDataSourceGroup(preset));
-  }
-
-  removeDataSource(index: number): void {
-    this.dataSourcesArray().removeAt(index);
-  }
-
-  addKeyReference(preset?: Partial<NodeLaunchKeyReference>): void {
-    this.keyReferencesArray().push(this.createKeyReferenceGroup(preset));
-  }
-
-  removeKeyReference(index: number): void {
-    this.keyReferencesArray().removeAt(index);
   }
 
   onTemplateChange(event: Event): void {
@@ -286,93 +321,173 @@ export class NodeLaunchDialogComponent {
     this.form.controls.strategy.controls.name.setValue(template.name);
     const params = this.strategyParameters();
     params.clear();
-    template.defaults.forEach((param) => params.push(this.createStrategyParameterGroup(param.key, param.value)));
+    template.defaults.forEach((param) =>
+      params.push(this.createStrategyParameterGroup(param.key, param.value)),
+    );
   }
 
-  private createStrategyParameterGroup(key = '', value = ''): FormGroup<{ key: FormControl<string>; value: FormControl<string> }> {
+  private ensureExchangeCatalog(): void {
+    if (this.hasLoadedExchanges) {
+      return;
+    }
+    this.hasLoadedExchanges = true;
+    this.isExchangesLoading.set(true);
+    this.exchangesError.set(null);
+    this.integrationsApi.listExchanges().subscribe({
+      next: (response) => {
+        const normalized = (response.exchanges ?? [])
+          .map((entry) => ({
+            code: (entry.code || '').toUpperCase(),
+            name: entry.name || entry.code || '',
+          }))
+          .filter((entry) => entry.code.length > 0);
+        normalized.sort((a, b) => a.name.localeCompare(b.name));
+        this.exchanges.set(normalized);
+        this.isExchangesLoading.set(false);
+      },
+      error: (error) => {
+        console.error(error);
+        this.exchangesError.set('Unable to load exchange catalog.');
+        this.isExchangesLoading.set(false);
+      },
+    });
+  }
+
+  private refreshKeys(): void {
+    this.isKeysLoading.set(true);
+    this.keysError.set(null);
+    this.keysApi.listKeys().subscribe({
+      next: (response) => {
+        this.apiKeys.set(response.keys ?? []);
+        this.isKeysLoading.set(false);
+        this.reconcileAdaptersWithKeys();
+      },
+      error: (error) => {
+        console.error(error);
+        this.keysError.set('Unable to load API keys.');
+        this.isKeysLoading.set(false);
+      },
+    });
+  }
+
+  private computeVenueOptions(): LaunchVenueOption[] {
+    const keysByVenue = new Map<string, ApiKey[]>();
+    for (const key of this.apiKeys()) {
+      const venue = (key.venue || '').toUpperCase();
+      if (!venue) {
+        continue;
+      }
+      if (!keysByVenue.has(venue)) {
+        keysByVenue.set(venue, []);
+      }
+      keysByVenue.get(venue)!.push(key);
+    }
+
+    const map = new Map<string, LaunchVenueOption>();
+    for (const exchange of this.exchanges()) {
+      const code = (exchange.code || '').toUpperCase();
+      if (!code) {
+        continue;
+      }
+      map.set(code, {
+        code,
+        name: exchange.name || code,
+        keys: keysByVenue.get(code) ?? [],
+      });
+    }
+
+    for (const [venue, list] of keysByVenue.entries()) {
+      if (map.has(venue)) {
+        map.get(venue)!.keys = list;
+      } else {
+        map.set(venue, { code: venue, name: venue, keys: list });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private reconcileAdaptersWithKeys(): void {
+    const available = new Set(this.apiKeys().map((key) => key.key_id));
+    this.adaptersArray().controls.forEach((group) => {
+      const keyId = group.controls.keyId.value;
+      if (keyId && !available.has(keyId)) {
+        group.controls.keyId.setValue('');
+      }
+    });
+  }
+
+  private onNodeModeChanged(mode: NodeMode): void {
+    const isSandbox = mode === 'sandbox';
+    const allowTrading = mode === 'live';
+    this.adaptersArray().controls.forEach((group) => {
+      group.controls.sandbox.setValue(isSandbox);
+      if (!allowTrading && group.controls.enableTrading.value) {
+        group.controls.enableTrading.setValue(false);
+      }
+    });
+  }
+
+  private createStrategyParameterGroup(
+    key = '',
+    value = '',
+  ): FormGroup<{ key: FormControl<string>; value: FormControl<string> }> {
     return this.fb.nonNullable.group({
       key: this.fb.nonNullable.control<string>(key, { validators: [Validators.required] }),
       value: this.fb.nonNullable.control<string>(value, { validators: [Validators.required] }),
     });
   }
 
-  private createDataSourceGroup(
-    preset: Partial<NodeLaunchDataSource> = {},
-  ): DataSourceFormGroup {
+  private createAdapterGroup(
+    preset: Partial<NodeLaunchAdapterSelection> = {},
+  ): AdapterFormGroup {
+    const mode = this.form.controls.nodeType.value;
+    const alias = (preset.alias ?? preset.venue?.toLowerCase() ?? '').trim();
     return this.fb.nonNullable.group({
-      id: this.fb.nonNullable.control<string>(preset.id ?? ''),
-      label: this.fb.nonNullable.control<string>(preset.label ?? ''),
-      type: this.fb.nonNullable.control<string>(preset.type ?? 'historical'),
-      mode: this.fb.nonNullable.control<string>(preset.mode ?? 'read'),
-      enabled: this.fb.nonNullable.control<boolean>(preset.enabled ?? true),
-    });
-  }
-
-  private createKeyReferenceGroup(
-    preset: Partial<NodeLaunchKeyReference> = {},
-  ): KeyReferenceFormGroup {
-    return this.fb.nonNullable.group({
-      alias: this.fb.nonNullable.control<string>(preset.alias ?? '', { validators: [Validators.required] }),
-      keyId: this.fb.nonNullable.control<string>(preset.keyId ?? '', { validators: [Validators.required] }),
-      required: this.fb.nonNullable.control<boolean>(preset.required ?? true),
+      venue: this.fb.nonNullable.control<string>(preset.venue ?? '', {
+        validators: [Validators.required],
+      }),
+      alias: this.fb.nonNullable.control<string>(alias),
+      keyId: this.fb.nonNullable.control<string>(preset.keyId ?? ''),
+      enableData: this.fb.nonNullable.control<boolean>(
+        preset.enableData ?? true,
+      ),
+      enableTrading: this.fb.nonNullable.control<boolean>(
+        preset.enableTrading ?? mode === 'live',
+      ),
+      sandbox: this.fb.nonNullable.control<boolean>(
+        preset.sandbox ?? mode === 'sandbox',
+      ),
     });
   }
 
   private resetForm(initialType: NodeMode): void {
     this.form.controls.nodeType.setValue(initialType);
+
     const defaultTemplate = this.strategyTemplates[0];
     this.form.controls.strategy.controls.id.setValue(defaultTemplate?.id ?? '');
     this.form.controls.strategy.controls.name.setValue(defaultTemplate?.name ?? '');
     const params = this.strategyParameters();
     params.clear();
-    (defaultTemplate?.defaults ?? []).forEach((param) => params.push(this.createStrategyParameterGroup(param.key, param.value)));
+    (defaultTemplate?.defaults ?? []).forEach((param) =>
+      params.push(this.createStrategyParameterGroup(param.key, param.value)),
+    );
 
-    const dataSources = this.dataSourcesArray();
-    dataSources.clear();
-    if (initialType === 'live') {
-      dataSources.push(
-        this.createDataSourceGroup({ id: 'binance-btcusdt-live', label: 'Binance BTC/USDT live trades', type: 'live', mode: 'read' }),
-      );
-      dataSources.push(
-        this.createDataSourceGroup({ id: 'binance-order-entry', label: 'Binance order entry', type: 'live', mode: 'write' }),
-      );
-    } else if (initialType === 'sandbox') {
-      dataSources.push(
-        this.createDataSourceGroup({
-          id: 'binance-sandbox-market',
-          label: 'Binance sandbox market feed',
-          type: 'synthetic',
-          mode: 'read',
-        }),
-      );
-      dataSources.push(
-        this.createDataSourceGroup({
-          id: 'binance-sandbox-entry',
-          label: 'Binance sandbox order entry',
-          type: 'synthetic',
-          mode: 'write',
-        }),
-      );
-    } else {
-      dataSources.push(
-        this.createDataSourceGroup({ id: 'binance-btcusdt-1m', label: 'Binance BTC/USDT 1m klines', type: 'historical', mode: 'read' }),
-      );
-    }
-
-    const keyRefs = this.keyReferencesArray();
-    keyRefs.clear();
-    if (initialType === 'sandbox') {
-      keyRefs.push(this.createKeyReferenceGroup({ alias: 'Paper trading sandbox', keyId: 'paper-trading', required: true }));
-    } else {
-      keyRefs.push(this.createKeyReferenceGroup({ alias: 'Binance primary key', keyId: 'binance-primary', required: true }));
-    }
+    const adapters = this.adaptersArray();
+    adapters.clear();
+    adapters.markAsPristine();
+    adapters.markAsUntouched();
 
     this.form.controls.constraints.patchValue({
-      maxRuntimeMinutes: initialType === 'live' ? null : initialType === 'sandbox' ? 720 : 480,
+      maxRuntimeMinutes:
+        initialType === 'backtest' ? 480 : initialType === 'sandbox' ? 720 : null,
       maxDrawdownPercent: 20,
       autoStopOnError: true,
-      concurrencyLimit: initialType === 'live' ? 1 : initialType === 'sandbox' ? 1 : null,
+      concurrencyLimit:
+        initialType === 'live' ? 1 : initialType === 'sandbox' ? 1 : null,
     });
+
+    this.onNodeModeChanged(initialType);
   }
 
   private validateCurrentStep(isSubmit = false): boolean {
@@ -402,30 +517,23 @@ export class NodeLaunchDialogComponent {
         return true;
       }
       case 2: {
-        if (this.dataSourcesArray().length === 0) {
-          this.stepError.set('Specify at least one data source or adapter.');
-          return false;
-        }
-        this.dataSourcesArray().controls.forEach((group) => group.markAllAsTouched());
-        if (!this.dataSourcesArray().valid) {
-          this.stepError.set('Data source details are incomplete.');
-          return false;
+        const adapters = this.adaptersArray();
+        adapters.controls.forEach((group) => group.markAllAsTouched());
+        const mode = this.form.controls.nodeType.value;
+        if (mode === 'live') {
+          if (adapters.length === 0) {
+            this.stepError.set('Select at least one exchange for live nodes.');
+            return false;
+          }
+          const missingKeys = adapters.controls.some((group) => !group.controls.keyId.value);
+          if (missingKeys) {
+            this.stepError.set('Assign an API key to each selected exchange.');
+            return false;
+          }
         }
         return true;
       }
       case 3: {
-        this.keyReferencesArray().controls.forEach((group) => group.markAllAsTouched());
-        if (this.keyReferencesArray().length === 0) {
-          this.stepError.set('Provide at least one credential reference to authorise adapters.');
-          return false;
-        }
-        if (!this.keyReferencesArray().valid) {
-          this.stepError.set('Credential references are incomplete.');
-          return false;
-        }
-        return true;
-      }
-      case 4: {
         const constraints = this.form.controls.constraints;
         constraints.markAllAsTouched();
         if (!constraints.valid) {
@@ -434,7 +542,7 @@ export class NodeLaunchDialogComponent {
         }
         return true;
       }
-      case 5: {
+      case 4: {
         if (!isSubmit) {
           return true;
         }
@@ -461,19 +569,20 @@ export class NodeLaunchDialogComponent {
       })),
     };
 
-    const dataSources: NodeLaunchDataSource[] = formValue.dataSources.map((source) => ({
-      id: source.id,
-      label: source.label,
-      type: source.type,
-      mode: source.mode,
-      enabled: source.enabled,
-    }));
-
-    const keyReferences: NodeLaunchKeyReference[] = formValue.keyReferences.map((key) => ({
-      alias: key.alias,
-      keyId: key.keyId,
-      required: key.required,
-    }));
+    const adapters: NodeLaunchAdapterSelection[] = this.adaptersArray().controls.map(
+      (group) => {
+        const alias = group.controls.alias.value?.trim() ?? '';
+        const keyId = group.controls.keyId.value?.trim() ?? '';
+        return {
+          venue: group.controls.venue.value,
+          alias: alias || undefined,
+          keyId: keyId || undefined,
+          enableData: group.controls.enableData.value,
+          enableTrading: group.controls.enableTrading.value,
+          sandbox: group.controls.sandbox.value,
+        };
+      },
+    );
 
     const constraints: NodeLaunchConstraints = {
       maxRuntimeMinutes: formValue.constraints.maxRuntimeMinutes ?? null,
@@ -485,9 +594,10 @@ export class NodeLaunchDialogComponent {
     return {
       type: formValue.nodeType,
       strategy,
-      dataSources,
-      keyReferences,
+      adapters,
       constraints,
+      dataSources: [],
+      keyReferences: [],
     };
   }
 }
