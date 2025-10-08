@@ -313,7 +313,7 @@ class MockNautilusService:
         cache_ttl: int = 60,
         data: Optional["DataService"] = None,
     ) -> None:
-        engine_service = engine or build_engine_service()
+        engine_service = engine or build_engine_service(redis_url=settings.redis_url)
         self._engine_service: NautilusEngineService = engine_service
         self._bus: EngineEventBus = self._engine_service.bus
         self._mode = "mock"
@@ -4447,7 +4447,7 @@ class NautilusService:
         engine: Optional[NautilusEngineService] = None,
         storage: Optional[NullStorage] = None,
     ) -> None:
-        self._engine = engine or build_engine_service()
+        self._engine = engine or build_engine_service(redis_url=settings.redis_url)
         self._allow_mock = settings.use_mock_services
         self._state_sync: Optional[EngineStateSync] = None
         try:
