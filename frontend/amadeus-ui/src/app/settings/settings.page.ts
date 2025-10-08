@@ -38,7 +38,6 @@ import { NotificationService } from '../shared/notifications/notification.servic
 import { encryptSecret, hashPassphrase } from './secret-crypto';
 
 type KeyCreateFormGroup = FormGroup<{
-  keyId: FormControl<string>;
   label: FormControl<string>;
   venue: FormControl<string>;
   apiKey: FormControl<string>;
@@ -213,6 +212,7 @@ export class SettingsPage implements OnInit {
           .filter((exchange) => exchange.code.length > 0);
         sanitized.sort((a, b) => a.name.localeCompare(b.name));
         this.availableExchanges.set(sanitized);
+        this.ensureCreateVenueInitialized();
         this.isExchangesLoading.set(false);
       },
       error: (error) => {
@@ -262,6 +262,7 @@ export class SettingsPage implements OnInit {
     this.resetCreateForm();
     this.createError.set(null);
     this.isCreateCustomVenue.set(false);
+    this.ensureCreateVenueInitialized();
     this.isCreateDialogOpen.set(true);
   }
 
@@ -567,14 +568,20 @@ export class SettingsPage implements OnInit {
       return;
     }
 
-    const keyId = raw.keyId.trim();
-    const venue = raw.venue.trim();
+    const label = raw.label.trim();
+    const venue = raw.venue.trim() || this.pickDefaultVenue();
     const apiKey = raw.apiKey.trim();
     const apiSecret = raw.apiSecret.trim();
     const passphrase = raw.passphrase.trim();
 
-    if (!keyId || !venue || !apiKey || !apiSecret || !passphrase) {
+    if (!venue || !apiKey || !apiSecret || !passphrase) {
       this.createError.set('Fill in all required fields.');
+      return;
+    }
+
+    const keyId = this.generateKeyIdentifier(label, apiKey);
+    if (!keyId) {
+      this.createError.set('Unable to generate a key identifier.');
       return;
     }
 
@@ -593,7 +600,6 @@ export class SettingsPage implements OnInit {
         passphraseHash,
       };
 
-      const label = raw.label.trim();
       if (label) {
         payload.label = label;
       }
@@ -883,6 +889,7 @@ export class SettingsPage implements OnInit {
         }
       });
       this.knownVenues.set(Array.from(venueSet));
+      this.ensureCreateVenueInitialized();
 
       const nodes = nodesResponse.nodes ?? [];
       const details = await Promise.all(
@@ -1100,6 +1107,7 @@ export class SettingsPage implements OnInit {
           return labelA.localeCompare(labelB);
         });
         this.keys.set(sorted);
+        this.ensureCreateVenueInitialized();
         this.evaluateKeyHealth(sorted);
         this.lastUpdated.set(new Date());
         this.errorText.set(null);
@@ -1172,7 +1180,6 @@ export class SettingsPage implements OnInit {
 
   private createKeyForm(): KeyCreateFormGroup {
     return this.fb.group({
-      keyId: this.fb.nonNullable.control('', { validators: [Validators.required] }),
       label: this.fb.nonNullable.control(''),
       venue: this.fb.nonNullable.control('', { validators: [Validators.required] }),
       apiKey: this.fb.nonNullable.control('', { validators: [Validators.required] }),
@@ -1190,9 +1197,8 @@ export class SettingsPage implements OnInit {
 
   private resetCreateForm(): void {
     this.createForm.reset({
-      keyId: '',
       label: '',
-      venue: '',
+      venue: this.pickDefaultVenue(),
       apiKey: '',
       apiSecret: '',
       passphrase: '',
@@ -1204,7 +1210,8 @@ export class SettingsPage implements OnInit {
     });
     this.createForm.markAsPristine();
     this.createForm.markAsUntouched();
-    this.isCreateCustomVenue.set(false);
+    const currentVenue = this.createForm.controls.venue.value;
+    this.isCreateCustomVenue.set(!!currentVenue && !this.hasKnownVenue(currentVenue));
   }
 
   private createEditForm(): KeyEditFormGroup {
@@ -1327,6 +1334,68 @@ export class SettingsPage implements OnInit {
     }
     const code = venue.toUpperCase();
     return this.venueOptions().some((option) => option.code === code);
+  }
+
+  private pickDefaultVenue(): string {
+    const options = this.venueOptions();
+    if (options.length > 0) {
+      return options[0].code;
+    }
+    return '';
+  }
+
+  private ensureCreateVenueInitialized(): void {
+    const control = this.createForm.controls.venue;
+    const currentValue = control.value?.trim();
+    if (currentValue) {
+      return;
+    }
+    if (this.isCreateDialogOpen() && this.isCreateCustomVenue()) {
+      return;
+    }
+    const defaultVenue = this.pickDefaultVenue();
+    if (defaultVenue) {
+      control.setValue(defaultVenue);
+      this.isCreateCustomVenue.set(false);
+    }
+  }
+
+  private generateKeyIdentifier(label: string, apiKey: string): string {
+    const normalizedLabel = label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48);
+    let base = normalizedLabel;
+    if (!base) {
+      const sanitizedKey = apiKey.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      base = sanitizedKey.slice(0, 24);
+    }
+    if (!base) {
+      base = `key-${Date.now().toString(36)}`;
+    }
+    return this.ensureUniqueKeyId(base);
+  }
+
+  private ensureUniqueKeyId(base: string): string {
+    const maxLength = 64;
+    const normalizedBase = base.slice(0, maxLength);
+    const existingIds = new Set(this.keys().map((key) => key.key_id));
+    if (!existingIds.has(normalizedBase)) {
+      return normalizedBase;
+    }
+
+    let counter = 2;
+    while (true) {
+      const suffix = `-${counter}`;
+      const truncated = normalizedBase.slice(0, Math.max(1, maxLength - suffix.length));
+      const candidate = `${truncated}${suffix}`;
+      if (!existingIds.has(candidate)) {
+        return candidate;
+      }
+      counter += 1;
+    }
   }
 
   private formatRelativeTime(date: Date): string {

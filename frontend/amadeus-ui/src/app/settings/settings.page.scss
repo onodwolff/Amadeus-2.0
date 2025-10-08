@@ -378,36 +378,41 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  padding: clamp(16px, 4vh, 48px) 16px;
+  overflow-y: auto;
 }
 
 .dialog__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(15, 23, 42, 0.7);
+  background: rgba(15, 23, 42, 0.76);
   backdrop-filter: blur(6px);
 }
 
 .dialog__panel {
   position: relative;
-  width: min(520px, calc(100vw - 32px));
-  max-height: calc(100vh - 48px);
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - clamp(56px, 12vh, 104px));
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 20px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(15, 23, 42, 0.95);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.88));
   display: flex;
   flex-direction: column;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.55);
 }
 
 .dialog__header {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 24px 24px 12px;
+  padding: 28px 32px 20px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .dialog__header--danger {
-  border-bottom: 1px solid rgba(248, 113, 113, 0.24);
+  border-bottom-color: rgba(248, 113, 113, 0.3);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.85), rgba(30, 41, 59, 0.72));
 }
 
 .dialog__eyebrow {
@@ -446,16 +451,16 @@
 .dialog__form {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .dialog__body {
   display: grid;
-  gap: 16px;
-  padding: 0 24px 24px;
+  gap: 20px;
+  padding: 0 32px 28px;
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   grid-template-columns: 1fr;
 }
@@ -483,21 +488,49 @@
   }
 }
 
+@media (max-width: 720px) {
+  .dialog {
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .dialog__panel {
+    width: 100%;
+    max-height: calc(100vh - 32px);
+  }
+
+  .dialog__header {
+    padding: 24px 24px 18px;
+  }
+
+  .dialog__body {
+    padding: 0 24px 24px;
+  }
+
+  .dialog__footer {
+    padding: 18px 24px 24px;
+  }
+
+  .dialog__error {
+    margin: 0 24px;
+  }
+}
+
 .dialog__footer {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 16px 24px 24px;
-  border-top: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.95);
-  box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.45);
+  padding: 20px 32px 32px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.92));
+  box-shadow: 0 -12px 24px rgba(15, 23, 42, 0.5);
   flex-shrink: 0;
 }
 
 .dialog__error {
-  margin: 0 24px;
+  margin: 0 32px;
   padding: 12px 16px;
   border-radius: 10px;
   background: rgba(239, 68, 68, 0.12);

@@ -301,31 +301,18 @@
             <label class="field">
               <span class="field__label">Key label</span>
               <input class="field__control" formControlName="label" type="text" placeholder="Primary trading key" />
-            </label>
-
-            <label class="field">
-              <span class="field__label">Key identifier</span>
-              <input
-                class="field__control"
-                formControlName="keyId"
-                type="text"
-                placeholder="binance-primary"
-                required
-              />
-              <span class="field__hint" *ngIf="createForm.controls.keyId.invalid && createForm.controls.keyId.touched">
-                Identifier is required.
-              </span>
+              <span class="field__hint">A key identifier will be generated automatically from this label.</span>
             </label>
 
             <label class="field field--full">
-              <span class="field__label">Venue</span>
+              <span class="field__label">Exchange (Биржа)</span>
               <select
                 class="field__control field__control--select"
                 [value]="isCreateCustomVenue() ? '__custom__' : createForm.controls.venue.value"
                 (change)="onCreateVenueSelected($any($event.target).value)"
                 required
               >
-                <option value="" disabled>Select a venue</option>
+                <option value="" disabled>Select an exchange</option>
                 <option *ngFor="let exchange of venueOptions()" [value]="exchange.code">
                   {{ exchange.name }} ({{ exchange.code }})
                 </option>
@@ -457,7 +444,7 @@
             </label>
 
             <label class="field field--full">
-              <span class="field__label">Venue</span>
+              <span class="field__label">Exchange (Биржа)</span>
               <select
                 class="field__control field__control--select"
                 [value]="isEditCustomVenue() ? '__custom__' : editForm.controls.venue.value"
