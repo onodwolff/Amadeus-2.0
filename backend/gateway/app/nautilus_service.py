@@ -110,6 +110,7 @@ class NodeHandle:
     updated_at: str = field(default_factory=_utcnow_iso)
     metrics: Dict[str, Any] = field(default_factory=dict)
     adapters: List[Dict[str, Any]] = field(default_factory=list)
+    summary: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -381,27 +382,31 @@ class MockNautilusService:
         except Exception:
             adapters = []
         state.handle.adapters = adapters
+        self._update_node_summary(node_id)
 
     def _persist_node_handle(self, handle: NodeHandle) -> None:
         try:
             mode = EngineMode(handle.mode)
         except ValueError:
             mode = EngineMode.BACKTEST
+        summary_payload = deepcopy(handle.summary) if handle.summary else {}
+        summary_payload.setdefault("external_id", handle.id)
+        summary_payload.setdefault("mode", handle.mode)
+        summary_payload.setdefault("status", handle.status)
+        if handle.detail is not None and "detail" not in summary_payload:
+            summary_payload["detail"] = handle.detail
+
         self._storage.record_node(
             {
                 "node_id": handle.id,
                 "mode": mode,
                 "status": handle.status,
                 "detail": handle.detail,
-                "metrics": handle.metrics,
-                "adapters": handle.adapters,
+                "metrics": deepcopy(handle.metrics),
+                "adapters": deepcopy(handle.adapters),
                 "created_at": handle.created_at,
                 "updated_at": handle.updated_at,
-                "summary": {
-                    "external_id": handle.id,
-                    "detail": handle.detail,
-                    "mode": handle.mode,
-                },
+                "summary": summary_payload,
             }
         )
 
@@ -3457,6 +3462,18 @@ class MockNautilusService:
                 f"Historical data unavailable: {exc}",
                 source="data",
             )
+        except Exception as exc:  # pragma: no cover - allow degraded launch without DB
+            LOGGER.warning(
+                "backtest_dataset_prepare_failed",
+                extra={"node_id": node_id, "error": str(exc)},
+                exc_info=True,
+            )
+            self._append_log(
+                node_id,
+                "warning",
+                "Unable to prepare backtest dataset – proceeding with cached configuration",
+                source="data",
+            )
 
         self._persist_node_config(
             node_id=node_id,
@@ -3525,6 +3542,7 @@ class MockNautilusService:
 
         data_sources = config_data.get("dataSources") or []
         data_params = data_sources[0].setdefault("parameters", {}) if data_sources else {}
+        dataset_warning = False
         try:
             dataset_record = self._data_service.ensure_backtest_dataset_sync(config_data)
             config_data["datasetId"] = dataset_record.dataset_id
@@ -3546,6 +3564,13 @@ class MockNautilusService:
                 f"Historical data unavailable: {exc}",
                 source="data",
             )
+        except Exception as exc:  # pragma: no cover - allow degraded launch without DB
+            LOGGER.warning(
+                "backtest_dataset_prepare_failed",
+                extra={"detail": detail, "error": str(exc)},
+                exc_info=True,
+            )
+            dataset_warning = True
 
         handle = self._create_node(
             mode=engine_mode.value,
@@ -3558,6 +3583,13 @@ class MockNautilusService:
         config_data.setdefault("id", node_id)
         config_metadata = dict(config_metadata or {})
         config_metadata.setdefault("detail", handle.detail)
+        if dataset_warning:
+            self._append_log(
+                node_id,
+                "warning",
+                "Unable to prepare backtest dataset – proceeding with cached configuration",
+                source="data",
+            )
 
         self._persist_node_config(
             node_id=node_id,
@@ -3938,6 +3970,7 @@ class MockNautilusService:
         self._append_log(
             node_id, "info", "Node received stop signal", source="orchestrator"
         )
+        self._update_node_summary(node_id)
         self._persist_node_handle(handle)
 
         if handle.mode == "backtest":
@@ -4001,12 +4034,14 @@ class MockNautilusService:
         self._append_log(
             node_id, "info", "Restart sequence completed", source="controller"
         )
+        self._update_node_summary(node_id)
         self._persist_node_handle(handle)
         return handle
 
     def node_detail(self, node_id: str) -> dict:
         state = self._require_node(node_id)
         self._sync_node_adapters(node_id)
+        self._update_node_summary(node_id)
         return {
             "node": self.as_dict(state.handle),
             "config": state.config,
@@ -4042,6 +4077,7 @@ class MockNautilusService:
         for node_id in list(self._nodes.keys()):
             self._update_handle_metrics(node_id)
             self._sync_node_adapters(node_id)
+            self._update_node_summary(node_id)
         return [state.handle for state in self._nodes.values()]
 
     def as_dict(self, handle: NodeHandle) -> dict:
@@ -4064,6 +4100,7 @@ class MockNautilusService:
         self._nodes[node_id] = state
         self._config_versions[node_id] = 0
         self._record_lifecycle(node_id, "created", "Node registered")
+        self._update_node_summary(node_id)
         self._publish(
             "engine.nodes",
             {"event": "created", "node": self.as_dict(handle)},
@@ -4086,6 +4123,7 @@ class MockNautilusService:
         handle.updated_at = _utcnow_iso()
         self._record_lifecycle(node_id, "error", message)
         self._append_log(node_id, "error", message, source=source)
+        self._update_node_summary(node_id)
         self._publish(
             "engine.nodes",
             {"event": "error", "node": self.as_dict(handle)},
@@ -4100,6 +4138,7 @@ class MockNautilusService:
         handle.updated_at = _utcnow_iso()
         self._record_lifecycle(node_id, "running", message)
         self._append_log(node_id, "info", "Node entered running state", source="engine")
+        self._update_node_summary(node_id)
         self._publish(
             "engine.nodes",
             {"event": "running", "node": self.as_dict(handle)},
@@ -4195,10 +4234,65 @@ class MockNautilusService:
             }
         )
 
+    def _update_node_summary(self, node_id: str) -> None:
+        state = self._nodes.get(node_id)
+        if state is None:
+            return
+
+        handle = state.handle
+        summary: Dict[str, Any] = {
+            "external_id": handle.id,
+            "id": handle.id,
+            "mode": handle.mode,
+            "status": handle.status,
+            "detail": handle.detail,
+            "created_at": handle.created_at,
+            "updated_at": handle.updated_at,
+        }
+
+        version = self._config_versions.get(node_id)
+        if version is not None:
+            summary["config_version"] = version
+
+        config = state.config or {}
+        strategy = config.get("strategy")
+        if isinstance(strategy, dict) and strategy:
+            strategy_summary: Dict[str, Any] = {}
+            if strategy.get("id") is not None:
+                strategy_summary["id"] = strategy.get("id")
+            if strategy.get("name") is not None:
+                strategy_summary["name"] = strategy.get("name")
+            parameters: List[Dict[str, Any]] = []
+            for entry in strategy.get("parameters", []) or []:
+                if not isinstance(entry, dict):
+                    continue
+                key = entry.get("key")
+                value = entry.get("value")
+                if key is None and value is None:
+                    continue
+                parameters.append({"key": key, "value": value})
+            if parameters:
+                strategy_summary["parameters"] = parameters
+            summary["strategy"] = strategy_summary
+
+        metrics_snapshot = deepcopy(handle.metrics) if handle.metrics else {}
+        if metrics_snapshot:
+            summary["metrics"] = metrics_snapshot
+            for metric_key in ("pnl", "equity", "latency_ms", "cpu_percent", "memory_mb"):
+                metric_value = metrics_snapshot.get(metric_key)
+                if metric_value is not None:
+                    summary[metric_key] = metric_value
+
+        if handle.adapters:
+            summary["adapters"] = deepcopy(handle.adapters)
+
+        handle.summary = {key: value for key, value in summary.items() if value is not None}
+
     def _update_handle_metrics(self, node_id: str) -> None:
         state = self._require_node(node_id)
         if not state.metrics:
             state.handle.metrics = {}
+            self._update_node_summary(node_id)
             return
 
         latest = state.metrics[-1]
@@ -4212,6 +4306,7 @@ class MockNautilusService:
             "equity_history": [round(sample.equity, 2) for sample in history_window],
         }
         state.handle.updated_at = _utcnow_iso()
+        self._update_node_summary(node_id)
         self._persist_node_handle(state.handle)
 
     def metrics_series(self, node_id: str, limit: int = 360) -> dict:
@@ -4413,7 +4508,9 @@ class NautilusService:
             has_package = False
         if not has_package:
             return False
-        running = getattr(self._engine, "_nodes_running", {})
+        running = getattr(self._engine, "active_nodes", None)
+        if running is None:
+            running = getattr(self._engine, "_nodes_running", {})
         return bool(running)
 
     def _start_bus_consumers(self) -> None:

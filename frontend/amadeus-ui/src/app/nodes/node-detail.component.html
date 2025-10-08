@@ -8,6 +8,9 @@
           {{ current.status }}
         </span>
         <span class="node-detail__status" *ngIf="current.mode">• {{ current.mode }} mode</span>
+        <span class="node-detail__status" *ngIf="current.summary?.strategy as strategySummary">
+          • {{ strategySummary.name || strategySummary.id }}
+        </span>
         <span class="node-detail__status" *ngIf="current.updated_at">• updated {{ current.updated_at | date: 'short' }}</span>
       </div>
     </div>

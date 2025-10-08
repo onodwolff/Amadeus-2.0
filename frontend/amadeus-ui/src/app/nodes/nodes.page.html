@@ -82,6 +82,7 @@
               <tr>
                 <th>ID</th>
                 <th>Mode</th>
+                <th>Strategy</th>
                 <th>Status</th>
                 <th>Detail</th>
                 <th>PnL</th>
@@ -98,6 +99,15 @@
               >
                 <td data-label="ID"><code>{{ node.id }}</code></td>
                 <td data-label="Mode"><span class="tag">{{ node.mode | titlecase }}</span></td>
+                <td data-label="Strategy" class="strategy">
+                  <ng-container *ngIf="node.summary?.strategy as strategy; else noStrategy">
+                    <span class="strategy__name">{{ strategy.name || strategy.id || '—' }}</span>
+                    <span class="strategy__meta" *ngIf="strategy.id && strategy.name && strategy.id !== strategy.name">
+                      ({{ strategy.id }})
+                    </span>
+                  </ng-container>
+                  <ng-template #noStrategy>—</ng-template>
+                </td>
                 <td data-label="Status">
                   <span
                     class="status"
@@ -107,14 +117,16 @@
                   >
                 </td>
                 <td data-label="Detail" class="detail">{{ node.detail || '—' }}</td>
-                <td data-label="PnL">{{ node.metrics?.pnl ?? '—' }}</td>
+                <td data-label="PnL">{{ node.metrics?.pnl ?? node.summary?.pnl ?? '—' }}</td>
                 <td data-label="Equity" class="equity">
-                  <ng-container *ngIf="node.metrics?.equity !== undefined && node.metrics?.equity !== null; else noEquity">
+                  <ng-container
+                    *ngIf="(node.metrics?.equity ?? node.summary?.equity) as equityValue; else noEquity"
+                  >
                     <div class="equity-cell">
-                      <span class="equity-cell__value">${{ node.metrics?.equity | number: '1.0-0' }}</span>
+                      <span class="equity-cell__value">${{ equityValue | number: '1.0-0' }}</span>
                       <app-equity-sparkline
                         class="equity-cell__sparkline"
-                        [series]="node.metrics?.equity_history ?? []"
+                        [series]="node.metrics?.equity_history ?? node.summary?.metrics?.equity_history ?? []"
                         [width]="96"
                         [height]="28"
                       ></app-equity-sparkline>
@@ -122,7 +134,18 @@
                   </ng-container>
                   <ng-template #noEquity>—</ng-template>
                 </td>
-                <td data-label="Latency">{{ node.metrics?.latency_ms ? node.metrics?.latency_ms + ' ms' : '—' }}</td>
+                <td data-label="Latency">
+                  <ng-container
+                    *ngIf="
+                      (node.metrics?.latency_ms ?? node.summary?.latency_ms) !== undefined &&
+                      (node.metrics?.latency_ms ?? node.summary?.latency_ms) !== null;
+                      else noLatency
+                    "
+                  >
+                    {{ (node.metrics?.latency_ms ?? node.summary?.latency_ms) | number: '1.0-0' }} ms
+                  </ng-container>
+                  <ng-template #noLatency>—</ng-template>
+                </td>
                 <td data-label="Actions" class="actions">
                   <button
                     type="button"

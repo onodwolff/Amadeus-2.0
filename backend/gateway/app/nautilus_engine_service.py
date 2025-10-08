@@ -300,6 +300,10 @@ class NautilusEngineService:
         self._storage_root = storage_root or self._default_storage_root()
         self._logger = logging.getLogger(__name__)
         self._nodes_running: Dict[str, EngineNodeHandle] = {}
+        # ``active_nodes`` is the public alias used by orchestration layers to
+        # reference running engine handles.  Keep it backed by the same dict to
+        # preserve existing expectations while exposing the clearer name.
+        self.active_nodes: Dict[str, EngineNodeHandle] = self._nodes_running
         self._config_versions: Dict[str, int] = {}
         self._database_url = database_url
         self._encryption_key = encryption_key
@@ -609,11 +613,11 @@ class NautilusEngineService:
         resolved_node_id = (
             node_id
             or str(safe_config.get("id") or "").strip()
-            or f"node-{len(self._nodes_running) + 1}"
+            or f"node-{len(self.active_nodes) + 1}"
         )
         safe_config.setdefault("id", resolved_node_id)
 
-        if resolved_node_id in self._nodes_running:
+        if resolved_node_id in self.active_nodes:
             raise RuntimeError(f"Node '{resolved_node_id}' is already running")
 
         self._node_configs[resolved_node_id] = deepcopy(safe_config)
@@ -678,7 +682,7 @@ class NautilusEngineService:
             adapters=deepcopy(self._adapter_status.get(resolved_node_id, [])),
         )
 
-        self._nodes_running[resolved_node_id] = handle
+        self.active_nodes[resolved_node_id] = handle
 
         try:
             self.attach_bus_listeners(node, resolved_node_id)
@@ -718,7 +722,7 @@ class NautilusEngineService:
     def get_node_handle(self, node_id: str) -> Optional[EngineNodeHandle]:
         """Return the active :class:`EngineNodeHandle` for ``node_id`` if running."""
 
-        return self._nodes_running.get(node_id)
+        return self.active_nodes.get(node_id)
 
     def get_node_config(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Return the last stored configuration for ``node_id`` if available."""
@@ -735,7 +739,7 @@ class NautilusEngineService:
     ) -> EngineNodeHandle:
         """Stop a running trading node and update internal bookkeeping."""
 
-        handle = self._nodes_running.get(node_id)
+        handle = self.active_nodes.get(node_id)
         if handle is None:
             raise KeyError(f"Node '{node_id}' is not running")
 
@@ -772,7 +776,7 @@ class NautilusEngineService:
 
         handle.node = None
 
-        self._nodes_running.pop(node_id, None)
+        self.active_nodes.pop(node_id, None)
 
         self._set_adapter_state(node_id, "stopped")
         handle.adapters = deepcopy(self._adapter_status.get(node_id, []))
@@ -797,7 +801,7 @@ class NautilusEngineService:
         if config is None:
             raise KeyError(f"No configuration stored for node '{node_id}'")
 
-        existing = self._nodes_running.get(node_id)
+        existing = self.active_nodes.get(node_id)
         preserved_user = user_id or (existing.user_id if existing else None)
 
         if existing is not None:
@@ -1138,16 +1142,16 @@ class NautilusEngineService:
     def submit_order(self, instructions: Dict[str, Any]) -> None:
         """Forward order instructions to a running Nautilus trading node if available."""
 
-        if not self._nodes_running:
+        if not self.active_nodes:
             self._logger.debug("No Nautilus nodes active – skipping order submission.")
             return
 
         target_id = instructions.get("node_id")
         candidates: Iterable[Tuple[str, EngineNodeHandle]]
-        if isinstance(target_id, str) and target_id in self._nodes_running:
-            candidates = [(target_id, self._nodes_running[target_id])]
+        if isinstance(target_id, str) and target_id in self.active_nodes:
+            candidates = [(target_id, self.active_nodes[target_id])]
         else:
-            candidates = list(self._nodes_running.items())
+            candidates = list(self.active_nodes.items())
 
         payload = {
             key: value for key, value in instructions.items() if key != "node_id"
@@ -1178,16 +1182,16 @@ class NautilusEngineService:
     def cancel_order(self, instructions: Dict[str, Any]) -> None:
         """Forward an order cancel request to a running Nautilus node."""
 
-        if not self._nodes_running:
+        if not self.active_nodes:
             self._logger.debug("No Nautilus nodes active – skipping cancel request.")
             return
 
         target_id = instructions.get("node_id")
         candidates: Iterable[Tuple[str, EngineNodeHandle]]
-        if isinstance(target_id, str) and target_id in self._nodes_running:
-            candidates = [(target_id, self._nodes_running[target_id])]
+        if isinstance(target_id, str) and target_id in self.active_nodes:
+            candidates = [(target_id, self.active_nodes[target_id])]
         else:
-            candidates = list(self._nodes_running.items())
+            candidates = list(self.active_nodes.items())
 
         payload = {
             key: value for key, value in instructions.items() if key != "node_id"
@@ -1226,7 +1230,7 @@ class NautilusEngineService:
     ) -> Optional[Dict[str, Any]]:
         """Attempt to retrieve historical bars via the running Nautilus nodes."""
 
-        if not self._nodes_running:
+        if not self.active_nodes:
             return None
 
         start_dt = self._parse_iso8601(start)
@@ -1255,7 +1259,7 @@ class NautilusEngineService:
             "bars",
         )
 
-        for node_key, entry in self._nodes_running.items():
+        for node_key, entry in self.active_nodes.items():
             node_obj = entry.node
             if node_obj is None:
                 continue
@@ -1878,7 +1882,7 @@ class NautilusEngineService:
                 continue
             entry["state"] = state
 
-        running = self._nodes_running.get(node_id)
+        running = self.active_nodes.get(node_id)
         if running is not None:
             running.adapters = deepcopy(entries)
 

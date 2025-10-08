@@ -12,6 +12,35 @@ export interface NodeMetrics {
   equity_history?: number[];
 }
 
+export interface NodeStrategySummary {
+  id?: string;
+  name?: string;
+  parameters?: NodeLaunchStrategyParameter[];
+}
+
+export interface NodeSummary {
+  external_id?: string;
+  id?: string;
+  mode?: NodeMode;
+  status?: NodeStatus;
+  detail?: string;
+  created_at?: string;
+  updated_at?: string;
+  config_version?: number;
+  config_source?: string;
+  config_format?: string;
+  strategy?: NodeStrategySummary;
+  metrics?: NodeMetrics;
+  adapters?: AdapterStatus[];
+  pnl?: number;
+  equity?: number;
+  latency_ms?: number;
+  cpu_percent?: number;
+  memory_mb?: number;
+  error?: string;
+  [key: string]: unknown;
+}
+
 export interface AdapterStatus {
   node_id?: string;
   name?: string;
@@ -50,6 +79,9 @@ export interface NodeHandle {
   created_at?: string;
   updated_at?: string;
   adapters?: AdapterStatus[];
+  summary?: NodeSummary;
+  config_version?: number;
+  db_id?: number;
 }
 
 export interface NodesListResponse {
