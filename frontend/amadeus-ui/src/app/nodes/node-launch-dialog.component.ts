@@ -159,7 +159,14 @@ export class NodeLaunchDialogComponent {
     },
   ] as const;
 
-  readonly currentStepDescriptor = computed(() => this.steps[this.currentStep()] ?? this.steps[0]!);
+  readonly currentStepDescriptor = computed(() => {
+    const fallback = this.steps[0];
+    return this.steps[this.currentStep()] ?? fallback ?? {
+      key: 'type',
+      title: '',
+      description: '',
+    };
+  });
   readonly selectedStrategyDescription = computed(() => {
     const id = this.form.controls.strategy.controls.id.value;
     const template = this.strategyTemplates.find((item) => item.id === id);
@@ -569,25 +576,14 @@ export class NodeLaunchDialogComponent {
       })),
     };
 
-    const adapters: NodeLaunchAdapterSelection[] = this.adaptersArray().controls.map((group) => {
-      const aliasValue = group.controls.alias.value?.trim();
-      const keyIdValue = group.controls.keyId.value?.trim();
-      const base: NodeLaunchAdapterSelection = {
-        venue: group.controls.venue.value,
-        enableData: group.controls.enableData.value,
-        enableTrading: group.controls.enableTrading.value,
-        sandbox: group.controls.sandbox.value,
-      };
-
-      const alias = aliasValue && aliasValue.length > 0 ? aliasValue : null;
-      const keyId = keyIdValue && keyIdValue.length > 0 ? keyIdValue : null;
-
-      return {
-        ...base,
-        ...(alias ? { alias } : {}),
-        ...(keyId ? { keyId } : {}),
-      };
-    });
+    const adapters: NodeLaunchAdapterSelection[] = this.adaptersArray().controls.map((group) => ({
+      venue: group.controls.venue.value,
+      alias: group.controls.alias.value?.trim() ?? '',
+      keyId: group.controls.keyId.value?.trim() ?? '',
+      enableData: group.controls.enableData.value,
+      enableTrading: group.controls.enableTrading.value,
+      sandbox: group.controls.sandbox.value,
+    }));
 
     const constraints: NodeLaunchConstraints = {
       maxRuntimeMinutes: formValue.constraints.maxRuntimeMinutes ?? null,

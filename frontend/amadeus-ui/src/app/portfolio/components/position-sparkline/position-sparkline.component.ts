@@ -115,6 +115,10 @@ export class PositionSparklineComponent implements AfterViewInit, OnChanges {
       return { x, y };
     });
 
+    if (!points.length) {
+      return;
+    }
+
     context.lineWidth = 1.8;
     context.lineJoin = 'round';
     context.lineCap = 'round';

@@ -78,8 +78,7 @@ export class NodeDetailComponent implements AfterViewInit, OnChanges {
   }
 
   get latestPnl(): number | null {
-    const latest = this._pnlHistory.at(-1);
-    return latest ?? null;
+    return this._pnlHistory[this._pnlHistory.length - 1] ?? null;
   }
 
   ngOnChanges(changes: SimpleChanges): void {

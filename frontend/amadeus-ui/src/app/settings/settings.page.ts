@@ -896,7 +896,7 @@ export class SettingsPage implements OnInit {
         venue,
         scopes,
         passphraseHash,
-        ...(trimmedLabel ? { label: trimmedLabel } : {}),
+        label: trimmedLabel,
       };
 
       const hint = raw.passphraseHint.trim();
@@ -979,10 +979,11 @@ export class SettingsPage implements OnInit {
 
     return contexts.map((context) => {
       const adapters = context.adapters.map<AdapterView>((adapter) => {
-        const selectedRaw =
-          selections.hasOwnProperty(adapter.selectionKey)
-            ? selections[adapter.selectionKey]
-            : adapter.assignedKeyId ?? null;
+        const selectedRaw = selections.hasOwnProperty(adapter.selectionKey)
+          ? selections[adapter.selectionKey]
+          : adapter.assignedKeyId && adapter.assignedKeyId.length > 0
+          ? adapter.assignedKeyId
+          : null;
         const selected = selectedRaw ?? null;
         const compatibleKeys = this.filterCompatibleKeys(keys, adapter);
         const options: AdapterOption[] = compatibleKeys.map((key) => ({ key, compatible: true }));
@@ -1009,7 +1010,7 @@ export class SettingsPage implements OnInit {
 
         return {
           ...adapter,
-          ...(selected ? { assignedKeyId: selected } : {}),
+          assignedKeyId: selected ?? '',
           options,
           warnings,
         };
@@ -1144,7 +1145,9 @@ export class SettingsPage implements OnInit {
         const context = this.buildNodeAssignmentContext(detail);
         contexts.push(context);
         context.adapters.forEach((adapter) => {
-          selections[adapter.selectionKey] = adapter.assignedKeyId ?? null;
+          selections[adapter.selectionKey] = adapter.assignedKeyId && adapter.assignedKeyId.length > 0
+            ? adapter.assignedKeyId
+            : null;
         });
       }
 

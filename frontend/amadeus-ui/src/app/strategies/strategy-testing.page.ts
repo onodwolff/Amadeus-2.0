@@ -147,8 +147,8 @@ export class StrategyTestingPage implements OnDestroy {
     },
   ];
 
-  private readonly initialTemplate = this.ensureTemplate(this.strategyTemplates[0]);
-  private readonly initialDataset = this.ensureDataset(this.datasetOptions[0]);
+  private readonly templateDefaults = this.createTemplateDefaults(this.strategyTemplates[0]);
+  private readonly datasetDefaults = this.createDatasetDefaults(this.datasetOptions[0]);
 
   readonly form = this.fb.nonNullable.group({
     name: this.fb.nonNullable.control('Strategy optimisation run', [
@@ -156,32 +156,32 @@ export class StrategyTestingPage implements OnDestroy {
       Validators.maxLength(120),
     ]),
     strategy: this.fb.nonNullable.group({
-      id: this.fb.nonNullable.control(this.initialTemplate.id, Validators.required),
-      name: this.fb.nonNullable.control(this.initialTemplate.name, Validators.required),
-      description: this.fb.nonNullable.control(this.initialTemplate.description),
+      id: this.fb.nonNullable.control(this.templateDefaults.id, Validators.required),
+      name: this.fb.nonNullable.control(this.templateDefaults.name, Validators.required),
+      description: this.fb.nonNullable.control(this.templateDefaults.description),
     }),
     parameters: this.fb.array<ParameterRangeGroup>(
-      this.initialTemplate.ranges.map(range => this.createParameterGroup(range)),
+      this.templateDefaults.ranges.map(range => this.createParameterGroup(range)),
     ),
     dataset: this.fb.nonNullable.group({
-      id: this.fb.nonNullable.control(this.initialDataset.id, Validators.required),
-      name: this.fb.nonNullable.control(this.initialDataset.name, Validators.required),
-      venue: this.fb.nonNullable.control(this.initialDataset.venue, Validators.required),
+      id: this.fb.nonNullable.control(this.datasetDefaults.id, Validators.required),
+      name: this.fb.nonNullable.control(this.datasetDefaults.name, Validators.required),
+      venue: this.fb.nonNullable.control(this.datasetDefaults.venue, Validators.required),
       barInterval: this.fb.nonNullable.control(
-        this.initialDataset.barInterval,
+        this.datasetDefaults.barInterval,
         Validators.required,
       ),
       instrument: this.fb.nonNullable.control(
-        this.initialDataset.instrument,
+        this.datasetDefaults.instrument,
         Validators.required,
       ),
-      description: this.fb.nonNullable.control(this.initialDataset.description),
+      description: this.fb.nonNullable.control(this.datasetDefaults.description),
       start: this.fb.nonNullable.control(
-        this.formatDateTimeLocal(new Date(this.initialDataset.start)),
+        this.formatDateTimeLocal(new Date(this.datasetDefaults.start)),
         Validators.required,
       ),
       end: this.fb.nonNullable.control(
-        this.formatDateTimeLocal(new Date(this.initialDataset.end)),
+        this.formatDateTimeLocal(new Date(this.datasetDefaults.end)),
         Validators.required,
       ),
     }),
@@ -365,8 +365,8 @@ export class StrategyTestingPage implements OnDestroy {
 
     const dataset = formValue.dataset;
     const dateRange = {
-      start: new Date(dataset.start).toISOString(),
-      end: new Date(dataset.end).toISOString(),
+      start: this.toIso(dataset.start),
+      end: this.toIso(dataset.end),
     };
 
     const baseConfig = {
@@ -405,15 +405,14 @@ export class StrategyTestingPage implements OnDestroy {
     };
 
     const plan = formValue.plan;
+    const optimisationMetric = formValue.optimisationMetric ?? 'pnl';
     const payload: StrategyTestRunRequest = {
       name: formValue.name,
       baseConfig,
       parameterSpace,
       plan,
       optimisationDirection: formValue.optimisationDirection,
-      ...(formValue.optimisationMetric
-        ? { optimisationMetric: formValue.optimisationMetric }
-        : {}),
+      optimisationMetric,
       ...(formValue.randomSeed !== null && formValue.randomSeed !== undefined
         ? { randomSeed: formValue.randomSeed }
         : {}),
@@ -421,7 +420,10 @@ export class StrategyTestingPage implements OnDestroy {
 
     if (plan === 'random') {
       if (formValue.sampleCount != null) {
-        payload.sampleCount = formValue.sampleCount;
+        const sampleCount = Number(formValue.sampleCount);
+        if (Number.isFinite(sampleCount)) {
+          payload.sampleCount = sampleCount;
+        }
       }
     }
     if (formValue.maxParallel != null) {
@@ -429,20 +431,6 @@ export class StrategyTestingPage implements OnDestroy {
     }
 
     return payload;
-  }
-
-  private ensureTemplate(template: StrategyTemplate | undefined): StrategyTemplate {
-    if (!template) {
-      throw new Error('Strategy templates are not configured.');
-    }
-    return template;
-  }
-
-  private ensureDataset(dataset: DatasetOption | undefined): DatasetOption {
-    if (!dataset) {
-      throw new Error('Dataset options are not configured.');
-    }
-    return dataset;
   }
 
   startPolling(runId: string): void {
@@ -475,10 +463,43 @@ export class StrategyTestingPage implements OnDestroy {
       });
   }
 
+  private createTemplateDefaults(template: StrategyTemplate | undefined): StrategyTemplate {
+    return {
+      id: template?.id ?? '',
+      name: template?.name ?? '',
+      description: template?.description ?? '',
+      ranges: Array.isArray(template?.ranges) ? template.ranges : [],
+    };
+  }
+
+  private createDatasetDefaults(option: DatasetOption | undefined): DatasetOption {
+    return {
+      id: option?.id ?? '',
+      name: option?.name ?? '',
+      venue: option?.venue ?? '',
+      barInterval: option?.barInterval ?? '',
+      instrument: option?.instrument ?? '',
+      description: option?.description ?? '',
+      start: option?.start ?? '',
+      end: option?.end ?? '',
+    };
+  }
+
   private formatDateTimeLocal(date: Date): string {
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
     const clone = new Date(date.getTime());
     clone.setMinutes(clone.getMinutes() - clone.getTimezoneOffset());
     return clone.toISOString().slice(0, 16);
+  }
+
+  private toIso(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toISOString();
   }
 }
 

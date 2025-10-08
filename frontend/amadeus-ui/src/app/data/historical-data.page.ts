@@ -94,7 +94,7 @@ export class HistoricalDataPage {
       timeframe: value.timeframe,
       start: this.toIso(value.start),
       end: this.toIso(value.end),
-      ...(trimmedLabel ? { label: trimmedLabel } : {}),
+      label: trimmedLabel?.length ? trimmedLabel : null,
       source: 'ui' as const,
     };
 

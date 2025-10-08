@@ -46,8 +46,8 @@ export class TradeTapeComponent implements OnChanges, OnDestroy {
     hour12: false,
   });
 
-  private messagesSubscription: Subscription | null = null;
-  private stateSubscription: Subscription | null = null;
+  private messagesSubscription?: Subscription;
+  private stateSubscription?: Subscription;
 
   constructor() {
     effect(() => {
@@ -111,9 +111,9 @@ export class TradeTapeComponent implements OnChanges, OnDestroy {
 
   private teardown(): void {
     this.messagesSubscription?.unsubscribe();
-    this.messagesSubscription = null;
+    this.messagesSubscription = undefined;
     this.stateSubscription?.unsubscribe();
-    this.stateSubscription = null;
+    this.stateSubscription = undefined;
     this.wsState.set('disconnected');
   }
 
