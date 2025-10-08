@@ -5,7 +5,7 @@ import { buildWebSocketUrl } from './api-base';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'disconnected';
 
-export interface WsChannelConfig<T> {
+export interface WsChannelConfig {
   /**
    * Logical channel name. Channels with the same name reuse the same underlying connection.
    */
@@ -30,7 +30,7 @@ export interface WsChannelHandle<T> {
   readonly state$: Observable<WsConnectionState>;
 }
 
-interface ResolvedChannelConfig<T> {
+interface ResolvedChannelConfig {
   name: string;
   url: string;
   retryAttempts: number;
@@ -38,7 +38,7 @@ interface ResolvedChannelConfig<T> {
 }
 
 interface InternalChannelState<T> {
-  config: ResolvedChannelConfig<T>;
+  config: ResolvedChannelConfig;
   source$: Observable<T>;
   statusSubject: BehaviorSubject<WsConnectionState>;
   refCount: number;
@@ -48,7 +48,7 @@ interface InternalChannelState<T> {
 export class WsService {
   private readonly channels = new Map<string, InternalChannelState<unknown>>();
 
-  channel<T>(config: WsChannelConfig<T>): WsChannelHandle<T> {
+  channel<T>(config: WsChannelConfig): WsChannelHandle<T> {
     const resolved = this.resolveConfig(config);
     const existing = this.channels.get(resolved.name) as InternalChannelState<T> | undefined;
 
@@ -62,7 +62,7 @@ export class WsService {
     }
 
     const statusSubject = new BehaviorSubject<WsConnectionState>('connecting');
-    const source$ = this.createSourceObservable(resolved, statusSubject);
+    const source$ = this.createSourceObservable<T>(resolved, statusSubject);
     const state: InternalChannelState<T> = {
       config: resolved,
       source$,
@@ -75,7 +75,7 @@ export class WsService {
     return this.createHandle(resolved.name, state);
   }
 
-  private resolveConfig<T>(config: WsChannelConfig<T>): ResolvedChannelConfig<T> {
+  private resolveConfig(config: WsChannelConfig): ResolvedChannelConfig {
     const url = config.path.startsWith('ws') ? config.path : buildWebSocketUrl(config.path);
     const retryAttempts = config.retryAttempts ?? Infinity;
     const retryDelay = config.retryDelay ?? 1000;
@@ -89,7 +89,7 @@ export class WsService {
   }
 
   private createSourceObservable<T>(
-    config: ResolvedChannelConfig<T>,
+    config: ResolvedChannelConfig,
     statusSubject: BehaviorSubject<WsConnectionState>,
   ): Observable<T> {
     return new Observable<T>((subscriber) => {

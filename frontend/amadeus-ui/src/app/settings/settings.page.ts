@@ -891,11 +891,12 @@ export class SettingsPage implements OnInit {
 
     try {
       const passphraseHash = await hashPassphrase(passphrase);
+      const trimmedLabel = raw.label.trim();
       const payload: KeyUpdateRequest = {
-        label: raw.label.trim() || undefined,
         venue,
         scopes,
         passphraseHash,
+        ...(trimmedLabel ? { label: trimmedLabel } : {}),
       };
 
       const hint = raw.passphraseHint.trim();
@@ -978,10 +979,11 @@ export class SettingsPage implements OnInit {
 
     return contexts.map((context) => {
       const adapters = context.adapters.map<AdapterView>((adapter) => {
-        const selected =
+        const selectedRaw =
           selections.hasOwnProperty(adapter.selectionKey)
             ? selections[adapter.selectionKey]
             : adapter.assignedKeyId ?? null;
+        const selected = selectedRaw ?? null;
         const compatibleKeys = this.filterCompatibleKeys(keys, adapter);
         const options: AdapterOption[] = compatibleKeys.map((key) => ({ key, compatible: true }));
 
@@ -1007,7 +1009,7 @@ export class SettingsPage implements OnInit {
 
         return {
           ...adapter,
-          assignedKeyId: selected ?? undefined,
+          ...(selected ? { assignedKeyId: selected } : {}),
           options,
           warnings,
         };
@@ -1139,7 +1141,7 @@ export class SettingsPage implements OnInit {
         if (!detail) {
           continue;
         }
-        const context = this.buildNodeAssignmentContext(detail, venueSet);
+        const context = this.buildNodeAssignmentContext(detail);
         contexts.push(context);
         context.adapters.forEach((adapter) => {
           selections[adapter.selectionKey] = adapter.assignedKeyId ?? null;
@@ -1156,10 +1158,7 @@ export class SettingsPage implements OnInit {
     }
   }
 
-  private buildNodeAssignmentContext(
-    detail: NodeDetailResponse,
-    knownVenues: Set<string>,
-  ): NodeAssignmentContext {
+  private buildNodeAssignmentContext(detail: NodeDetailResponse): NodeAssignmentContext {
     const nodeMode = detail.node.mode ?? 'live';
     const strategy = detail.config.strategy;
     const strategyName = strategy?.name || strategy?.id || 'Unnamed strategy';
@@ -1595,10 +1594,8 @@ export class SettingsPage implements OnInit {
 
   private pickDefaultVenue(): string {
     const options = this.venueOptions();
-    if (options.length > 0) {
-      return options[0].code;
-    }
-    return '';
+    const [first] = options;
+    return first?.code ?? '';
   }
 
   private ensureCreateVenueInitialized(): void {

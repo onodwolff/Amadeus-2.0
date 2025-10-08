@@ -39,9 +39,10 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
 
   readonly depthOptions = [10, 20, 30, 50];
   private readonly aggregationMultipliers = [1, 2, 5, 10];
+  private readonly defaultDepth = this.depthOptions[1] ?? this.depthOptions[0] ?? 10;
 
   readonly instrumentSignal = signal<Instrument | null>(null);
-  readonly selectedDepth = signal(this.depthOptions[1]);
+  readonly selectedDepth = signal<number>(this.defaultDepth);
   readonly selectedAggregation = signal(0);
   readonly wsState = signal<WsConnectionState>('disconnected');
   readonly error = signal<string | null>(null);
@@ -84,8 +85,8 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
   });
 
   private instrumentId = signal<string | null>(null);
-  private messageSubscription?: Subscription;
-  private stateSubscription?: Subscription;
+  private messageSubscription: Subscription | null = null;
+  private stateSubscription: Subscription | null = null;
   private activeChannelKey: string | null = null;
   private bookState: InternalOrderBookState = {
     bids: new Map<number, number>(),
@@ -179,9 +180,9 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
   private teardown(): void {
     this.activeChannelKey = null;
     this.messageSubscription?.unsubscribe();
-    this.messageSubscription = undefined;
+    this.messageSubscription = null;
     this.stateSubscription?.unsubscribe();
-    this.stateSubscription = undefined;
+    this.stateSubscription = null;
     this.wsState.set('disconnected');
   }
 

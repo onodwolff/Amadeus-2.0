@@ -594,7 +594,7 @@ export class RiskPage implements OnInit {
             venue: (item?.venue ?? '').trim().toUpperCase(),
             node: (item?.node ?? '').trim(),
             locked: Boolean(item?.locked),
-            reason: reason.length > 0 ? reason : undefined,
+            reason: reason.length > 0 ? reason : null,
           };
         }),
       },

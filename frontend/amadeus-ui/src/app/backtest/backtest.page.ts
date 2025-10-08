@@ -15,6 +15,7 @@ import { Router } from '@angular/router';
 import { finalize } from 'rxjs';
 import { BacktestsApi, DataApi } from '../api/clients';
 import {
+  BacktestDatasetDto,
   BacktestRunCreateRequest,
   BacktestStrategyParameterDto,
   HistoricalDatasetDto,
@@ -149,8 +150,8 @@ export class BacktestPage {
     },
   ];
 
-  private readonly initialDataset = this.fallbackDatasets[0];
-  private readonly initialStrategy = this.strategyTemplates[0];
+  private readonly initialDataset = this.ensureDataset(this.fallbackDatasets[0]);
+  private readonly initialStrategy = this.ensureStrategy(this.strategyTemplates[0]);
 
   readonly datasets = signal<DatasetOption[]>([]);
   readonly datasetLoadError = signal<string | null>(null);
@@ -367,12 +368,12 @@ export class BacktestPage {
         name: value.dataset.name,
         venue: value.dataset.venue,
         barInterval: value.dataset.barInterval,
-        description: value.dataset.description ?? '',
-        instrument: value.dataset.instrument,
-        start: this.normalizeDateValue(value.dataset.start),
-        end: this.normalizeDateValue(value.dataset.end),
-        status: value.dataset.status ?? undefined,
-      },
+      description: value.dataset.description ?? '',
+      instrument: value.dataset.instrument,
+      start: this.normalizeDateValue(value.dataset.start),
+      end: this.normalizeDateValue(value.dataset.end),
+      ...this.optionalStatus(value.dataset.status),
+    },
       dateRange: {
         start: this.normalizeDateValue(value.dateRange.start),
         end: this.normalizeDateValue(value.dateRange.end),
@@ -386,6 +387,27 @@ export class BacktestPage {
         engineVersion: value.engine.engineVersion,
       },
     };
+  }
+
+  private ensureDataset(option: DatasetOption | undefined): DatasetOption {
+    if (!option) {
+      throw new Error('Fallback datasets are not configured.');
+    }
+    return option;
+  }
+
+  private ensureStrategy(template: StrategyTemplate | undefined): StrategyTemplate {
+    if (!template) {
+      throw new Error('Strategy templates are not configured.');
+    }
+    return template;
+  }
+
+  private optionalStatus(status: string | null | undefined): Partial<BacktestDatasetDto> {
+    if (!status) {
+      return {};
+    }
+    return { status };
   }
 
   private createStrategyParameterGroup(parameter: BacktestStrategyParameterDto): StrategyParameterGroup {

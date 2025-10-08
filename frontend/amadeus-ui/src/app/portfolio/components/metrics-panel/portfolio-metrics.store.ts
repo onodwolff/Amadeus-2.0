@@ -337,7 +337,13 @@ export class PortfolioMetricsStore {
     return 'Other';
   }
 
-  private colorForAssetClass(name: string, index: number): string {
-    return ASSET_CLASS_COLORS[name] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+  private colorForAssetClass(name: string | undefined, index: number): string {
+    const key = name ?? 'Other';
+    const mapped = ASSET_CLASS_COLORS[key];
+    if (mapped) {
+      return mapped;
+    }
+    const fallback = FALLBACK_COLORS[index % FALLBACK_COLORS.length] ?? '#64748b';
+    return fallback;
   }
 }

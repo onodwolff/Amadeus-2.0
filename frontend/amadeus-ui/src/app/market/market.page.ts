@@ -61,7 +61,9 @@ export class MarketPage implements OnInit {
     { value: 'percent', label: 'Percent' },
   ];
 
-  readonly selectedTimeframe = signal(this.timeframeOptions[3].value);
+  private readonly defaultTimeframe =
+    this.timeframeOptions[3]?.value ?? this.timeframeOptions[0]?.value ?? '1m';
+  readonly selectedTimeframe = signal(this.defaultTimeframe);
   readonly selectedIndicator = signal<PriceChartIndicator>('none');
   readonly selectedScale = signal<PriceChartScale>('linear');
 

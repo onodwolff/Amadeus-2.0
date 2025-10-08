@@ -28,8 +28,8 @@ export class NotificationService {
       id,
       type,
       message,
-      title: options?.title,
       createdAt: new Date(),
+      ...(options?.title ? { title: options.title } : {}),
     };
 
     this.items.update((current) => [...current, notification]);
@@ -45,19 +45,19 @@ export class NotificationService {
   }
 
   success(message: string, title?: string, timeoutMs?: number | null): string {
-    return this.notify('success', message, { title, timeoutMs });
+    return this.notify('success', message, this.normalizeOptions(title, timeoutMs));
   }
 
   error(message: string, title?: string, timeoutMs?: number | null): string {
-    return this.notify('error', message, { title, timeoutMs });
+    return this.notify('error', message, this.normalizeOptions(title, timeoutMs));
   }
 
   info(message: string, title?: string, timeoutMs?: number | null): string {
-    return this.notify('info', message, { title, timeoutMs });
+    return this.notify('info', message, this.normalizeOptions(title, timeoutMs));
   }
 
   warning(message: string, title?: string, timeoutMs?: number | null): string {
-    return this.notify('warning', message, { title, timeoutMs });
+    return this.notify('warning', message, this.normalizeOptions(title, timeoutMs));
   }
 
   dismiss(id: string): void {
@@ -79,5 +79,19 @@ export class NotificationService {
 
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private normalizeOptions(
+    title?: string,
+    timeoutMs?: number | null,
+  ): NotifyOptions | undefined {
+    const options: NotifyOptions = {};
+    if (title) {
+      options.title = title;
+    }
+    if (timeoutMs !== undefined) {
+      options.timeoutMs = timeoutMs;
+    }
+    return Object.keys(options).length > 0 ? options : undefined;
   }
 }

@@ -155,11 +155,16 @@ export class OrderTicketComponent implements OnInit {
         next: (payload) => {
           const portfolio = payload.portfolio?.portfolio;
           if (portfolio) {
-            this.balances.set(portfolio.balances ?? []);
-            this.positions.set(portfolio.positions ?? []);
-            if (portfolio.positions?.length) {
-              const first = portfolio.positions[0];
-              this.form.patchValue({ symbol: first.symbol, venue: first.venue });
+            const balances = portfolio.balances ?? [];
+            const positions = portfolio.positions ?? [];
+            this.balances.set(balances);
+            this.positions.set(positions);
+            const [firstPosition] = positions;
+            if (firstPosition) {
+              this.form.patchValue({
+                symbol: firstPosition.symbol,
+                venue: firstPosition.venue,
+              });
             }
           }
 
@@ -215,7 +220,10 @@ export class OrderTicketComponent implements OnInit {
           const backendErrors = this.extractBackendErrors(err);
           if (backendErrors.length > 0) {
             this.formErrors.set(backendErrors);
-            this.notifications.error(backendErrors[0], 'Order rejected');
+            const [firstError] = backendErrors;
+            if (firstError) {
+              this.notifications.error(firstError, 'Order rejected');
+            }
           } else {
             this.notifications.error('Failed to submit order. Please review gateway logs.');
           }
