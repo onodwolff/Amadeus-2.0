@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +56,29 @@ class AuthSettings(BaseModel):
     jwt_secret: str = Field(default="change-me", min_length=8)
     access_token_ttl_seconds: int = Field(default=900, ge=60)
     refresh_token_ttl_seconds: int = Field(default=86400, ge=300)
+    admin_email: EmailStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ADMIN_EMAIL", "AUTH__ADMIN_EMAIL"),
+    )
+    admin_password: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ADMIN_PASSWORD", "AUTH__ADMIN_PASSWORD"),
+    )
+
+    @field_validator("admin_password", mode="before")
+    @classmethod
+    def _clean_password(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+    @field_validator("admin_email", mode="before")
+    @classmethod
+    def _normalise_admin_email(cls, value: str | EmailStr | None) -> EmailStr | None:
+        if value is None:
+            return None
+        return EmailStr(str(value).strip().lower())
 
 
 class StorageSettings(BaseModel):

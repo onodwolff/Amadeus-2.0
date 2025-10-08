@@ -21,8 +21,9 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import String, TypeDecorator
 
 from .base import Base
 
@@ -91,22 +92,43 @@ JSON_EMPTY_OBJECT = text("'{}'::jsonb")
 JSON_EMPTY_ARRAY = text("'[]'::jsonb")
 
 
+class CaseInsensitiveText(TypeDecorator):
+    """Case-insensitive text compatible with SQLite and PostgreSQL CITEXT."""
+
+    impl = String
+    cache_ok = True
+
+    def __init__(self, length: int = 320) -> None:
+        super().__init__(length)
+        self.length = length
+
+    def load_dialect_impl(self, dialect):  # type: ignore[override]
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(CITEXT())
+        return dialect.type_descriptor(String(self.length))
+
+
 class User(Base):
     """Registered user of the platform."""
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(CaseInsensitiveText(), unique=True, nullable=False)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String(255))
-    pwd_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str] = mapped_column("pwd_hash", String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role"),
         nullable=False,
         default=UserRole.MEMBER,
         server_default=UserRole.MEMBER.value,
     )
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    mfa_secret: Mapped[Optional[str]] = mapped_column(Text)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -131,6 +153,20 @@ class User(Base):
     watchlists: Mapped[List["Watchlist"]] = relationship(
         "Watchlist", back_populates="user", cascade="all, delete-orphan"
     )
+    sessions: Mapped[List["AuthSession"]] = relationship(
+        "AuthSession", back_populates="user", cascade="all, delete-orphan"
+    )
+    pending_email_change: Mapped[Optional["EmailChangeRequest"]] = relationship(
+        "EmailChangeRequest", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+
+    @property
+    def pwd_hash(self) -> str:  # pragma: no cover - compatibility shim
+        return self.password_hash
+
+    @pwd_hash.setter
+    def pwd_hash(self, value: str) -> None:  # pragma: no cover - compatibility shim
+        self.password_hash = value
 
 
 class ApiKey(Base):
@@ -471,6 +507,43 @@ class Watchlist(Base):
     )
 
 
+class AuthSession(Base):
+    """Refresh token session issued to a user."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    refresh_token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(255))
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship("User", back_populates="sessions")
+
+
+class EmailChangeRequest(Base):
+    """Pending e-mail change that requires verification."""
+
+    __tablename__ = "email_change_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    new_email: Mapped[str] = mapped_column(CaseInsensitiveText(), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship("User", back_populates="pending_email_change")
+
+
 class WatchlistItem(Base):
     """Instrument entry within a watchlist."""
 
@@ -703,6 +776,8 @@ __all__ = [
     "Config",
     "ConfigFormat",
     "ConfigSource",
+    "AuthSession",
+    "EmailChangeRequest",
     "EquityHistory",
     "HistoricalDataStatus",
     "HistoricalDataset",
