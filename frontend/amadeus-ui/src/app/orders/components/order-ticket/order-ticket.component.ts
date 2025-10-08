@@ -220,10 +220,7 @@ export class OrderTicketComponent implements OnInit {
           const backendErrors = this.extractBackendErrors(err);
           if (backendErrors.length > 0) {
             this.formErrors.set(backendErrors);
-            const [firstError] = backendErrors;
-            if (firstError) {
-              this.notifications.error(firstError, 'Order rejected');
-            }
+            this.notifications.error(backendErrors?.[0] ?? 'Unknown error', 'Order rejected');
           } else {
             this.notifications.error('Failed to submit order. Please review gateway logs.');
           }

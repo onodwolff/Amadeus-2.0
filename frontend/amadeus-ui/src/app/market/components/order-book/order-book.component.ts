@@ -85,8 +85,8 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
   });
 
   private instrumentId = signal<string | null>(null);
-  private messageSubscription: Subscription | null = null;
-  private stateSubscription: Subscription | null = null;
+  private messageSubscription?: Subscription;
+  private stateSubscription?: Subscription;
   private activeChannelKey: string | null = null;
   private bookState: InternalOrderBookState = {
     bids: new Map<number, number>(),
@@ -98,7 +98,7 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
     effect(() => {
       // Reconnect when the instrument or requested depth changes.
       const instrumentId = this.instrumentId();
-      const depth = this.selectedDepth();
+      const depth = this.selectedDepth() ?? this.defaultDepth;
       if (instrumentId) {
         this.connect(instrumentId, depth);
       } else {
@@ -180,9 +180,9 @@ export class OrderBookComponent implements OnChanges, OnDestroy {
   private teardown(): void {
     this.activeChannelKey = null;
     this.messageSubscription?.unsubscribe();
-    this.messageSubscription = null;
+    this.messageSubscription = undefined;
     this.stateSubscription?.unsubscribe();
-    this.stateSubscription = null;
+    this.stateSubscription = undefined;
     this.wsState.set('disconnected');
   }
 

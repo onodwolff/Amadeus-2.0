@@ -60,23 +60,16 @@ export class PortfolioMetricsPanelComponent implements OnInit {
 
   exportExposureCsv(): void {
     const rows = this.store.exposureTable();
-    if (rows.length === 0) {
+    if (!rows.length) {
       return;
     }
-    const [firstRow] = rows;
-    if (!firstRow) {
-      return;
-    }
-    const columns = Object.keys(firstRow.values);
+    const columns = Object.keys(rows[0].values);
     if (columns.length === 0) {
       return;
     }
     const data = rows.map(entry => [
       entry.timestamp,
-      ...columns.map(column => {
-        const value = entry.values[column] ?? 0;
-        return value.toFixed(2);
-      }),
+      ...columns.map(column => Number(entry.values[column] ?? 0).toFixed(2)),
     ]);
     this.downloadCsv('portfolio-exposure.csv', ['Timestamp', ...columns], data);
   }

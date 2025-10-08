@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import {
   AbstractControl,
   FormArray,
@@ -14,12 +14,7 @@ import {
 import { Router } from '@angular/router';
 import { finalize } from 'rxjs';
 import { BacktestsApi, DataApi } from '../api/clients';
-import {
-  BacktestDatasetDto,
-  BacktestRunCreateRequest,
-  BacktestStrategyParameterDto,
-  HistoricalDatasetDto,
-} from '../api/models';
+import { BacktestRunCreateRequest, BacktestStrategyParameterDto, HistoricalDatasetDto } from '../api/models';
 
 type StrategyParameterGroup = FormGroup<{ key: FormControl<string>; value: FormControl<string> }>;
 
@@ -50,7 +45,7 @@ type StrategyTemplate = {
   styleUrls: ['./backtest.page.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class BacktestPage {
+export class BacktestPage implements OnInit {
   private static readonly dateRangeValidator: ValidatorFn = (control: AbstractControl): ValidationErrors | null => {
     const group = control as FormGroup;
     const start = group.controls['start']?.value;
@@ -150,37 +145,37 @@ export class BacktestPage {
     },
   ];
 
-  private readonly initialDataset = this.ensureDataset(this.fallbackDatasets[0]);
-  private readonly initialStrategy = this.ensureStrategy(this.strategyTemplates[0]);
+  private readonly datasetDefaults = this.createDatasetDefaults(this.fallbackDatasets[0]);
+  private readonly strategyDefaults = this.createStrategyDefaults(this.strategyTemplates[0]);
 
   readonly datasets = signal<DatasetOption[]>([]);
   readonly datasetLoadError = signal<string | null>(null);
   readonly isLoadingDatasets = signal(false);
 
-  private readonly defaultStart = this.formatDateTimeLocal(new Date(this.initialDataset.start));
-  private readonly defaultEnd = this.formatDateTimeLocal(new Date(this.initialDataset.end));
+  private readonly defaultStart = this.formatDateTimeLocal(new Date(this.datasetDefaults.start));
+  private readonly defaultEnd = this.formatDateTimeLocal(new Date(this.datasetDefaults.end));
 
   readonly form = this.fb.nonNullable.group({
     name: this.fb.nonNullable.control<string>('New backtest run', {
       validators: [Validators.required, Validators.maxLength(120)],
     }),
     strategy: this.fb.nonNullable.group({
-      id: this.fb.nonNullable.control<string>(this.initialStrategy.id, Validators.required),
-      name: this.fb.nonNullable.control<string>(this.initialStrategy.name, Validators.required),
+      id: this.fb.nonNullable.control<string>(this.strategyDefaults.id, Validators.required),
+      name: this.fb.nonNullable.control<string>(this.strategyDefaults.name, Validators.required),
       parameters: this.fb.array<StrategyParameterGroup>(
-        this.initialStrategy.defaults.map(param => this.createStrategyParameterGroup(param)),
+        this.strategyDefaults.defaults.map(param => this.createStrategyParameterGroup(param)),
       ),
     }),
     dataset: this.fb.nonNullable.group({
-      id: this.fb.nonNullable.control<string>(this.initialDataset.id, Validators.required),
-      name: this.fb.nonNullable.control<string>(this.initialDataset.name, Validators.required),
-      venue: this.fb.nonNullable.control<string>(this.initialDataset.venue, Validators.required),
-      barInterval: this.fb.nonNullable.control<string>(this.initialDataset.barInterval, Validators.required),
-      instrument: this.fb.nonNullable.control<string>(this.initialDataset.instrument, Validators.required),
-      start: this.fb.nonNullable.control<string>(this.initialDataset.start, Validators.required),
-      end: this.fb.nonNullable.control<string>(this.initialDataset.end, Validators.required),
-      status: this.fb.control<string | null>(this.initialDataset.status ?? null),
-      description: this.fb.control<string>(this.initialDataset.description),
+      id: this.fb.nonNullable.control<string>(this.datasetDefaults.id, Validators.required),
+      name: this.fb.nonNullable.control<string>(this.datasetDefaults.name, Validators.required),
+      venue: this.fb.nonNullable.control<string>(this.datasetDefaults.venue, Validators.required),
+      barInterval: this.fb.nonNullable.control<string>(this.datasetDefaults.barInterval, Validators.required),
+      instrument: this.fb.nonNullable.control<string>(this.datasetDefaults.instrument, Validators.required),
+      start: this.fb.nonNullable.control<string>(this.datasetDefaults.start, Validators.required),
+      end: this.fb.nonNullable.control<string>(this.datasetDefaults.end, Validators.required),
+      status: this.fb.control<string | null>(this.datasetDefaults.status || null),
+      description: this.fb.control<string>(this.datasetDefaults.description),
     }),
     dateRange: this.fb.nonNullable.group(
       {
@@ -210,6 +205,33 @@ export class BacktestPage {
   constructor() {
     this.applyDatasetOptions(this.fallbackDatasets);
     this.refreshDatasets();
+  }
+
+  ngOnInit(): void {
+    const ds = this.datasetDefaults;
+    const st = this.strategyDefaults;
+
+    this.form.patchValue({
+      strategy: {
+        id: st.id,
+        name: st.name,
+      },
+      dataset: {
+        id: ds.id,
+        name: ds.name,
+        venue: ds.venue,
+        barInterval: ds.barInterval,
+        instrument: ds.instrument,
+        start: ds.start,
+        end: ds.end,
+        status: ds.status || null,
+        description: ds.description,
+      },
+      dateRange: {
+        start: this.formatDateTimeLocal(new Date(ds.start)),
+        end: this.formatDateTimeLocal(new Date(ds.end)),
+      },
+    });
   }
 
   get strategyParameters(): FormArray<StrategyParameterGroup> {
@@ -368,12 +390,12 @@ export class BacktestPage {
         name: value.dataset.name,
         venue: value.dataset.venue,
         barInterval: value.dataset.barInterval,
-      description: value.dataset.description ?? '',
-      instrument: value.dataset.instrument,
-      start: this.normalizeDateValue(value.dataset.start),
-      end: this.normalizeDateValue(value.dataset.end),
-      ...this.optionalStatus(value.dataset.status),
-    },
+        description: value.dataset.description ?? '',
+        instrument: value.dataset.instrument,
+        start: this.normalizeDateValue(value.dataset.start),
+        end: this.normalizeDateValue(value.dataset.end),
+        status: value.dataset.status ?? '',
+      },
       dateRange: {
         start: this.normalizeDateValue(value.dateRange.start),
         end: this.normalizeDateValue(value.dateRange.end),
@@ -389,27 +411,6 @@ export class BacktestPage {
     };
   }
 
-  private ensureDataset(option: DatasetOption | undefined): DatasetOption {
-    if (!option) {
-      throw new Error('Fallback datasets are not configured.');
-    }
-    return option;
-  }
-
-  private ensureStrategy(template: StrategyTemplate | undefined): StrategyTemplate {
-    if (!template) {
-      throw new Error('Strategy templates are not configured.');
-    }
-    return template;
-  }
-
-  private optionalStatus(status: string | null | undefined): Partial<BacktestDatasetDto> {
-    if (!status) {
-      return {};
-    }
-    return { status };
-  }
-
   private createStrategyParameterGroup(parameter: BacktestStrategyParameterDto): StrategyParameterGroup {
     return this.fb.nonNullable.group({
       key: this.fb.nonNullable.control<string>(parameter.key, Validators.required),
@@ -418,6 +419,9 @@ export class BacktestPage {
   }
 
   private formatDateTimeLocal(date: Date): string {
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
     const pad = (value: number) => `${value}`.padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
       date.getMinutes(),
@@ -430,5 +434,29 @@ export class BacktestPage {
       return value;
     }
     return date.toISOString();
+  }
+
+  private createDatasetDefaults(option: DatasetOption | undefined): DatasetOption {
+    return {
+      id: option?.id ?? '',
+      name: option?.name ?? '',
+      venue: option?.venue ?? '',
+      barInterval: option?.barInterval ?? '',
+      instrument: option?.instrument ?? '',
+      description: option?.description ?? '',
+      start: option?.start ?? '',
+      end: option?.end ?? '',
+      status: option?.status ?? '',
+    };
+  }
+
+  private createStrategyDefaults(template: StrategyTemplate | undefined): StrategyTemplate {
+    const defaults = Array.isArray(template?.defaults) ? template.defaults : [];
+    return {
+      id: template?.id ?? '',
+      name: template?.name ?? '',
+      description: template?.description ?? '',
+      defaults,
+    };
   }
 }

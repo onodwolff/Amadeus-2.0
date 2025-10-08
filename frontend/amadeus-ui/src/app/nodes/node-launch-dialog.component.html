@@ -4,8 +4,8 @@
     <header class="launch-dialog__header">
       <div>
         <p class="launch-dialog__eyebrow">Bot launch wizard</p>
-        <h2 class="launch-dialog__title" id="launchDialogTitle">{{ currentStepDescriptor().title }}</h2>
-        <p class="launch-dialog__subtitle">{{ currentStepDescriptor().description }}</p>
+        <h2 class="launch-dialog__title" id="launchDialogTitle">{{ currentStepDescriptor()?.title }}</h2>
+        <p class="launch-dialog__subtitle">{{ currentStepDescriptor()?.description }}</p>
       </div>
       <button type="button" class="launch-dialog__close" (click)="close()" aria-label="Close launch wizard">×</button>
     </header>

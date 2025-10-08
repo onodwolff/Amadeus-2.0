@@ -395,7 +395,7 @@ export class RiskPage implements OnInit {
             venue: item.venue ?? '',
             node: item.node ?? '',
             locked: Boolean(item.locked),
-            reason: item.reason ?? '',
+            reason: item.reason ?? null,
           }))
         : [],
     };

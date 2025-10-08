@@ -6,13 +6,13 @@ export interface NotificationMessage {
   id: string;
   type: NotificationType;
   message: string;
-  title?: string;
+  title: string;
   createdAt: Date;
 }
 
 interface NotifyOptions {
-  title?: string;
-  timeoutMs?: number | null;
+  title: string;
+  timeoutMs: number | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -24,17 +24,18 @@ export class NotificationService {
 
   notify(type: NotificationType, message: string, options?: NotifyOptions): string {
     const id = this.generateId();
+    const title = options?.title ?? '';
+    const timeout = options?.timeoutMs ?? null;
     const notification: NotificationMessage = {
       id,
       type,
       message,
+      title,
       createdAt: new Date(),
-      ...(options?.title ? { title: options.title } : {}),
     };
 
     this.items.update((current) => [...current, notification]);
 
-    const timeout = options?.timeoutMs;
     if (timeout !== null) {
       const duration = typeof timeout === 'number' ? Math.max(1500, timeout) : 6000;
       const handle = setTimeout(() => this.dismiss(id), duration);
@@ -81,17 +82,10 @@ export class NotificationService {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  private normalizeOptions(
-    title?: string,
-    timeoutMs?: number | null,
-  ): NotifyOptions | undefined {
-    const options: NotifyOptions = {};
-    if (title) {
-      options.title = title;
-    }
-    if (timeoutMs !== undefined) {
-      options.timeoutMs = timeoutMs;
-    }
-    return Object.keys(options).length > 0 ? options : undefined;
+  private normalizeOptions(title?: string, timeoutMs?: number | null): NotifyOptions {
+    return {
+      title: title ?? '',
+      timeoutMs: timeoutMs ?? null,
+    };
   }
 }

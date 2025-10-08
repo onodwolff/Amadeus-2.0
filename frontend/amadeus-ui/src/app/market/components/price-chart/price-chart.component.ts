@@ -63,9 +63,9 @@ export class PriceChartComponent implements OnInit, OnChanges, OnDestroy {
   private indicatorSeries: ISeriesApi<'Line'> | null = null;
   private resizeObserver?: ResizeObserver;
 
-  private barsSubscription: Subscription | null = null;
-  private tickSubscription: Subscription | null = null;
-  private stateSubscription: Subscription | null = null;
+  private barsSubscription?: Subscription;
+  private tickSubscription?: Subscription;
+  private stateSubscription?: Subscription;
 
   private candles: CandlestickData[] = [];
   private volumes: HistogramData[] = [];
@@ -96,7 +96,7 @@ export class PriceChartComponent implements OnInit, OnChanges, OnDestroy {
   ngOnDestroy(): void {
     this.teardownStreams();
     this.barsSubscription?.unsubscribe();
-    this.barsSubscription = null;
+    this.barsSubscription = undefined;
     this.resizeObserver?.disconnect();
     this.chart?.remove();
     this.chart = null;
@@ -351,8 +351,8 @@ export class PriceChartComponent implements OnInit, OnChanges, OnDestroy {
   private teardownStreams(): void {
     this.tickSubscription?.unsubscribe();
     this.stateSubscription?.unsubscribe();
-    this.tickSubscription = null;
-    this.stateSubscription = null;
+    this.tickSubscription = undefined;
+    this.stateSubscription = undefined;
     this.wsState.set('disconnected');
   }
 
@@ -395,15 +395,15 @@ export class PriceChartComponent implements OnInit, OnChanges, OnDestroy {
 
   private timeframeToSeconds(value: string): number | null {
     const match = /^(\d+)([smhdw])$/i.exec(value);
-    if (!match) {
-      return null;
-    }
-    const [, amountRaw, unitRaw] = match;
-    if (!amountRaw || !unitRaw) {
+    const amountRaw = match?.[1] ?? '';
+    const unit = match?.[2]?.toLowerCase() ?? '';
+    if (!amountRaw || !unit) {
       return null;
     }
     const amount = Number(amountRaw);
-    const unit = unitRaw.toLowerCase();
+    if (!Number.isFinite(amount)) {
+      return null;
+    }
     const factor: Record<string, number> = {
       s: 1,
       m: 60,
