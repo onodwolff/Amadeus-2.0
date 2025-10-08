@@ -74,10 +74,27 @@ class TradeLocksModule(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 
+class RiskEscalationModule(BaseModel):
+    warn_after: int = Field(default=1, ge=1)
+    halt_after: int = Field(default=2, ge=1)
+    reset_minutes: int = Field(default=60, ge=1)
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class RiskControlsModule(BaseModel):
+    halt_on_breach: bool = True
+    notify_on_recovery: bool = True
+    escalation: RiskEscalationModule = Field(default_factory=RiskEscalationModule)
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
 class RiskLimitsPayload(BaseModel):
     position_limits: PositionLimitsModule
     max_loss: MaxLossModule
     trade_locks: TradeLocksModule
+    controls: RiskControlsModule
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -97,12 +114,44 @@ class RiskLimitsResponse(BaseModel):
 
 
 def _deserialize_limits(payload: Dict[str, Any]) -> RiskLimitsPayload:
+    controls = payload.get("controls") or {}
+    escalation = controls.get("escalation") or {}
+    payload["controls"] = {
+        "halt_on_breach": bool(controls.get("halt_on_breach", True)),
+        "notify_on_recovery": bool(controls.get("notify_on_recovery", True)),
+        "escalation": {
+            "warn_after": max(1, int(escalation.get("warn_after") or 1)),
+            "halt_after": max(
+                int(escalation.get("halt_after") or 2),
+                int(escalation.get("warn_after") or 1),
+            ),
+            "reset_minutes": max(1, int(escalation.get("reset_minutes") or 60)),
+        },
+    }
+
     try:
         return RiskLimitsPayload.model_validate(payload)
     except ValidationError as exc:
         LOGGER.warning("risk_limits_deserialisation_failed", extra={"error": str(exc)})
         snapshot = svc.risk_limits_snapshot()
         limits = snapshot.get("limits") or {}
+        fallback_controls = limits.get("controls") or {}
+        fallback_escalation = fallback_controls.get("escalation") or {}
+        limits["controls"] = {
+            "halt_on_breach": bool(fallback_controls.get("halt_on_breach", True)),
+            "notify_on_recovery": bool(fallback_controls.get("notify_on_recovery", True)),
+            "escalation": {
+                "warn_after": max(1, int(fallback_escalation.get("warn_after") or 1)),
+                "halt_after": max(
+                    int(fallback_escalation.get("halt_after") or 2),
+                    int(fallback_escalation.get("warn_after") or 1),
+                ),
+                "reset_minutes": max(
+                    1,
+                    int(fallback_escalation.get("reset_minutes") or 60),
+                ),
+            },
+        }
         return RiskLimitsPayload.model_validate(limits)
 
 
