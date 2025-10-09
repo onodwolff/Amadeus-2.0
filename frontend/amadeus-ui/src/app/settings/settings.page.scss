@@ -714,6 +714,7 @@
   text-align: left;
   cursor: pointer;
   transition: background 160ms ease, color 160ms ease, border 160ms ease;
+  margin-top: 12px;
 }
 
 .dialog__toggle:hover,
@@ -727,6 +728,7 @@
 .dialog__advanced {
   display: grid;
   gap: 16px;
+  margin-top: 16px;
 }
 
 .field {

@@ -632,16 +632,6 @@
 
         <form class="dialog__form" [formGroup]="createForm" (ngSubmit)="createKey()">
           <div class="dialog__body">
-            <label class="field">
-              <span class="field__label">API key name</span>
-              <input
-                class="field__control"
-                formControlName="label"
-                type="text"
-                placeholder="Primary trading key"
-              />
-            </label>
-
             <label class="field field--full">
               <span class="field__label">Exchange</span>
               <select
@@ -692,21 +682,31 @@
               />
             </label>
 
-            <label class="field">
-              <span class="field__label">Passphrase hint (optional)</span>
-              <input class="field__control" formControlName="passphraseHint" type="text" />
-            </label>
-
             <button
               type="button"
               class="dialog__toggle"
               (click)="toggleCreateAdvanced()"
               [attr.aria-expanded]="isCreateAdvancedOpen()"
             >
-              Advanced scopes
+              Advanced settings
             </button>
 
             <div class="dialog__advanced" *ngIf="isCreateAdvancedOpen()">
+              <label class="field">
+                <span class="field__label">API key name</span>
+                <input
+                  class="field__control"
+                  formControlName="label"
+                  type="text"
+                  placeholder="Primary trading key"
+                />
+              </label>
+
+              <label class="field">
+                <span class="field__label">Passphrase hint (optional)</span>
+                <input class="field__control" formControlName="passphraseHint" type="text" />
+              </label>
+
               <fieldset class="field field--fieldset field--full">
                 <legend class="field__label">Scopes</legend>
                 <div class="scope-options">
@@ -767,11 +767,6 @@
 
         <form class="dialog__form" [formGroup]="editForm" (ngSubmit)="updateKey()">
           <div class="dialog__body">
-            <label class="field">
-              <span class="field__label">API key name</span>
-              <input class="field__control" formControlName="label" type="text" />
-            </label>
-
             <label class="field field--full">
               <span class="field__label">Exchange</span>
               <select
@@ -822,21 +817,26 @@
               />
             </label>
 
-            <label class="field">
-              <span class="field__label">Passphrase hint (optional)</span>
-              <input class="field__control" formControlName="passphraseHint" type="text" />
-            </label>
-
             <button
               type="button"
               class="dialog__toggle"
               (click)="toggleEditAdvanced()"
               [attr.aria-expanded]="isEditAdvancedOpen()"
             >
-              Advanced scopes
+              Advanced settings
             </button>
 
             <div class="dialog__advanced" *ngIf="isEditAdvancedOpen()">
+              <label class="field">
+                <span class="field__label">API key name</span>
+                <input class="field__control" formControlName="label" type="text" />
+              </label>
+
+              <label class="field">
+                <span class="field__label">Passphrase hint (optional)</span>
+                <input class="field__control" formControlName="passphraseHint" type="text" />
+              </label>
+
               <fieldset class="field field--fieldset field--full">
                 <legend class="field__label">Scopes</legend>
                 <div class="scope-options">
