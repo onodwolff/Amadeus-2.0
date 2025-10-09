@@ -8,29 +8,29 @@
       </p>
     </div>
     <div class="nodes-page__actions">
+      <div class="nodes-page__launch">
+        <label class="nodes-page__launch-label" for="launchModeSelect">Launch mode</label>
+        <div class="nodes-page__launch-control">
+          <select
+            id="launchModeSelect"
+            class="nodes-page__launch-select"
+            [value]="launchMode()"
+            (change)="onLaunchModeChange($event)"
+            [disabled]="isLaunching()"
+          >
+            <option value="backtest">Backtest</option>
+            <option value="sandbox">Sandbox</option>
+            <option value="live">Live</option>
+          </select>
+        </div>
+      </div>
       <button
         type="button"
         class="btn btn--primary"
-        (click)="openWizard(launchDialog, 'backtest')"
+        (click)="openWizard(launchDialog, launchMode())"
         [disabled]="isLaunching()"
       >
-        Launch backtest bot
-      </button>
-      <button
-        type="button"
-        class="btn btn--primary"
-        (click)="openWizard(launchDialog, 'sandbox')"
-        [disabled]="isLaunching()"
-      >
-        Launch sandbox bot
-      </button>
-      <button
-        type="button"
-        class="btn btn--primary"
-        (click)="openWizard(launchDialog, 'live')"
-        [disabled]="isLaunching()"
-      >
-        Launch live bot
+        Launch bot
       </button>
       <button type="button" class="btn" (click)="refresh()" [disabled]="isLoading()">Refresh bots</button>
     </div>
