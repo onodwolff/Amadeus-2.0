@@ -1,8 +1,10 @@
+// User models
+
 export interface UserProfile {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: 'admin' | 'user'; // при необходимости добавь 'viewer'
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -18,9 +20,9 @@ export interface UserResponse {
 
 export interface UserCreateRequest {
   email: string;
-  name?: string;
   password: string;
-  role: string;
+  name?: string;
+  role: 'admin' | 'user';
 }
 
 export interface AccountResponse {
