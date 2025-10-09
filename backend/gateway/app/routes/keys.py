@@ -19,9 +19,20 @@ from gateway.db.models import ApiKey, User
 
 from ..crypto import decrypt, encrypt, mask_key
 from ..nautilus_service import svc
+from .auth import get_current_user
 
 LOGGER = logging.getLogger("gateway.api_keys")
 router = APIRouter(prefix="/keys", tags=["api-keys"])
+
+
+async def _anonymous_user() -> Optional[User]:
+    return None
+
+
+if settings.auth.enabled:
+    _CURRENT_USER_DEP = Depends(get_current_user)
+else:
+    _CURRENT_USER_DEP = Depends(_anonymous_user)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -194,12 +205,29 @@ def _known_venues() -> set[str]:
     return {code for code in codes if code}
 
 
-async def _resolve_user_id(session: AsyncSession) -> int:
+async def _resolve_default_user_id(session: AsyncSession) -> int:
     result = await session.execute(select(User.id).order_by(User.id.asc()))
     user_id = result.scalars().first()
     if user_id is None:
         raise HTTPException(status_code=400, detail="No users available to associate API keys")
     return user_id
+
+
+async def _resolve_request_user_id(
+    session: AsyncSession,
+    current_user: Optional[User],
+) -> int:
+    user_obj = current_user if isinstance(current_user, User) else None
+
+    if settings.auth.enabled:
+        if user_obj is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        return int(user_obj.id)
+
+    if user_obj is not None:
+        return int(user_obj.id)
+
+    return await _resolve_default_user_id(session)
 
 
 def _encode_secret_payload(payload: Dict[str, Any]) -> bytes:
@@ -263,8 +291,11 @@ def _validate_known_venue(venue: str) -> None:
 
 
 @router.get("", response_model=ApiKeysResponse)
-async def list_api_keys(session: AsyncSession = Depends(get_session)) -> ApiKeysResponse:
-    user_id = await _resolve_user_id(session)
+async def list_api_keys(
+    session: AsyncSession = Depends(get_session),
+    current_user: Optional[User] = _CURRENT_USER_DEP,
+) -> ApiKeysResponse:
+    user_id = await _resolve_request_user_id(session, current_user)
 
     stmt: Select[ApiKey] = (
         select(ApiKey)
@@ -289,6 +320,7 @@ async def list_api_keys(session: AsyncSession = Depends(get_session)) -> ApiKeys
 async def create_api_key(
     payload: KeyCreateRequest,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[User] = _CURRENT_USER_DEP,
 ) -> ApiKeyResource:
     _validate_known_venue(payload.venue)
 
@@ -300,7 +332,7 @@ async def create_api_key(
     }
     secret_enc = _encode_secret_payload(secret_payload)
 
-    user_id = await _resolve_user_id(session)
+    user_id = await _resolve_request_user_id(session, current_user)
 
     record = ApiKey(
         user_id=user_id,
@@ -328,8 +360,9 @@ async def update_api_key(
     key_id: str,
     payload: KeyUpdateRequest,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[User] = _CURRENT_USER_DEP,
 ) -> ApiKeyResource:
-    user_id = await _resolve_user_id(session)
+    user_id = await _resolve_request_user_id(session, current_user)
 
     record = await _get_key(session, key_id, user_id=user_id)
     secret_payload = _decode_secret_payload(record.secret_enc)
@@ -364,8 +397,9 @@ async def delete_api_key(
     key_id: str,
     payload: KeyDeleteRequest,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[User] = _CURRENT_USER_DEP,
 ) -> Response:
-    user_id = await _resolve_user_id(session)
+    user_id = await _resolve_request_user_id(session, current_user)
 
     record = await _get_key(session, key_id, user_id=user_id)
     secret_payload = _decode_secret_payload(record.secret_enc)

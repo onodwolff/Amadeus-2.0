@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gateway.config import settings
+from gateway.db.models import User
 
 from ..nautilus_service import svc
 from ..strategy_tester import (
@@ -15,9 +16,27 @@ from ..strategy_tester import (
     StrategyOptimisationPlan,
     StrategyTestRunStatus,
 )
+from .auth import get_current_user
 
 
 router = APIRouter(prefix="/strategy-tests", tags=["strategy-tests"])
+
+
+async def _anonymous_user() -> Optional[User]:
+    return None
+
+
+if settings.auth.enabled:
+    _CURRENT_USER_DEP = Depends(get_current_user)
+else:
+    _CURRENT_USER_DEP = Depends(_anonymous_user)
+
+
+def _require_admin(current_user: Optional[User]) -> None:
+    if not settings.auth.enabled:
+        return
+    if current_user is None or not current_user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
 
 
 class StrategyTestRunRequest(BaseModel):
@@ -98,7 +117,11 @@ class StrategyTestRunListResponse(BaseModel):
 
 
 @router.post("", response_model=StrategyTestRunResponse, status_code=status.HTTP_201_CREATED)
-async def create_strategy_test_run(payload: StrategyTestRunRequest) -> StrategyTestRunResponse:
+async def create_strategy_test_run(
+    payload: StrategyTestRunRequest,
+    current_user: Optional[User] = _CURRENT_USER_DEP,
+) -> StrategyTestRunResponse:
+    _require_admin(current_user)
     try:
         run = await svc.strategy_tester.start_run(
             name=payload.name,
@@ -121,14 +144,21 @@ async def create_strategy_test_run(payload: StrategyTestRunRequest) -> StrategyT
 
 
 @router.get("", response_model=StrategyTestRunListResponse)
-async def list_strategy_test_runs() -> StrategyTestRunListResponse:
+async def list_strategy_test_runs(
+    current_user: Optional[User] = _CURRENT_USER_DEP,
+) -> StrategyTestRunListResponse:
+    _require_admin(current_user)
     runs = await svc.strategy_tester.list_runs()
     resources = [StrategyTestRunResource.model_validate(item) for item in runs]
     return StrategyTestRunListResponse(runs=resources)
 
 
 @router.get("/{run_id}", response_model=StrategyTestRunResponse)
-async def get_strategy_test_run(run_id: str) -> StrategyTestRunResponse:
+async def get_strategy_test_run(
+    run_id: str,
+    current_user: Optional[User] = _CURRENT_USER_DEP,
+) -> StrategyTestRunResponse:
+    _require_admin(current_user)
     run = await svc.strategy_tester.get_run(run_id)
     if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Run not found")

@@ -10,10 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.config import settings
 from gateway.db.base import create_session
 from gateway.db.models import Node, RiskLimit, User
 
 from ..nautilus_service import EngineUnavailableError, svc
+from .auth import get_current_user
 
 LOGGER = logging.getLogger("gateway.api.risk")
 router = APIRouter(prefix="/risk", tags=["risk"])
@@ -163,6 +165,58 @@ async def _resolve_primary_user(session: AsyncSession) -> User:
     return user
 
 
+async def _anonymous_user() -> Optional[User]:
+    return None
+
+
+if settings.auth.enabled:
+    _CURRENT_USER_DEP = Depends(get_current_user)
+else:
+    _CURRENT_USER_DEP = Depends(_anonymous_user)
+
+
+async def _resolve_scope_user(
+    session: AsyncSession,
+    *,
+    current_user: Optional[User],
+    requested_user_id: Optional[str],
+) -> User:
+    user_obj = current_user if isinstance(current_user, User) else None
+    identifier: Optional[str]
+    if isinstance(requested_user_id, (str, bytes, int)):
+        identifier = str(requested_user_id)
+    else:
+        identifier = None
+
+    if settings.auth.enabled:
+        if user_obj is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        if identifier is None or identifier == str(user_obj.id):
+            return user_obj
+        if not user_obj.is_admin:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+        try:
+            target_id = int(identifier)
+        except (TypeError, ValueError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid user id")
+        target = await session.get(User, target_id)
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+        return target
+
+    if identifier is not None:
+        try:
+            target_id = int(identifier)
+        except (TypeError, ValueError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid user id")
+        target = await session.get(User, target_id)
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+        return target
+
+    return await _resolve_primary_user(session)
+
+
 async def _resolve_node_id(session: AsyncSession, node_ref: Optional[str], *, required: bool) -> Optional[int]:
     if not node_ref:
         return None
@@ -214,9 +268,13 @@ def get_risk_snapshot() -> Dict[str, Any]:
 @router.get("/limits", response_model=RiskLimitsResponse)
 async def get_risk_limits(
     node_id: Optional[str] = Query(default=None, alias="nodeId"),
+    user_id: Optional[str] = Query(default=None, alias="userId"),
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[User] = _CURRENT_USER_DEP,
 ) -> RiskLimitsResponse:
-    user = await _resolve_primary_user(session)
+    user = await _resolve_scope_user(
+        session, current_user=current_user, requested_user_id=user_id
+    )
     resolved_node_id = await _resolve_node_id(session, node_id, required=False)
 
     record = await _load_risk_limit(session, user_id=user.id, node_id=resolved_node_id)
@@ -244,9 +302,13 @@ async def get_risk_limits(
 async def update_risk_limits(
     payload: RiskLimitsPayload,
     node_id: Optional[str] = Query(default=None, alias="nodeId"),
+    user_id: Optional[str] = Query(default=None, alias="userId"),
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[User] = _CURRENT_USER_DEP,
 ) -> RiskLimitsResponse:
-    user = await _resolve_primary_user(session)
+    user = await _resolve_scope_user(
+        session, current_user=current_user, requested_user_id=user_id
+    )
     resolved_node_id = await _resolve_node_id(session, node_id, required=node_id is not None)
 
     record = await _load_risk_limit(session, user_id=user.id, node_id=resolved_node_id)
