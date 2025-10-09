@@ -119,7 +119,7 @@ export class AdminUserCreateDialogComponent {
         name: ['', [Validators.required, Validators.minLength(2)]],
         password: ['', [Validators.required, Validators.minLength(8)]],
         confirmPassword: ['', [Validators.required]],
-        role: ['member', Validators.required],
+        role: this.fb.nonNullable.control<UserCreateRequest['role']>('member', Validators.required),
       },
       { validators: matchPasswordsValidator },
     );
