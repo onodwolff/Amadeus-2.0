@@ -4,6 +4,11 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+try:  # pragma: no cover - support running from backend/
+    from gateway.config import settings
+except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+    from backend.gateway.config import settings  # type: ignore
+
 
 revision = "0003_strategy_tester"
 down_revision = "0002_historical_data"
@@ -11,18 +16,20 @@ branch_labels = None
 depends_on = None
 
 
+SCHEMA = settings.storage.schema
+
 _backtest_run_status = sa.Enum(
     "pending",
     "running",
     "completed",
     "failed",
     name="backtest_run_status",
+    schema=SCHEMA,
 )
+_backtest_run_status.create_type = False
 
 
 def upgrade() -> None:
-    _backtest_run_status.create(op.get_bind(), checkfirst=True)
-
     op.create_table(
         "backtest_runs",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),

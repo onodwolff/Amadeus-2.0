@@ -4,6 +4,11 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+try:  # pragma: no cover - support running from backend/
+    from gateway.config import settings
+except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+    from backend.gateway.config import settings  # type: ignore
+
 
 revision = "0002_historical_data"
 down_revision = "0001_initial"
@@ -11,18 +16,20 @@ branch_labels = None
 depends_on = None
 
 
+SCHEMA = settings.storage.schema
+
 _historical_data_status = sa.Enum(
     "pending",
     "running",
     "ready",
     "failed",
     name="historical_data_status",
+    schema=SCHEMA,
 )
+_historical_data_status.create_type = False
 
 
 def upgrade() -> None:
-    _historical_data_status.create(op.get_bind(), checkfirst=True)
-
     op.create_table(
         "historical_datasets",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),

@@ -34,6 +34,15 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def apply_schema_to_metadata(schema: str | None) -> None:
+    """Assign the configured schema to metadata and known tables."""
+
+    metadata.schema = schema or None
+
+    for table in metadata.tables.values():
+        table.schema = metadata.schema
+
+
 def init_engine(database_url: str, **kwargs: Any) -> AsyncEngine:
     """Create (if needed) and cache a global async SQLAlchemy engine."""
 
@@ -106,6 +115,7 @@ async def dispose_engine() -> None:
 __all__ = [
     "AsyncEngine",
     "AsyncSession",
+    "apply_schema_to_metadata",
     "Base",
     "create_engine",
     "create_session",
