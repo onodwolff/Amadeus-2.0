@@ -61,7 +61,7 @@ from .nautilus_service import (
 )
 from .nautilus_engine_service import EngineConfigError, EngineMode, EngineNodeHandle
 from .logging import bind_contextvars, clear_contextvars, get_logger
-from .routes.auth import router as auth_router
+from .routes.auth import get_current_user, router as auth_router
 from .routes.data import router as data_router
 from .routes.keys import router as keys_router
 from .routes.orders import router as orders_router
@@ -72,6 +72,46 @@ from .security import hash_password
 
 
 logger = get_logger("gateway.api")
+
+
+if settings.auth.enabled:
+    _AUTH_DEPENDENCIES = [Depends(get_current_user)]
+else:
+    _AUTH_DEPENDENCIES: list[Any] = []
+
+
+async def _anonymous_user() -> DbUser | None:
+    """Return a sentinel user value when authentication is disabled."""
+
+    return None
+
+
+_CURRENT_USER_DEP = (
+    Depends(get_current_user) if settings.auth.enabled else Depends(_anonymous_user)
+)
+
+
+def _ensure_admin_privileges(current_user: DbUser | None) -> None:
+    """Ensure the acting user possesses administrator rights when required."""
+
+    if not settings.auth.enabled:
+        return
+    if current_user is None or not current_user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+
+
+def _ensure_self_or_admin(current_user: DbUser | None, target_user_id: str) -> None:
+    """Allow access for administrators or when acting on the current user."""
+
+    if not settings.auth.enabled or current_user is None:
+        return
+    if current_user.is_admin:
+        return
+    try:
+        if current_user.id != int(target_user_id):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+    except ValueError:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
 
 
 async def _apply_database_migrations(database_url: str) -> None:
@@ -826,36 +866,37 @@ def core_info():
     return svc.core_info()
 
 
-@app.get("/nodes")
+@app.get("/nodes", dependencies=_AUTH_DEPENDENCIES)
 def list_nodes():
     return {"nodes": [svc.as_dict(n) for n in svc.list_nodes()]}
 
 
-@app.post("/nodes/backtest/start")
+@app.post("/nodes/backtest/start", dependencies=_AUTH_DEPENDENCIES)
 def start_backtest():
     _ensure_engine_available()
     node: NodeHandle = svc.start_backtest()
     return {"node": svc.as_dict(node)}
 
 
-@app.post("/nodes/live/start")
+@app.post("/nodes/live/start", dependencies=_AUTH_DEPENDENCIES)
 def start_live():
     _ensure_engine_available()
     node: NodeHandle = svc.start_live()
     return {"node": svc.as_dict(node)}
 
 
-@app.post("/nodes/sandbox/start")
+@app.post("/nodes/sandbox/start", dependencies=_AUTH_DEPENDENCIES)
 def start_sandbox():
     _ensure_engine_available()
     node: NodeHandle = svc.start_sandbox()
     return {"node": svc.as_dict(node)}
 
 
-@app.post("/nodes/launch")
+@app.post("/nodes/launch", dependencies=_AUTH_DEPENDENCIES)
 async def launch_node(
     request: Request,
     session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
 ) -> Dict[str, Any]:
     _ensure_engine_available()
 
@@ -863,7 +904,7 @@ async def launch_node(
     config_metadata: Dict[str, Any] = {}
     detail: Optional[str] = None
 
-    user: Optional[DbUser] = None
+    user: Optional[DbUser] = current_user if settings.auth.enabled else None
 
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -1128,7 +1169,7 @@ async def _record_launch(
     return node_record
 
 
-@app.post("/nodes/{node_id}/stop")
+@app.post("/nodes/{node_id}/stop", dependencies=_AUTH_DEPENDENCIES)
 def stop_node(node_id: str):
     _ensure_engine_available()
     try:
@@ -1138,7 +1179,7 @@ def stop_node(node_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.post("/nodes/{node_id}/restart")
+@app.post("/nodes/{node_id}/restart", dependencies=_AUTH_DEPENDENCIES)
 def restart_node(node_id: str):
     _ensure_engine_available()
     try:
@@ -1157,17 +1198,25 @@ def _perform_node_delete(node_id: str) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.delete("/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/nodes/{node_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_DEPENDENCIES,
+)
 def delete_node(node_id: str):
     return _perform_node_delete(node_id)
 
 
-@app.post("/nodes/{node_id}/delete", status_code=status.HTTP_204_NO_CONTENT)
+@app.post(
+    "/nodes/{node_id}/delete",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_DEPENDENCIES,
+)
 def delete_node_legacy(node_id: str):
     return _perform_node_delete(node_id)
 
 
-@app.get("/nodes/{node_id}")
+@app.get("/nodes/{node_id}", dependencies=_AUTH_DEPENDENCIES)
 def get_node(node_id: str):
     _ensure_engine_available()
     try:
@@ -1176,7 +1225,7 @@ def get_node(node_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.get("/nodes/{node_id}/logs")
+@app.get("/nodes/{node_id}/logs", dependencies=_AUTH_DEPENDENCIES)
 def download_node_logs(node_id: str):
     _ensure_engine_available()
     try:
@@ -1200,7 +1249,7 @@ def download_node_logs(node_id: str):
     )
 
 
-@app.get("/nodes/{node_id}/logs/entries")
+@app.get("/nodes/{node_id}/logs/entries", dependencies=_AUTH_DEPENDENCIES)
 def get_node_logs(node_id: str):
     _ensure_engine_available()
     try:
@@ -1209,7 +1258,7 @@ def get_node_logs(node_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@app.get("/nodes/{node_id}/logs/export")
+@app.get("/nodes/{node_id}/logs/export", dependencies=_AUTH_DEPENDENCIES)
 def export_node_logs(node_id: str):
     _ensure_engine_available()
     try:
@@ -1219,13 +1268,13 @@ def export_node_logs(node_id: str):
     return PlainTextResponse(payload, media_type="text/plain")
 
 
-@app.get("/portfolio")
+@app.get("/portfolio", dependencies=_AUTH_DEPENDENCIES)
 def get_portfolio():
     _ensure_engine_available()
     return svc.portfolio_snapshot()
 
 
-@app.get("/market/instruments")
+@app.get("/market/instruments", dependencies=_AUTH_DEPENDENCIES)
 def list_instruments(venue: Optional[str] = Query(default=None)):
     _ensure_engine_available()
     try:
@@ -1234,30 +1283,35 @@ def list_instruments(venue: Optional[str] = Query(default=None)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.get("/market/watchlist")
+@app.get("/market/watchlist", dependencies=_AUTH_DEPENDENCIES)
 def get_watchlist():
     _ensure_engine_available()
     return svc.get_watchlist()
 
 
-@app.put("/market/watchlist")
+@app.put("/market/watchlist", dependencies=_AUTH_DEPENDENCIES)
 def update_watchlist(payload: WatchlistUpdatePayload):
     _ensure_engine_available()
     return svc.update_watchlist(payload.favorites)
 
 
-@app.get("/users")
-def list_users():
+@app.get("/users", dependencies=_AUTH_DEPENDENCIES)
+def list_users(current_user: DbUser | None = _CURRENT_USER_DEP):
+    _ensure_admin_privileges(current_user)
     return svc.list_users()
 
 
-@app.get("/integrations/exchanges")
+@app.get("/integrations/exchanges", dependencies=_AUTH_DEPENDENCIES)
 def list_exchanges():
     return svc.list_available_exchanges()
 
 
-@app.post("/users", status_code=201)
-def create_user(payload: UserCreatePayload):
+@app.post("/users", status_code=201, dependencies=_AUTH_DEPENDENCIES)
+def create_user(
+    payload: UserCreatePayload,
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    _ensure_admin_privileges(current_user)
     try:
         return svc.create_user(payload.dict())
     except UserConflictError as exc:
@@ -1266,16 +1320,22 @@ def create_user(payload: UserCreatePayload):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.get("/users/{user_id}")
-def get_user(user_id: str):
+@app.get("/users/{user_id}", dependencies=_AUTH_DEPENDENCIES)
+def get_user(user_id: str, current_user: DbUser | None = _CURRENT_USER_DEP):
+    _ensure_self_or_admin(current_user, user_id)
     try:
         return svc.get_user(user_id)
     except UserNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.put("/users/{user_id}")
-def update_user(user_id: str, payload: UserUpdatePayload):
+@app.put("/users/{user_id}", dependencies=_AUTH_DEPENDENCIES)
+def update_user(
+    user_id: str,
+    payload: UserUpdatePayload,
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    _ensure_self_or_admin(current_user, user_id)
     try:
         return svc.update_user(user_id, payload.dict(exclude_unset=True))
     except UserNotFoundError as exc:
@@ -1286,7 +1346,7 @@ def update_user(user_id: str, payload: UserUpdatePayload):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.get("/market/instruments/{instrument_id}/bars")
+@app.get("/market/instruments/{instrument_id}/bars", dependencies=_AUTH_DEPENDENCIES)
 def get_historical_bars(
     instrument_id: str,
     *,
@@ -1309,12 +1369,12 @@ def get_historical_bars(
         raise HTTPException(status_code=503, detail=str(exc))
 
 
-@app.get("/portfolio/history")
+@app.get("/portfolio/history", dependencies=_AUTH_DEPENDENCIES)
 def get_portfolio_history(limit: int = 720):
     return svc.portfolio_history(limit=limit)
 
 
-@app.post("/risk/alerts/{alert_id}/ack")
+@app.post("/risk/alerts/{alert_id}/ack", dependencies=_AUTH_DEPENDENCIES)
 def acknowledge_risk_alert(alert_id: str):
     try:
         return svc.acknowledge_risk_alert(alert_id)
@@ -1322,7 +1382,7 @@ def acknowledge_risk_alert(alert_id: str):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.post("/risk/alerts/{alert_id}/unlock")
+@app.post("/risk/alerts/{alert_id}/unlock", dependencies=_AUTH_DEPENDENCIES)
 def unlock_risk_alert(alert_id: str):
     try:
         return svc.unlock_circuit_breaker(alert_id)
@@ -1332,7 +1392,7 @@ def unlock_risk_alert(alert_id: str):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.post("/risk/alerts/{alert_id}/escalate")
+@app.post("/risk/alerts/{alert_id}/escalate", dependencies=_AUTH_DEPENDENCIES)
 def escalate_margin_call(alert_id: str):
     try:
         return svc.escalate_margin_call(alert_id)
@@ -1342,19 +1402,19 @@ def escalate_margin_call(alert_id: str):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.get("/orders")
+@app.get("/orders", dependencies=_AUTH_DEPENDENCIES)
 def get_orders():
     _ensure_engine_available()
     return svc.orders_snapshot()
 
 
-@app.post("/orders")
+@app.post("/orders", dependencies=_AUTH_DEPENDENCIES)
 def create_order(payload: OrderCreatePayload):
     _ensure_engine_available()
     return svc.create_order(payload.dict())
 
 
-@app.post("/orders/{order_id}/cancel")
+@app.post("/orders/{order_id}/cancel", dependencies=_AUTH_DEPENDENCIES)
 def cancel_order(order_id: str):
     _ensure_engine_available()
     try:
@@ -1363,7 +1423,7 @@ def cancel_order(order_id: str):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.post("/orders/{order_id}/duplicate")
+@app.post("/orders/{order_id}/duplicate", dependencies=_AUTH_DEPENDENCIES)
 def duplicate_order(order_id: str):
     _ensure_engine_available()
     try:

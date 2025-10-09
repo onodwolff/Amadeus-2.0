@@ -4,7 +4,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, EmailStr, Field, TypeAdapter, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    EmailStr,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,7 +62,10 @@ class RiskSettings(BaseModel):
 class AuthSettings(BaseModel):
     """Authentication and authorization configuration."""
 
-    enabled: bool = False
+    enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AUTH_ENABLED", "AUTH__ENABLED"),
+    )
     jwt_secret: str = Field(default="change-me", min_length=8)
     access_token_ttl_seconds: int = Field(default=900, ge=60)
     refresh_token_ttl_seconds: int = Field(default=86400, ge=300)
@@ -82,6 +93,14 @@ class AuthSettings(BaseModel):
             return None
         normalised = str(value).strip().lower()
         return _EMAIL_STR_ADAPTER.validate_python(normalised)
+
+    @model_validator(mode="after")
+    def _auto_enable(self) -> "AuthSettings":
+        """Automatically enable auth when administrator credentials are provided."""
+
+        if not self.enabled and self.admin_email:
+            self.enabled = True
+        return self
 
 
 class StorageSettings(BaseModel):
