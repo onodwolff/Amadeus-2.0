@@ -1,40 +1,48 @@
 import { Routes } from '@angular/router';
 
 import { AdminGuard } from './shared/auth/admin.guard';
+import { AuthGuard } from './shared/auth/auth.guard';
 
 export const routes: Routes = [
-  { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
-  { path: 'dashboard', loadComponent: () => import('./nodes/nodes.page').then(m => m.NodesPage) },
-  { path: 'nodes', redirectTo: 'dashboard', pathMatch: 'full' },
-  { path: 'market', loadComponent: () => import('./market/market.page').then(m => m.MarketPage) },
-  { path: 'portfolio', loadComponent: () => import('./portfolio/portfolio.page').then(m => m.PortfolioPage) },
-  { path: 'orders', loadComponent: () => import('./orders/orders.page').then(m => m.OrdersPage) },
+  { path: 'login', loadComponent: () => import('./auth/login.page').then(m => m.LoginPage) },
   {
-    path: 'backtest',
+    path: '',
+    canActivateChild: [AuthGuard],
     children: [
-      { path: '', loadComponent: () => import('./backtest/backtest.page').then(m => m.BacktestPage) },
-      { path: 'runs/:runId', redirectTo: '/backtest/:runId', pathMatch: 'full' },
+      { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
+      { path: 'dashboard', loadComponent: () => import('./nodes/nodes.page').then(m => m.NodesPage) },
+      { path: 'nodes', redirectTo: 'dashboard', pathMatch: 'full' },
+      { path: 'market', loadComponent: () => import('./market/market.page').then(m => m.MarketPage) },
+      { path: 'portfolio', loadComponent: () => import('./portfolio/portfolio.page').then(m => m.PortfolioPage) },
+      { path: 'orders', loadComponent: () => import('./orders/orders.page').then(m => m.OrdersPage) },
       {
-        path: ':id',
-        loadComponent: () => import('./backtest/run-detail.page').then(m => m.RunDetailPage),
+        path: 'backtest',
+        children: [
+          { path: '', loadComponent: () => import('./backtest/backtest.page').then(m => m.BacktestPage) },
+          { path: 'runs/:runId', redirectTo: '/backtest/:runId', pathMatch: 'full' },
+          {
+            path: ':id',
+            loadComponent: () => import('./backtest/run-detail.page').then(m => m.RunDetailPage),
+          },
+        ],
       },
+      {
+        path: 'strategy-tests',
+        loadComponent: () => import('./strategies/strategy-testing.page').then(m => m.StrategyTestingPage),
+      },
+      { path: 'risk', loadComponent: () => import('./risk/risk.page').then(m => m.RiskPage) },
+      {
+        path: 'data',
+        loadComponent: () => import('./data/historical-data.page').then(m => m.HistoricalDataPage),
+      },
+      { path: 'settings', loadComponent: () => import('./settings/settings.page').then(m => m.SettingsPage) },
+      {
+        path: 'admin/users',
+        canActivate: [AdminGuard],
+        providers: [AdminGuard],
+        loadComponent: () => import('./admin/users').then(m => m.AdminUsersPage),
+      },
+      { path: '**', redirectTo: 'dashboard' },
     ],
   },
-  {
-    path: 'strategy-tests',
-    loadComponent: () => import('./strategies/strategy-testing.page').then(m => m.StrategyTestingPage),
-  },
-  { path: 'risk', loadComponent: () => import('./risk/risk.page').then(m => m.RiskPage) },
-  {
-    path: 'data',
-    loadComponent: () => import('./data/historical-data.page').then(m => m.HistoricalDataPage),
-  },
-  { path: 'settings', loadComponent: () => import('./settings/settings.page').then(m => m.SettingsPage) },
-  {
-    path: 'admin/users',
-    canActivate: [AdminGuard],
-    providers: [AdminGuard],
-    loadComponent: () => import('./admin/users').then(m => m.AdminUsersPage),
-  },
-  { path: '**', redirectTo: 'dashboard' },
 ];
