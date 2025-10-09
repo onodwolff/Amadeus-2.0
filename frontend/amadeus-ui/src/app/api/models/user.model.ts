@@ -16,6 +16,13 @@ export interface UserResponse {
   user: UserProfile;
 }
 
+export interface UserCreateRequest {
+  email: string;
+  password: string;
+  name?: string;
+  role: string;
+}
+
 export interface AccountResponse {
   account: UserProfile;
 }
