@@ -229,10 +229,10 @@ export class AdminUserCreateDialogComponent {
     email: this.fb.nonNullable.control<string>('', [Validators.required, Validators.email]),
     password: this.fb.nonNullable.control<string>('', [Validators.required, Validators.minLength(8)]),
     name: this.fb.control<string>(''),
-    role: this.fb.nonNullable.control<string>('member', Validators.required),
+    role: this.fb.nonNullable.control<UserCreateRequest['role']>('member', Validators.required),
   });
 
-  readonly roleOptions: Array<{ value: string; label: string }> = [
+  readonly roleOptions: ReadonlyArray<{ value: UserCreateRequest['role']; label: string }> = [
     { value: 'member', label: 'Member' },
     { value: 'viewer', label: 'Viewer' },
   ];
@@ -266,7 +266,7 @@ export class AdminUserCreateDialogComponent {
     const payload: UserCreateRequest = {
       email: email.trim().toLowerCase(),
       password,
-      role: role.trim().toLowerCase(),
+      role: role.trim().toLowerCase() as UserCreateRequest['role'],
     };
 
     const trimmedName = name?.trim();

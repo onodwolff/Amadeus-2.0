@@ -4,7 +4,7 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'user'; // при необходимости добавь 'viewer'
+  role: 'admin' | 'member' | 'viewer';
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -22,7 +22,7 @@ export interface UserCreateRequest {
   email: string;
   password: string;
   name?: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'member' | 'viewer';
 }
 
 export interface AccountResponse {
