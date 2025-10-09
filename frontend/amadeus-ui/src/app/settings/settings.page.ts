@@ -193,6 +193,7 @@ export class SettingsPage implements OnInit {
 
   readonly activeUser = signal<UserProfile | null>(null);
   readonly authUser = signal<AuthUser | null>(null);
+  readonly user = computed(() => this.authState.currentUser());
   readonly isEmailDialogOpen = signal(false);
   readonly isPasswordDialogOpen = signal(false);
 
@@ -235,7 +236,9 @@ export class SettingsPage implements OnInit {
   readonly isCreateCustomVenue = signal(false);
   readonly isEditCustomVenue = signal(false);
   readonly venueOptions = computed<ExchangeDescriptor[]>(() => this.computeVenueOptions());
-  readonly isAdmin = this.authState.isAdmin;
+  get isAdmin(): boolean {
+    return this.user()?.isAdmin ?? false;
+  }
 
   ngOnInit(): void {
     this.fetchKeys();
