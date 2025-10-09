@@ -1338,8 +1338,18 @@ def update_user(
     current_user: DbUser | None = _CURRENT_USER_DEP,
 ):
     _ensure_self_or_admin(current_user, user_id)
+    update_data = payload.dict(exclude_unset=True)
+
+    if settings.auth.enabled:
+        restricted_fields = {"role", "active"}
+        if update_data.keys() & restricted_fields:
+            if current_user is None or not current_user.is_admin:
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    detail="Admin privileges required",
+                )
     try:
-        return svc.update_user(user_id, payload.dict(exclude_unset=True))
+        return svc.update_user(user_id, update_data)
     except UserNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except UserConflictError as exc:
