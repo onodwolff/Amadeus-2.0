@@ -10,10 +10,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.app.dependencies import get_session
 from gateway.app.security import hash_password, verify_password
+from gateway.config import settings
 from gateway.db.models import User
+
+from .auth import get_current_user
 
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+
+async def _anonymous_user() -> User | None:
+    """Return a sentinel user when authentication is disabled."""
+
+    return None
+
+
+_CURRENT_USER_DEP = (
+    Depends(get_current_user) if settings.auth.enabled else Depends(_anonymous_user)
+)
+
+
+def _ensure_admin(current_user: User | None) -> None:
+    """Allow access only to administrators when authentication is enabled."""
+
+    if not settings.auth.enabled:
+        return
+    if current_user is None or not current_user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not allowed")
 
 
 class AccountResource(BaseModel):
@@ -85,7 +108,11 @@ async def _load_primary_user(session: AsyncSession) -> User:
 
 
 @router.get("/account", response_model=AccountResponse)
-async def get_account_settings(session: AsyncSession = Depends(get_session)) -> AccountResponse:
+async def get_account_settings(
+    session: AsyncSession = Depends(get_session),
+    current_user: User | None = _CURRENT_USER_DEP,
+) -> AccountResponse:
+    _ensure_admin(current_user)
     user = await _load_primary_user(session)
     return AccountResponse(account=_serialize_account(user))
 
@@ -94,7 +121,9 @@ async def get_account_settings(session: AsyncSession = Depends(get_session)) -> 
 async def update_account_settings(
     payload: AccountUpdateRequest,
     session: AsyncSession = Depends(get_session),
+    current_user: User | None = _CURRENT_USER_DEP,
 ) -> AccountResponse:
+    _ensure_admin(current_user)
     user = await _load_primary_user(session)
 
     changed = False
@@ -129,7 +158,9 @@ async def update_account_settings(
 async def update_password(
     payload: PasswordUpdateRequest,
     session: AsyncSession = Depends(get_session),
+    current_user: User | None = _CURRENT_USER_DEP,
 ) -> AccountResponse:
+    _ensure_admin(current_user)
     user = await _load_primary_user(session)
 
     if not verify_password(user.password_hash, payload.current_password):
