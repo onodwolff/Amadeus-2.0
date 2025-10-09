@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 
+DEFAULT_SCHEMA = "public"
+
+
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -21,7 +24,7 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 
-metadata = MetaData(naming_convention=NAMING_CONVENTION)
+metadata = MetaData(schema=DEFAULT_SCHEMA, naming_convention=NAMING_CONVENTION)
 
 
 class Base(DeclarativeBase):
@@ -37,11 +40,9 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 def apply_schema_to_metadata(schema: str | None) -> None:
     """Assign the configured schema to metadata and known tables."""
 
-    normalised = (schema or "").strip()
-    if normalised.lower() == "public":
-        normalised = ""
+    normalised = (schema or "").strip() or DEFAULT_SCHEMA
 
-    metadata.schema = normalised or None
+    metadata.schema = normalised
 
     for table in metadata.tables.values():
         table.schema = metadata.schema
