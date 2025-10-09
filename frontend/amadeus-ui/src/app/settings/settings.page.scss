@@ -731,9 +731,15 @@
   margin-top: 16px;
 }
 
-.field {
+.field { 
   display: grid;
   gap: 6px;
+}
+
+.field__label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .field--inline {
@@ -754,6 +760,20 @@
   color: rgba(148, 163, 184, 0.75);
 }
 
+.field__support-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.18);
+  color: rgba(59, 130, 246, 0.85);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .field__control {
   width: 100%;
   padding: 10px 12px;
@@ -762,6 +782,11 @@
   background: rgba(15, 23, 42, 0.8);
   color: inherit;
   font: inherit;
+}
+
+.field--invalid .field__control {
+  border-color: rgba(248, 113, 113, 0.65);
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.25);
 }
 
 .field__control--select {
@@ -938,6 +963,19 @@
 .field__hint {
   font-size: 0.8rem;
   color: rgba(248, 113, 113, 0.9);
+}
+
+.field__support {
+  margin: 0;
+  font-size: 0.8rem;
+  color: rgba(148, 163, 184, 0.85);
+  line-height: 1.4;
+}
+
+.field-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: rgba(248, 113, 113, 0.95);
 }
 
 .checkbox {
