@@ -4503,6 +4503,7 @@ class NautilusService:
             self._state_sync = EngineStateSync(
                 bus=self._engine.bus,
                 database_url=settings.database_url,
+                database_schema=settings.database_schema,
                 redis_url=settings.redis_url,
             )
             self._state_sync.start()

@@ -37,7 +37,11 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 def apply_schema_to_metadata(schema: str | None) -> None:
     """Assign the configured schema to metadata and known tables."""
 
-    metadata.schema = schema or None
+    normalised = (schema or "").strip()
+    if normalised.lower() == "public":
+        normalised = ""
+
+    metadata.schema = normalised or None
 
     for table in metadata.tables.values():
         table.schema = metadata.schema
