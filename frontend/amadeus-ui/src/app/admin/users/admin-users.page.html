@@ -1,0 +1,84 @@
+<section class="users-page">
+  <header class="users-page__header">
+    <div class="users-page__header-text">
+      <h1 class="users-page__title">User management</h1>
+      <p class="users-page__description">
+        Review existing operator accounts and create new administrators or members for the control plane.
+      </p>
+    </div>
+    <button mat-flat-button color="primary" (click)="openCreateDialog()" type="button">
+      Create user
+    </button>
+  </header>
+
+  <mat-form-field appearance="outline" class="users-page__filter">
+    <mat-label>Filter users</mat-label>
+    <input
+      matInput
+      placeholder="Search by email, name, or role"
+      [formControl]="filterControl"
+      type="search"
+    />
+    <button
+      mat-button
+      matSuffix
+      type="button"
+      (click)="clearFilter()"
+      *ngIf="filterControl.value"
+      class="users-page__clear"
+    >
+      Clear
+    </button>
+  </mat-form-field>
+
+  <div class="users-page__content" *ngIf="!isLoading(); else loading">
+    <table mat-table [dataSource]="dataSource" matSort matSortDisableClear class="users-table">
+      <ng-container matColumnDef="id">
+        <th mat-header-cell *matHeaderCellDef mat-sort-header>Identifier</th>
+        <td mat-cell *matCellDef="let user" class="users-table__id">{{ user.id }}</td>
+      </ng-container>
+
+      <ng-container matColumnDef="email">
+        <th mat-header-cell *matHeaderCellDef mat-sort-header>Email</th>
+        <td mat-cell *matCellDef="let user">{{ user.email }}</td>
+      </ng-container>
+
+      <ng-container matColumnDef="name">
+        <th mat-header-cell *matHeaderCellDef mat-sort-header>Name</th>
+        <td mat-cell *matCellDef="let user">{{ user.name || '—' }}</td>
+      </ng-container>
+
+      <ng-container matColumnDef="role">
+        <th mat-header-cell *matHeaderCellDef mat-sort-header>Role</th>
+        <td mat-cell *matCellDef="let user" class="users-table__role">{{ user.role | titlecase }}</td>
+      </ng-container>
+
+      <ng-container matColumnDef="created_at">
+        <th mat-header-cell *matHeaderCellDef mat-sort-header>Created</th>
+        <td mat-cell *matCellDef="let user">{{ user.created_at | date: 'medium' }}</td>
+      </ng-container>
+
+      <ng-container matColumnDef="updated_at">
+        <th mat-header-cell *matHeaderCellDef mat-sort-header>Updated</th>
+        <td mat-cell *matCellDef="let user">{{ user.updated_at | date: 'medium' }}</td>
+      </ng-container>
+
+      <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+      <tr mat-row *matRowDef="let row; columns: displayedColumns; trackBy: trackByUserId"></tr>
+    </table>
+
+    <div class="users-page__empty" *ngIf="!dataSource.data.length">
+      <h2>No users found</h2>
+      <p>Adjust your filters or invite a new teammate to get started.</p>
+    </div>
+  </div>
+
+  <p class="users-page__error" *ngIf="error()">{{ error() }}</p>
+
+  <ng-template #loading>
+    <div class="users-page__loading" role="status" aria-live="polite">
+      <mat-spinner diameter="42"></mat-spinner>
+      <span>Loading users…</span>
+    </div>
+  </ng-template>
+</section>

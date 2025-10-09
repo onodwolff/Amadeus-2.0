@@ -83,29 +83,15 @@
         <div>
           <h2 class="settings-card__title">Workspace members</h2>
           <p class="settings-card__description">
-            Manage operator access to the control plane. The primary administrator signs in with their email address.
+            Manage operator access to the control plane from the dedicated admin console.
           </p>
         </div>
+        <a class="btn btn--ghost" routerLink="/admin/users">Open admin users</a>
       </header>
-      <div class="members-loading" *ngIf="isUsersLoading()" role="status" aria-live="polite">
-        <span class="credentials-spinner" aria-hidden="true"></span>
-        <span>Loading workspace members…</span>
-      </div>
-      <p class="settings-message settings-message--error" *ngIf="usersError() as userError">{{ userError }}</p>
-      <ul class="members-list" *ngIf="!isUsersLoading() && !usersError() && workspaceUsers().length > 0; else noMembers">
-        <li class="members-list__item" *ngFor="let member of workspaceUsers()">
-          <div class="members-list__primary">{{ member.email }}</div>
-          <div class="members-list__meta">
-            <span class="members-list__badge">{{ member.role | titlecase }}</span>
-            <span class="members-list__status" [class.members-list__status--inactive]="!member.active">
-              {{ member.active ? 'Active' : 'Suspended' }}
-            </span>
-          </div>
-        </li>
-      </ul>
-      <ng-template #noMembers>
-        <p class="settings-card__helper">No workspace members have been added yet.</p>
-      </ng-template>
+      <p class="settings-card__helper">
+        User invitations, suspensions, and role assignments now live on the
+        <a routerLink="/admin/users">Admin users page</a> for a focused management experience.
+      </p>
     </article>
 
     <article class="settings-card">

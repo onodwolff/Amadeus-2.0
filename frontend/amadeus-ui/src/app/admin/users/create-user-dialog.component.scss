@@ -1,0 +1,25 @@
+.create-user-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.create-user-form__content {
+  display: grid;
+  gap: 16px;
+  max-width: 520px;
+}
+
+.create-user-form__helper {
+  margin: 0 0 4px;
+  color: rgba(148, 163, 184, 0.85);
+}
+
+.create-user-form__field {
+  width: 100%;
+}
+
+.create-user-form__button-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
