@@ -18,7 +18,7 @@ export interface UserResponse {
 
 export interface UserCreateRequest {
   email: string;
-  name: string;
+  name?: string;
   password: string;
   role: string;
 }
