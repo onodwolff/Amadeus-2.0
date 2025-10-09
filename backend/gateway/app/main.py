@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from starlette.datastructures import UploadFile
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import settings
@@ -136,6 +136,66 @@ async def _resolve_primary_user(session: AsyncSession) -> DbUser:
             status.HTTP_404_NOT_FOUND, detail="No user accounts available for launch"
         )
     return user
+
+
+async def _resolve_request_user(
+    session: AsyncSession, current_user: DbUser | None
+) -> DbUser:
+    if settings.auth.enabled:
+        if current_user is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        return current_user
+    if current_user is not None:
+        return current_user
+    return await _resolve_primary_user(session)
+
+
+async def _load_user_node_ids(session: AsyncSession, user_id: int) -> set[str]:
+    stmt = select(
+        DbNode.summary["external_id"].astext, DbNode.id
+    ).where(DbNode.user_id == user_id)
+    result = await session.execute(stmt)
+    visible: set[str] = set()
+    for external_id, node_pk in result.all():
+        if external_id:
+            visible.add(str(external_id))
+        visible.add(str(node_pk))
+    return visible
+
+
+async def _ensure_node_access(
+    session: AsyncSession,
+    *,
+    node_id: str,
+    current_user: DbUser | None,
+    allow_admin_without_record: bool = False,
+) -> None:
+    if not settings.auth.enabled:
+        return
+    if current_user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    conditions = [DbNode.summary["external_id"].astext == node_id]
+    try:
+        numeric_id = int(node_id)
+    except (TypeError, ValueError):
+        numeric_id = None
+    else:
+        conditions.append(DbNode.id == numeric_id)
+
+    stmt = select(DbNode.user_id).where(or_(*conditions)).limit(1)
+    result = await session.execute(stmt)
+    owner_id = result.scalar_one_or_none()
+
+    if owner_id is None:
+        if current_user.is_admin and allow_admin_without_record:
+            return
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    if current_user.is_admin or owner_id == current_user.id:
+        return
+
+    raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Node not found")
 
 
 async def _ensure_admin_user() -> None:
@@ -869,27 +929,47 @@ def core_info():
 
 
 @app.get("/nodes", dependencies=_AUTH_DEPENDENCIES)
-def list_nodes():
-    return {"nodes": [svc.as_dict(n) for n in svc.list_nodes()]}
+async def list_nodes(
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    nodes = svc.list_nodes()
+    if not settings.auth.enabled or current_user is None or current_user.is_admin:
+        return {"nodes": [svc.as_dict(n) for n in nodes]}
+
+    visible_ids = await _load_user_node_ids(session, current_user.id)
+    filtered: List[Dict[str, Any]] = []
+    for handle in nodes:
+        handle_ids = {str(handle.id)}
+        summary = getattr(handle, "summary", {}) or {}
+        summary_external = summary.get("external_id") or summary.get("id")
+        if summary_external is not None:
+            handle_ids.add(str(summary_external))
+        if handle_ids & visible_ids:
+            filtered.append(svc.as_dict(handle))
+    return {"nodes": filtered}
 
 
 @app.post("/nodes/backtest/start", dependencies=_AUTH_DEPENDENCIES)
-def start_backtest():
+async def start_backtest(current_user: DbUser | None = _CURRENT_USER_DEP):
     _ensure_engine_available()
+    _ensure_admin_privileges(current_user)
     node: NodeHandle = svc.start_backtest()
     return {"node": svc.as_dict(node)}
 
 
 @app.post("/nodes/live/start", dependencies=_AUTH_DEPENDENCIES)
-def start_live():
+async def start_live(current_user: DbUser | None = _CURRENT_USER_DEP):
     _ensure_engine_available()
+    _ensure_admin_privileges(current_user)
     node: NodeHandle = svc.start_live()
     return {"node": svc.as_dict(node)}
 
 
 @app.post("/nodes/sandbox/start", dependencies=_AUTH_DEPENDENCIES)
-def start_sandbox():
+async def start_sandbox(current_user: DbUser | None = _CURRENT_USER_DEP):
     _ensure_engine_available()
+    _ensure_admin_privileges(current_user)
     node: NodeHandle = svc.start_sandbox()
     return {"node": svc.as_dict(node)}
 
@@ -905,6 +985,9 @@ async def launch_node(
     content_type = request.headers.get("content-type", "")
     config_metadata: Dict[str, Any] = {}
     detail: Optional[str] = None
+
+    if settings.auth.enabled and current_user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
     user: Optional[DbUser] = current_user if settings.auth.enabled else None
 
@@ -996,7 +1079,7 @@ async def launch_node(
 
         detail = build_launch_detail(payload)
 
-        user = await _resolve_primary_user(session)
+        user = await _resolve_request_user(session, current_user)
 
         if payload.engineConfig is not None:
             config_input = payload.engineConfig
@@ -1034,7 +1117,7 @@ async def launch_node(
             config_metadata = {"source": "payload", "format": "json"}
 
     if user is None:
-        user = await _resolve_primary_user(session)
+        user = await _resolve_request_user(session, current_user)
 
     try:
         engine_handle = svc.engine.launch_node(
@@ -1172,7 +1255,17 @@ async def _record_launch(
 
 
 @app.post("/nodes/{node_id}/stop", dependencies=_AUTH_DEPENDENCIES)
-def stop_node(node_id: str):
+async def stop_node(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    await _ensure_node_access(
+        session,
+        node_id=node_id,
+        current_user=current_user,
+        allow_admin_without_record=True,
+    )
     _ensure_engine_available()
     try:
         node = svc.stop_node(node_id)
@@ -1182,7 +1275,17 @@ def stop_node(node_id: str):
 
 
 @app.post("/nodes/{node_id}/restart", dependencies=_AUTH_DEPENDENCIES)
-def restart_node(node_id: str):
+async def restart_node(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    await _ensure_node_access(
+        session,
+        node_id=node_id,
+        current_user=current_user,
+        allow_admin_without_record=True,
+    )
     _ensure_engine_available()
     try:
         node = svc.restart_node(node_id)
@@ -1191,7 +1294,17 @@ def restart_node(node_id: str):
         raise HTTPException(status_code=404, detail=str(e))
 
 
-def _perform_node_delete(node_id: str) -> Response:
+async def _perform_node_delete(
+    node_id: str,
+    session: AsyncSession,
+    current_user: DbUser | None,
+) -> Response:
+    await _ensure_node_access(
+        session,
+        node_id=node_id,
+        current_user=current_user,
+        allow_admin_without_record=True,
+    )
     _ensure_engine_available()
     try:
         svc.delete_node(node_id)
@@ -1205,8 +1318,12 @@ def _perform_node_delete(node_id: str) -> Response:
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_DEPENDENCIES,
 )
-def delete_node(node_id: str):
-    return _perform_node_delete(node_id)
+async def delete_node(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+) -> Response:
+    return await _perform_node_delete(node_id, session, current_user)
 
 
 @app.post(
@@ -1214,12 +1331,26 @@ def delete_node(node_id: str):
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_DEPENDENCIES,
 )
-def delete_node_legacy(node_id: str):
-    return _perform_node_delete(node_id)
+async def delete_node_legacy(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+) -> Response:
+    return await _perform_node_delete(node_id, session, current_user)
 
 
 @app.get("/nodes/{node_id}", dependencies=_AUTH_DEPENDENCIES)
-def get_node(node_id: str):
+async def get_node(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    await _ensure_node_access(
+        session,
+        node_id=node_id,
+        current_user=current_user,
+        allow_admin_without_record=True,
+    )
     _ensure_engine_available()
     try:
         return svc.node_detail(node_id)
@@ -1228,7 +1359,17 @@ def get_node(node_id: str):
 
 
 @app.get("/nodes/{node_id}/logs", dependencies=_AUTH_DEPENDENCIES)
-def download_node_logs(node_id: str):
+async def download_node_logs(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    await _ensure_node_access(
+        session,
+        node_id=node_id,
+        current_user=current_user,
+        allow_admin_without_record=True,
+    )
     _ensure_engine_available()
     try:
         path = svc.node_log_file(node_id)
@@ -1252,7 +1393,17 @@ def download_node_logs(node_id: str):
 
 
 @app.get("/nodes/{node_id}/logs/entries", dependencies=_AUTH_DEPENDENCIES)
-def get_node_logs(node_id: str):
+async def get_node_logs(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    await _ensure_node_access(
+        session,
+        node_id=node_id,
+        current_user=current_user,
+        allow_admin_without_record=True,
+    )
     _ensure_engine_available()
     try:
         return svc.node_logs(node_id)
@@ -1261,7 +1412,17 @@ def get_node_logs(node_id: str):
 
 
 @app.get("/nodes/{node_id}/logs/export", dependencies=_AUTH_DEPENDENCIES)
-def export_node_logs(node_id: str):
+async def export_node_logs(
+    node_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: DbUser | None = _CURRENT_USER_DEP,
+):
+    await _ensure_node_access(
+        session,
+        node_id=node_id,
+        current_user=current_user,
+        allow_admin_without_record=True,
+    )
     _ensure_engine_available()
     try:
         payload = svc.export_logs(node_id)
