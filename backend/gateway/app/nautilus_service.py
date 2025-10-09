@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import itertools
 import json
 import logging
@@ -18,6 +17,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional, Tuple, Union
 
 from .config import settings
+from .security import hash_password as _argon2_hash_password
+from .security import verify_password as _argon2_verify_password
 from .data_service import HistoricalDataUnavailable, data_service as historical_data_service
 from .nautilus_engine_service import (
     EngineConfigError,
@@ -62,9 +63,15 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
 
 
 def _hash_password(password: str) -> str:
-    digest = hashlib.sha256()
-    digest.update(password.encode("utf-8"))
-    return digest.hexdigest()
+    """Hash passwords for the in-memory Nautilus user store."""
+
+    return _argon2_hash_password(password)
+
+
+def _is_argon_hash(value: str) -> bool:
+    """Return ``True`` if the stored hash already uses Argon2."""
+
+    return value.startswith("$argon2")
 
 
 def _import_nautilus():
@@ -1062,9 +1069,11 @@ class MockNautilusService:
             password_raw = payload.get("password")
             if not isinstance(password_raw, str) or len(password_raw) < 8:
                 raise UserValidationError("Password must be at least 8 characters long")
-            password_hash = _hash_password(password_raw)
-            if password_hash != user.password_hash:
-                user.password_hash = password_hash
+            needs_update = (not _is_argon_hash(user.password_hash)) or not _argon2_verify_password(
+                user.password_hash, password_raw
+            )
+            if needs_update:
+                user.password_hash = _hash_password(password_raw)
                 changed = True
 
         if changed:
