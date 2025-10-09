@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,7 @@ _LOGIN_WINDOW_SECONDS = 60
 _MAX_LOGIN_ATTEMPTS = 5
 _login_attempts: Dict[str, List[float]] = {}
 _bearer_scheme = HTTPBearer(auto_error=False)
+_PASSWORD_COMPLEXITY_PATTERN = re.compile(r"(?=.*[A-Za-z])(?=.*\d)")
 
 router = APIRouter(tags=["auth"])
 
@@ -103,6 +105,15 @@ class UserCreatePayload(BaseModel):
             return UserRole(candidate)
         except ValueError as exc:  # pragma: no cover - defensive validation
             raise ValueError("Invalid role specified") from exc
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not _PASSWORD_COMPLEXITY_PATTERN.search(value):
+            raise ValueError("Password must include letters and digits")
+        return value
 
 
 class LoginRequest(BaseModel):

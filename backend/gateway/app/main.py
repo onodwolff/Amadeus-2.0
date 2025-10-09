@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 import time
 import uuid
 from copy import deepcopy
@@ -452,6 +453,9 @@ class WatchlistUpdatePayload(BaseModel):
     favorites: List[str] = Field(default_factory=list)
 
 
+PASSWORD_COMPLEXITY_PATTERN = re.compile(r"(?=.*[A-Za-z])(?=.*\d)")
+
+
 class UserCreatePayload(BaseModel):
     name: str = Field(..., min_length=1)
     email: str = Field(..., min_length=3)
@@ -459,6 +463,16 @@ class UserCreatePayload(BaseModel):
     password: str = Field(..., min_length=8)
     role: str = Field(default="viewer", min_length=1)
     active: bool = True
+
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        if not PASSWORD_COMPLEXITY_PATTERN.search(value):
+            raise ValueError("Password must include letters and digits")
+        return value
 
 
 class UserUpdatePayload(BaseModel):
