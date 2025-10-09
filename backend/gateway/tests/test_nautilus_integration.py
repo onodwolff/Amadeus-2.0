@@ -4,6 +4,7 @@ import pytest
 
 from ..app.nautilus_engine_service import EngineEventBus, build_engine_service
 from ..app.nautilus_service import NautilusService
+from ..app.security import verify_password
 
 
 def test_build_engine_service_propagates_redis_url():
@@ -123,6 +124,10 @@ def test_user_management_flow():
     assert created["email"] == "qa.user@example.com"
     assert created["username"] == "qa.user"
     assert created["active"] is True
+
+    stored_profile = service._users[created["user_id"]]
+    assert stored_profile.password_hash.startswith("$argon2")
+    assert verify_password(stored_profile.password_hash, "secure-pass-123")
 
     fetched = service.get_user(created["user_id"])["user"]
     assert fetched["user_id"] == created["user_id"]
