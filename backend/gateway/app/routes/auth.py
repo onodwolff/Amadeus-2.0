@@ -408,6 +408,9 @@ async def create_user(
         role=role,
         is_admin=is_admin,
         email_verified=payload.email_verified,
+        mfa_enabled=False,
+        mfa_secret=None,
+        last_login_at=None,
     )
     db.add(user)
     await db.commit()

@@ -38,6 +38,9 @@ async def test_create_user_as_admin(db_session):
 
     assert resource.email == "new.user@example.com"
     assert resource.is_admin is False
+    assert resource.email_verified is False
+    assert resource.mfa_enabled is False
+    assert resource.last_login_at is None
 
     result = await db_session.execute(select(User).where(User.id == int(resource.id)))
     user = result.scalar_one()
@@ -47,6 +50,9 @@ async def test_create_user_as_admin(db_session):
     assert user.is_admin is False
     assert verify_password(user.password_hash, "S3curePass!")
     assert user.email_verified is False
+    assert user.mfa_enabled is False
+    assert user.mfa_secret is None
+    assert user.last_login_at is None
 
 
 @pytest.mark.asyncio
