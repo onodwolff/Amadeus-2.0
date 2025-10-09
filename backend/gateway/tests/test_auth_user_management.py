@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from backend.gateway.app.routes import auth
 from backend.gateway.app.security import hash_password, verify_password
@@ -109,3 +110,30 @@ async def test_create_user_requires_admin_privileges(db_session):
     with pytest.raises(HTTPException) as exc_info:
         await auth.create_user(payload=payload, current_user=actor, db=db_session)
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_user_admin_role_consistency_enforced(db_session):
+    inconsistent_admin_flag = User(
+        email="member-admin-flag@example.com",
+        username="member-admin-flag",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.MEMBER,
+        is_admin=True,
+    )
+    db_session.add(inconsistent_admin_flag)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+    inconsistent_role = User(
+        email="admin-role@example.com",
+        username="admin-role",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.ADMIN,
+        is_admin=False,
+    )
+    db_session.add(inconsistent_role)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()

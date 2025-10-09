@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -112,6 +113,12 @@ class User(Base):
     """Registered user of the platform."""
 
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "(is_admin AND role = 'ADMIN') OR (NOT is_admin AND role <> 'ADMIN')",
+            name="ck_users_admin_consistency",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(CaseInsensitiveText(), unique=True, nullable=False)
