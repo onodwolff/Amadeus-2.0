@@ -1,11 +1,11 @@
 import { CommonModule } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import {
   ChangeDetectionStrategy,
   Component,
   OnInit,
   WritableSignal,
   computed,
-  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -139,7 +139,7 @@ interface NodeAssignmentView extends NodeAssignmentContext {
 @Component({
   standalone: true,
   selector: 'app-settings-page',
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink],
   templateUrl: './settings.page.html',
   styleUrls: ['./settings.page.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -192,10 +192,6 @@ export class SettingsPage implements OnInit {
 
   readonly activeUser = signal<UserProfile | null>(null);
   readonly authUser = signal<AuthUser | null>(null);
-  readonly workspaceUsers = signal<UserProfile[]>([]);
-  readonly isUsersLoading = signal(false);
-  readonly usersError = signal<string | null>(null);
-
   readonly isEmailDialogOpen = signal(false);
   readonly isPasswordDialogOpen = signal(false);
 
@@ -239,25 +235,6 @@ export class SettingsPage implements OnInit {
   readonly isEditCustomVenue = signal(false);
   readonly venueOptions = computed<ExchangeDescriptor[]>(() => this.computeVenueOptions());
   readonly isAdmin = this.authState.isAdmin;
-
-  private hasLoadedWorkspaceUsers = false;
-
-  constructor() {
-    effect(() => {
-      const isAdmin = this.isAdmin();
-      if (isAdmin) {
-        if (!this.hasLoadedWorkspaceUsers) {
-          this.hasLoadedWorkspaceUsers = true;
-          this.loadWorkspaceUsers();
-        }
-      } else {
-        this.workspaceUsers.set([]);
-        this.isUsersLoading.set(false);
-        this.usersError.set(null);
-        this.hasLoadedWorkspaceUsers = false;
-      }
-    });
-  }
 
   ngOnInit(): void {
     this.fetchKeys();
@@ -385,23 +362,6 @@ export class SettingsPage implements OnInit {
       },
       error: (error) => {
         this.handleError(error, this.emailError, 'Unable to load account profile.');
-      },
-    });
-  }
-
-  private loadWorkspaceUsers(): void {
-    this.isUsersLoading.set(true);
-    this.usersError.set(null);
-    this.usersApi.listUsers().subscribe({
-      next: (response) => {
-        const members = [...(response.users ?? [])];
-        members.sort((a, b) => a.email.localeCompare(b.email));
-        this.workspaceUsers.set(members);
-        this.isUsersLoading.set(false);
-      },
-      error: (error) => {
-        this.handleError(error, this.usersError, 'Unable to load workspace members.');
-        this.isUsersLoading.set(false);
       },
     });
   }

@@ -1,3 +1,19 @@
+@use '@angular/material' as mat;
+
+@include mat.core();
+
+$amadeus-theme: mat.define-theme((
+  color: (
+    theme-type: dark,
+    primary: mat.$cyan-palette,
+    tertiary: mat.$blue-palette,
+  ),
+));
+
+:root {
+  @include mat.all-component-themes($amadeus-theme);
+}
+
 *,
 *::before,
 *::after {
