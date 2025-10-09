@@ -77,36 +77,27 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
-SCHEMA = settings.storage.schema
 VERSION_TABLE = "alembic_version"
 VERSION_TABLE_SCHEMA = "public"
 
 
 def _get_database_url() -> str:
-    url = config.get_main_option("sqlalchemy.url")
-    if url:
-        return url
     return settings.database_url
 
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
 
-    configure_kwargs: dict[str, object] = {
-        "url": _get_database_url(),
-        "target_metadata": target_metadata,
-        "literal_binds": True,
-        "dialect_opts": {"paramstyle": "named"},
-        "compare_type": True,
-        "compare_server_default": True,
-        "version_table": VERSION_TABLE,
-        "version_table_schema": VERSION_TABLE_SCHEMA,
-    }
-
-    if SCHEMA:
-        configure_kwargs["include_schemas"] = True
-
-    context.configure(**configure_kwargs)
+    context.configure(
+        url=_get_database_url(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        compare_type=True,
+        compare_server_default=True,
+        version_table=VERSION_TABLE,
+        version_table_schema=VERSION_TABLE_SCHEMA,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
@@ -128,28 +119,14 @@ def run_migrations_online() -> None:
 
 
 def _run_sync_migrations(sync_conn) -> None:
-    escaped_schema = None
-
-    if SCHEMA:
-        escaped_schema = SCHEMA.replace('"', '""')
-        sync_conn.exec_driver_sql(
-            f'CREATE SCHEMA IF NOT EXISTS "{escaped_schema}"'
-        )
-        sync_conn.exec_driver_sql(f'SET search_path TO "{escaped_schema}"')
-
-    configure_kwargs: dict[str, object] = {
-        "connection": sync_conn,
-        "target_metadata": target_metadata,
-        "compare_type": True,
-        "compare_server_default": True,
-        "version_table": VERSION_TABLE,
-        "version_table_schema": VERSION_TABLE_SCHEMA,
-    }
-
-    if SCHEMA:
-        configure_kwargs["include_schemas"] = True
-
-    context.configure(**configure_kwargs)
+    context.configure(
+        connection=sync_conn,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+        version_table=VERSION_TABLE,
+        version_table_schema=VERSION_TABLE_SCHEMA,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
