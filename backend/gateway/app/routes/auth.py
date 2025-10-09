@@ -19,7 +19,7 @@ from pydantic import (
     FieldValidationInfo,
     field_validator,
 )
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.app.config import settings
@@ -313,12 +313,37 @@ async def _ensure_email_available(
         )
 
 
-async def _ensure_username_available(
-    db: AsyncSession, *, username: str
+async def _ensure_user_identifiers_available(
+    db: AsyncSession, *, email: str, username: str
 ) -> None:
-    stmt = select(User.id).where(func.lower(User.username) == username.lower())
+    normalized_email = email.lower()
+    normalized_username = username.strip().lower()
+
+    stmt = select(User.email, User.username).where(
+        or_(
+            func.lower(User.email) == normalized_email,
+            func.lower(User.username) == normalized_username,
+        )
+    )
     result = await db.execute(stmt)
-    if result.scalars().first():
+    matches = result.all()
+
+    email_conflict = any(
+        (record_email or "").lower() == normalized_email
+        for record_email, _ in matches
+    )
+    username_conflict = any(
+        (record_username or "").lower() == normalized_username
+        for _, record_username in matches
+    )
+
+    if email_conflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already associated with another account.",
+        )
+
+    if username_conflict:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username is already associated with another account.",
@@ -364,8 +389,9 @@ async def create_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
 
     email = _normalize_email(str(payload.email))
-    await _ensure_email_available(db, email=email)
-    await _ensure_username_available(db, username=payload.username)
+    await _ensure_user_identifiers_available(
+        db, email=email, username=payload.username
+    )
 
     is_admin = bool(payload.is_admin)
     role = payload.role
