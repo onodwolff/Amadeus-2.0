@@ -35,7 +35,17 @@ def upgrade() -> None:
         postgresql.CITEXT() if _is_postgres(bind) else sa.String(length=320)
     )
 
-    role_enum = sa.Enum("admin", "member", "viewer", name="user_role")
+    if _is_postgres(bind):
+        role_enum = postgresql.ENUM(
+            "admin",
+            "member",
+            "viewer",
+            name="user_role",
+            create_type=False,
+        )
+        role_enum.create(bind, checkfirst=True)
+    else:
+        role_enum = sa.Enum("admin", "member", "viewer", name="user_role")
 
     op.create_table(
         "users",
@@ -92,9 +102,8 @@ def upgrade() -> None:
     )
 
 def downgrade() -> None:
-    op.drop_table('users')
+    op.drop_table("users")
 
     bind = op.get_bind()
     if _is_postgres(bind):
-        bind.exec_driver_sql("DROP TYPE IF EXISTS user_role")
         bind.exec_driver_sql("DROP EXTENSION IF EXISTS citext")
