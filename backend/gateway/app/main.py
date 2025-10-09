@@ -62,6 +62,7 @@ from .nautilus_service import (
 from .nautilus_engine_service import EngineConfigError, EngineMode, EngineNodeHandle
 from .logging import bind_contextvars, clear_contextvars, get_logger
 from .routes.auth import get_current_user, router as auth_router
+from .routes.admin_users import router as admin_users_router
 from .routes.data import router as data_router
 from .routes.keys import router as keys_router
 from .routes.orders import router as orders_router
@@ -807,6 +808,7 @@ app.include_router(risk_router, dependencies=_ROUTER_AUTH_DEPENDENCIES)
 app.include_router(data_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
 app.include_router(keys_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
 app.include_router(orders_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
+app.include_router(admin_users_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
 app.include_router(users_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
 app.include_router(strategies_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
 
