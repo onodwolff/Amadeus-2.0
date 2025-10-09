@@ -77,6 +77,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+SCHEMA = settings.storage.schema
+VERSION_TABLE = "alembic_version"
 
 
 def _get_database_url() -> str:
@@ -89,16 +91,21 @@ def _get_database_url() -> str:
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
 
-    context.configure(
-        url=_get_database_url(),
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-        compare_type=True,
-        version_table="alembic_version",
-        version_table_schema="public",   # <— важно
-        compare_server_default=True,
-    )
+    configure_kwargs: dict[str, object] = {
+        "url": _get_database_url(),
+        "target_metadata": target_metadata,
+        "literal_binds": True,
+        "dialect_opts": {"paramstyle": "named"},
+        "compare_type": True,
+        "compare_server_default": True,
+        "version_table": VERSION_TABLE,
+    }
+
+    if SCHEMA:
+        configure_kwargs["version_table_schema"] = SCHEMA
+        configure_kwargs["include_schemas"] = True
+
+    context.configure(**configure_kwargs)
 
     with context.begin_transaction():
         context.run_migrations()
@@ -112,17 +119,38 @@ def run_migrations_online() -> None:
 
     async def _run_async_migrations() -> None:
         async with connectable.connect() as connection:
-            await connection.run_sync(
-                lambda sync_conn: context.configure(
-                    connection=sync_conn,
-                    target_metadata=target_metadata,
-                    compare_type=True,
-                )
-            )
-            await connection.run_sync(lambda sync_conn: context.run_migrations())
+            await connection.run_sync(_run_sync_migrations)
         await connectable.dispose()
 
     asyncio.run(_run_async_migrations())
+
+
+def _run_sync_migrations(sync_conn) -> None:
+    escaped_schema = None
+
+    if SCHEMA:
+        escaped_schema = SCHEMA.replace('"', '""')
+        sync_conn.exec_driver_sql(
+            f'CREATE SCHEMA IF NOT EXISTS "{escaped_schema}"'
+        )
+        sync_conn.exec_driver_sql(f'SET search_path TO "{escaped_schema}"')
+
+    configure_kwargs: dict[str, object] = {
+        "connection": sync_conn,
+        "target_metadata": target_metadata,
+        "compare_type": True,
+        "compare_server_default": True,
+        "version_table": VERSION_TABLE,
+    }
+
+    if SCHEMA:
+        configure_kwargs["version_table_schema"] = SCHEMA
+        configure_kwargs["include_schemas"] = True
+
+    context.configure(**configure_kwargs)
+
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 if context.is_offline_mode():

@@ -5,6 +5,11 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+try:  # pragma: no cover - support running from backend/
+    from gateway.config import settings
+except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+    from backend.gateway.config import settings  # type: ignore
+
 
 revision = "0001_initial"
 down_revision = None
@@ -12,13 +17,23 @@ branch_labels = None
 depends_on = None
 
 
-_user_role = sa.Enum("admin", "member", "viewer", name="user_role")
-_node_mode = sa.Enum("backtest", "sandbox", "live", name="node_mode")
-_node_status = sa.Enum("created", "running", "stopped", "error", name="node_status")
-_config_source = sa.Enum("upload", "template", "ui", name="config_source")
-_config_format = sa.Enum("yaml", "json", name="config_format")
-_position_mode = sa.Enum("net", "hedge", name="position_mode")
-_order_status = sa.Enum(
+SCHEMA = settings.storage.schema
+
+
+def _enum(name: str, *values: str) -> sa.Enum:
+    enum = sa.Enum(*values, name=name, schema=SCHEMA)
+    enum.create_type = False
+    return enum
+
+
+_user_role = _enum("user_role", "admin", "member", "viewer")
+_node_mode = _enum("node_mode", "backtest", "sandbox", "live")
+_node_status = _enum("node_status", "created", "running", "stopped", "error")
+_config_source = _enum("config_source", "upload", "template", "ui")
+_config_format = _enum("config_format", "yaml", "json")
+_position_mode = _enum("position_mode", "net", "hedge")
+_order_status = _enum(
+    "order_status",
     "new",
     "pending",
     "partially_filled",
@@ -27,19 +42,10 @@ _order_status = sa.Enum(
     "rejected",
     "expired",
     "failed",
-    name="order_status",
 )
 
 
 def upgrade() -> None:
-    _user_role.create(op.get_bind(), checkfirst=True)
-    _node_mode.create(op.get_bind(), checkfirst=True)
-    _node_status.create(op.get_bind(), checkfirst=True)
-    _config_source.create(op.get_bind(), checkfirst=True)
-    _config_format.create(op.get_bind(), checkfirst=True)
-    _position_mode.create(op.get_bind(), checkfirst=True)
-    _order_status.create(op.get_bind(), checkfirst=True)
-
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),

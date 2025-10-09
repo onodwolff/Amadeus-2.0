@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import (
     AliasChoices,
     BaseModel,
+    ConfigDict,
     EmailStr,
     Field,
     TypeAdapter,
@@ -14,6 +15,11 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:  # pragma: no cover - support running from backend/
+    from backend.gateway.db.base import apply_schema_to_metadata
+except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+    from gateway.db.base import apply_schema_to_metadata  # type: ignore
 
 
 _ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -110,10 +116,18 @@ class StorageSettings(BaseModel):
         default="postgresql+asyncpg://amadeus:amadeus@localhost:5432/amadeus",
         validation_alias=AliasChoices("DATABASE_URL", "STORAGE__DATABASE_URL"),
     )
+    schema_: str = Field(
+        default="public",
+        alias="schema",
+        validation_alias=AliasChoices("DATABASE_SCHEMA", "STORAGE__DATABASE_SCHEMA"),
+        serialization_alias="schema",
+    )
     redis_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("REDIS_URL", "STORAGE__REDIS_URL"),
     )
+
+    model_config = ConfigDict(populate_by_name=True, protected_namespaces=())
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -127,6 +141,22 @@ class StorageSettings(BaseModel):
         if not url:
             raise ValueError("DATABASE_URL must be a non-empty string")
         return url
+
+    @field_validator("schema_", mode="before")
+    @classmethod
+    def _normalise_schema(cls, value: str | None) -> str:
+        if value is None:
+            return "public"
+
+        schema = value.strip()
+        if not schema:
+            raise ValueError("DATABASE_SCHEMA must be a non-empty string")
+
+        return schema
+
+    @property
+    def schema(self) -> str:
+        return self.schema_
 
 
 class SecuritySettings(BaseModel):
@@ -188,6 +218,10 @@ class Settings(BaseSettings):
         return self.storage.redis_url
 
     @property
+    def database_schema(self) -> str:
+        return self.storage.schema
+
+    @property
     def default_engine_mode(self) -> str:
         return self.engine.default_mode
 
@@ -201,6 +235,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+apply_schema_to_metadata(settings.storage.schema)
 
 __all__ = [
     "AuthSettings",
