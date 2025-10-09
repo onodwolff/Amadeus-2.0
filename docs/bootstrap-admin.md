@@ -28,6 +28,24 @@ When the gateway process starts, it calls `_ensure_admin_user()` during applicat
 
 If the account already exists, the email, password hash, and admin flags are refreshed instead of creating a duplicate user.
 
+## Why the routine only runs once
+
+The `_ensure_admin_user()` hook executes during application startup and reads the administrator credentials exclusively from
+environment variables. When the database is empty the first boot creates the user; subsequent boots simply find the existing
+record and update the password hash if the environment variables are still present. In other words, only someone with access
+to the deployment environment can trigger the bootstrap. Regular UI or API users cannot invoke the routine again, which makes
+the initial administrator creation effectively a one-time action.
+
+You can remove the variables after the first boot if you prefer. Leaving them in place is also safe—they will only rotate the
+password on each deploy, which can be useful for a controlled reset.
+
+## No default users without bootstrap
+
+Until the bootstrap routine runs, the database contains no users at all. Requests to the settings endpoints (or any other
+protected resource) return the `"No user account configured"` error, confirming that the system starts in a locked-down state.
+Defining the environment variables and running the migrations ensures the administrator account exists before anyone interacts
+with the application.
+
 ## Result
 
 With the variables defined, deploying the stack automatically produces a single administrator account. Removing the variables
