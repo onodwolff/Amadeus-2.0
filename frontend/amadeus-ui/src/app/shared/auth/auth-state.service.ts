@@ -1,11 +1,11 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 
-import { AuthApi } from '../../api/clients/auth.api';
 import { AuthUser } from '../../api/models';
+import { AuthService } from '../../auth/auth.service';
 
 @Injectable({ providedIn: 'root' })
 export class AuthStateService {
-  private readonly authApi = inject(AuthApi);
+  private readonly auth = inject(AuthService);
 
   private readonly currentUserSignal = signal<AuthUser | null>(null);
   private readonly isInitializedSignal = signal(false);
@@ -16,38 +16,54 @@ export class AuthStateService {
   readonly isInitialized = this.isInitializedSignal.asReadonly();
   readonly isLoading = this.isLoadingSignal.asReadonly();
 
-  initialize(): void {
+  constructor() {
+    effect(
+      () => {
+        const user = this.auth.currentUser();
+        this.currentUserSignal.set(user);
+      },
+      { allowSignalWrites: true },
+    );
+
+    effect(
+      () => {
+        const bootstrapped = this.auth.isBootstrapped();
+        if (bootstrapped) {
+          this.isInitializedSignal.set(true);
+        } else if (!this.isLoadingSignal()) {
+          this.isInitializedSignal.set(false);
+        }
+      },
+      { allowSignalWrites: true },
+    );
+  }
+
+  initialize(): Promise<void> | void {
     if (this.isInitializedSignal() || this.isLoadingSignal()) {
       return;
     }
 
     this.isLoadingSignal.set(true);
-    this.authApi.getCurrentUser().subscribe({
-      next: (user) => {
-        this.currentUserSignal.set(user);
+    return this.auth
+      .bootstrapMe()
+      .finally(() => {
         this.isInitializedSignal.set(true);
         this.isLoadingSignal.set(false);
-      },
-      error: (error) => {
-        const status = (error as { status?: number })?.status ?? null;
-        if (status !== 401) {
-          console.error('Unable to load current user.', error);
-        }
-        this.currentUserSignal.set(null);
-        this.isInitializedSignal.set(true);
-        this.isLoadingSignal.set(false);
-      },
-    });
+      });
   }
 
   setCurrentUser(user: AuthUser | null): void {
-    this.currentUserSignal.set(user);
+    this.auth.setCurrentUser(user);
     this.isInitializedSignal.set(true);
   }
 
   clear(): void {
-    this.currentUserSignal.set(null);
     this.isInitializedSignal.set(false);
     this.isLoadingSignal.set(false);
+  }
+
+  logout(): void {
+    this.auth.logout();
+    this.clear();
   }
 }

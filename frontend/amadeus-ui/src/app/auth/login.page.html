@@ -1,0 +1,47 @@
+<div class="login-page">
+  <form class="login-form" [formGroup]="form" (ngSubmit)="submit()">
+    <h1 class="login-form__title">Sign in</h1>
+
+    <div class="login-form__field">
+      <label for="email">Email</label>
+      <input
+        id="email"
+        type="email"
+        formControlName="email"
+        autocomplete="email"
+        [class.login-form__input--invalid]="emailControl.touched && emailControl.invalid"
+        placeholder="you@example.com"
+      />
+      <p class="login-form__hint" *ngIf="emailControl.touched && emailControl.hasError('required')">
+        Email is required.
+      </p>
+      <p class="login-form__hint" *ngIf="emailControl.touched && emailControl.hasError('email')">
+        Enter a valid email address.
+      </p>
+    </div>
+
+    <div class="login-form__field">
+      <label for="password">Password</label>
+      <input
+        id="password"
+        type="password"
+        formControlName="password"
+        autocomplete="current-password"
+        [class.login-form__input--invalid]="passwordControl.touched && passwordControl.invalid"
+        placeholder="••••••••"
+      />
+      <p class="login-form__hint" *ngIf="passwordControl.touched && passwordControl.hasError('required')">
+        Password is required.
+      </p>
+    </div>
+
+    <div class="login-form__alert" *ngIf="error()">{{ error() }}</div>
+
+    <button type="submit" class="login-form__submit" [disabled]="isSubmitting()">
+      <span *ngIf="!isSubmitting(); else loading">Sign in</span>
+    </button>
+    <ng-template #loading>
+      <span>Signing in…</span>
+    </ng-template>
+  </form>
+</div>
