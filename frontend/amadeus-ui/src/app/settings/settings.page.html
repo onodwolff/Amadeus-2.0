@@ -8,6 +8,10 @@
         Nautilus Trader.
       </p>
     </div>
+    <div class="settings-page__chip" *ngIf="user() as user">
+      <span class="settings-page__chip-email">{{ user.email }}</span>
+      <span class="settings-page__chip-badge" *ngIf="isAdmin">Admin</span>
+    </div>
   </header>
 
   <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
@@ -78,7 +82,7 @@
       </p>
     </article>
 
-    <article class="settings-card" *ngIf="isAdmin()">
+    <article class="settings-card" *ngIf="isAdmin">
       <header class="settings-card__header">
         <div>
           <h2 class="settings-card__title">Workspace members</h2>
