@@ -79,6 +79,8 @@ if settings.auth.enabled:
 else:
     _AUTH_DEPENDENCIES: list[Any] = []
 
+_ROUTER_AUTH_DEPENDENCIES = _AUTH_DEPENDENCIES or None
+
 
 async def _anonymous_user() -> DbUser | None:
     """Return a sentinel user value when authentication is disabled."""
@@ -741,12 +743,12 @@ async def _apply_launch_adapters(
         ]
 app = FastAPI(title="Amadeus Gateway")
 app.include_router(auth_router, prefix="/api")
-app.include_router(risk_router)
-app.include_router(data_router, prefix="/api")
-app.include_router(keys_router, prefix="/api")
-app.include_router(orders_router, prefix="/api")
-app.include_router(users_router, prefix="/api")
-app.include_router(strategies_router, prefix="/api")
+app.include_router(risk_router, dependencies=_ROUTER_AUTH_DEPENDENCIES)
+app.include_router(data_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
+app.include_router(keys_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
+app.include_router(orders_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
+app.include_router(users_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
+app.include_router(strategies_router, prefix="/api", dependencies=_ROUTER_AUTH_DEPENDENCIES)
 
 
 @app.on_event("startup")
