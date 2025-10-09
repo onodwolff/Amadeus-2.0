@@ -28,6 +28,60 @@
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.nodes-page__launch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.nodes-page__launch-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.nodes-page__launch-control {
+  position: relative;
+}
+
+.nodes-page__launch-control::after {
+  content: '\25BE';
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 0.75rem;
+}
+
+.nodes-page__launch-select {
+  appearance: none;
+  width: 100%;
+  padding: 10px 38px 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(17, 24, 39, 0.8);
+  color: #f9fafb;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.nodes-page__launch-select:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.nodes-page__launch-select:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .btn {

@@ -50,6 +50,7 @@ export class NodesPage implements OnInit, OnDestroy {
   readonly stoppingNodeId = signal<string | null>(null);
   readonly restartingNodeId = signal<string | null>(null);
   readonly deletingNodeId = signal<string | null>(null);
+  readonly launchMode = signal<NodeMode>('backtest');
 
   private readonly nodesApi = inject(NodesApi);
   private readonly systemApi = inject(SystemApi);
@@ -119,6 +120,18 @@ export class NodesPage implements OnInit, OnDestroy {
 
   metric(node: NodeHandle, key: keyof NodeMetrics): number | null {
     return this.resolveMetric(node, key);
+  }
+
+  setLaunchMode(mode: NodeMode): void {
+    this.launchMode.set(mode);
+  }
+
+  onLaunchModeChange(event: Event): void {
+    const target = event.target as HTMLSelectElement | null;
+    if (!target) {
+      return;
+    }
+    this.setLaunchMode(target.value as NodeMode);
   }
 
   openWizard(dialog: NodeLaunchDialogComponent, nodeType: NodeMode): void {
