@@ -7,19 +7,33 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import ProgrammingError
 
 
+def _has_citext_extension(bind) -> bool:
+    if not _is_postgres(bind):
+        return False
+
+    result = bind.exec_driver_sql(
+        "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'citext')"
+    )
+    return bool(result.scalar())
+
+
 def _is_postgres(bind) -> bool:
     return bind.dialect.name == "postgresql"
 
 
-def _ensure_citext_extension(bind) -> None:
+def _ensure_citext_extension(bind) -> bool:
     if not _is_postgres(bind):
-        return
+        return False
+
+    if _has_citext_extension(bind):
+        return True
 
     try:
         bind.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS citext")
     except ProgrammingError as exc:  # pragma: no cover - depends on database privs
         if getattr(getattr(exc, "orig", None), "pgcode", None) != "42501":
             raise
+    return _has_citext_extension(bind)
 
 # revision identifiers, used by Alembic.
 revision = "0004_auth_users"
@@ -28,10 +42,9 @@ branch_labels = None
 depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
-    is_postgres = _is_postgres(bind)
-    _ensure_citext_extension(bind)
+    citext_available = _ensure_citext_extension(bind)
 
-    if is_postgres:
+    if citext_available:
         op.alter_column(
             "users",
             "email",
@@ -58,7 +71,9 @@ def upgrade() -> None:
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
     )
 
-    new_email_type = postgresql.CITEXT() if is_postgres else sa.String(length=320)
+    new_email_type = (
+        postgresql.CITEXT() if citext_available else sa.String(length=320)
+    )
     op.create_table(
         "auth_sessions",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
@@ -94,7 +109,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    is_postgres = _is_postgres(bind)
+    citext_available = _has_citext_extension(bind)
 
     op.drop_index("ix_email_change_requests_user_id", table_name="email_change_requests")
     op.drop_table("email_change_requests")
@@ -109,7 +124,7 @@ def downgrade() -> None:
     op.drop_column("users", "email_verified")
     op.drop_column("users", "is_admin")
 
-    if is_postgres:
+    if citext_available:
         op.alter_column(
             "users",
             "email",
@@ -118,5 +133,5 @@ def downgrade() -> None:
             existing_nullable=False,
         )
 
-    if is_postgres:
+    if _is_postgres(bind):
         bind.exec_driver_sql("DROP EXTENSION IF EXISTS citext")
