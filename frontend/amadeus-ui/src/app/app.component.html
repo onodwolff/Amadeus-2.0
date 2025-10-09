@@ -14,7 +14,7 @@
 
     <nav class="app-sidebar__nav" aria-label="Main navigation">
       <a
-        *ngFor="let link of navLinks"
+        *ngFor="let link of navLinks()"
         [routerLink]="link.route"
         routerLinkActive="active"
         class="app-sidebar__link"
