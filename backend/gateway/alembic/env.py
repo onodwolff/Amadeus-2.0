@@ -79,6 +79,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 SCHEMA = settings.storage.schema
 VERSION_TABLE = "alembic_version"
+VERSION_TABLE_SCHEMA = "public"
 
 
 def _get_database_url() -> str:
@@ -99,10 +100,10 @@ def run_migrations_offline() -> None:
         "compare_type": True,
         "compare_server_default": True,
         "version_table": VERSION_TABLE,
+        "version_table_schema": VERSION_TABLE_SCHEMA,
     }
 
     if SCHEMA:
-        configure_kwargs["version_table_schema"] = SCHEMA
         configure_kwargs["include_schemas"] = True
 
     context.configure(**configure_kwargs)
@@ -119,6 +120,7 @@ def run_migrations_online() -> None:
 
     async def _run_async_migrations() -> None:
         async with connectable.connect() as connection:
+            await connection.exec_driver_sql("SET search_path TO public")
             await connection.run_sync(_run_sync_migrations)
         await connectable.dispose()
 
@@ -141,10 +143,10 @@ def _run_sync_migrations(sync_conn) -> None:
         "compare_type": True,
         "compare_server_default": True,
         "version_table": VERSION_TABLE,
+        "version_table_schema": VERSION_TABLE_SCHEMA,
     }
 
     if SCHEMA:
-        configure_kwargs["version_table_schema"] = SCHEMA
         configure_kwargs["include_schemas"] = True
 
     context.configure(**configure_kwargs)
