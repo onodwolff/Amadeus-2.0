@@ -95,6 +95,9 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        version_table="alembic_version",
+        version_table_schema="public",   # <— важно
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
