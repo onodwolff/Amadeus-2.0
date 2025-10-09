@@ -172,6 +172,12 @@ class User(Base):
         "EmailChangeRequest", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
 
+    def __init__(self, **kwargs):
+        role = kwargs.get("role")
+        if "is_admin" not in kwargs and role == UserRole.ADMIN:
+            kwargs["is_admin"] = True
+        super().__init__(**kwargs)
+
     @property
     def pwd_hash(self) -> str:  # pragma: no cover - compatibility shim
         return self.password_hash
