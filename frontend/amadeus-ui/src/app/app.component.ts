@@ -1,7 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { NotificationCenterComponent } from './shared/notifications/notification-center.component';
+import { AuthStateService } from './shared/auth/auth-state.service';
 
 type NavLink = {
   label: string;
@@ -18,6 +19,8 @@ type NavLink = {
   styleUrls: ['./app.component.scss'],
 })
 export class AppComponent {
+  private readonly authState = inject(AuthStateService);
+
   protected sidebarOpen = false;
 
   protected navLinks: NavLink[] = [
@@ -43,5 +46,9 @@ export class AppComponent {
 
   protected closeSidebar(): void {
     this.sidebarOpen = false;
+  }
+
+  constructor() {
+    this.authState.initialize();
   }
 }

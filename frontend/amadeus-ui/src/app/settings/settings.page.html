@@ -78,7 +78,7 @@
       </p>
     </article>
 
-    <article class="settings-card">
+    <article class="settings-card" *ngIf="isAdmin()">
       <header class="settings-card__header">
         <div>
           <h2 class="settings-card__title">Workspace members</h2>

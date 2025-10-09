@@ -5,6 +5,7 @@ import {
   OnInit,
   WritableSignal,
   computed,
+  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -38,6 +39,7 @@ import {
 } from '../api/models';
 import { NotificationService } from '../shared/notifications/notification.service';
 import { encryptSecret, hashPassphrase } from './secret-crypto';
+import { AuthStateService } from '../shared/auth/auth-state.service';
 
 type KeyCreateFormGroup = FormGroup<{
   label: FormControl<string>;
@@ -151,6 +153,7 @@ export class SettingsPage implements OnInit {
   private readonly integrationsApi = inject(IntegrationsApi);
   private readonly fb = inject(FormBuilder);
   private readonly notifications = inject(NotificationService);
+  private readonly authState = inject(AuthStateService);
 
   readonly keys = signal<ApiKey[]>([]);
   readonly isLoading = signal(false);
@@ -224,7 +227,7 @@ export class SettingsPage implements OnInit {
   readonly twoFactorForm: TwoFactorFormGroup = this.createTwoFactorForm();
   readonly disableTwoFactorForm: PasswordConfirmFormGroup = this.createPasswordConfirmForm();
   readonly logoutForm: PasswordConfirmFormGroup = this.createPasswordConfirmForm();
-  
+
   private readonly healthAlertsDisplayed = new Set<string>();
 
   private readonly rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
@@ -235,13 +238,33 @@ export class SettingsPage implements OnInit {
   readonly isCreateCustomVenue = signal(false);
   readonly isEditCustomVenue = signal(false);
   readonly venueOptions = computed<ExchangeDescriptor[]>(() => this.computeVenueOptions());
+  readonly isAdmin = this.authState.isAdmin;
+
+  private hasLoadedWorkspaceUsers = false;
+
+  constructor() {
+    effect(() => {
+      const isAdmin = this.isAdmin();
+      if (isAdmin) {
+        if (!this.hasLoadedWorkspaceUsers) {
+          this.hasLoadedWorkspaceUsers = true;
+          this.loadWorkspaceUsers();
+        }
+      } else {
+        this.workspaceUsers.set([]);
+        this.isUsersLoading.set(false);
+        this.usersError.set(null);
+        this.hasLoadedWorkspaceUsers = false;
+      }
+    });
+  }
 
   ngOnInit(): void {
     this.fetchKeys();
     void this.loadAssignmentContext();
     this.loadExchangeCatalog();
     this.loadAccountProfile();
-    this.loadWorkspaceUsers();
+    this.authState.initialize();
     this.bootstrapTwoFactorState();
   }
 
@@ -1695,6 +1718,7 @@ export class SettingsPage implements OnInit {
     this.authApi.getCurrentUser().subscribe({
       next: (user) => {
         this.authUser.set(user);
+        this.authState.setCurrentUser(user);
         this.isTwoFactorEnabled.set(user.mfaEnabled);
         if (user.mfaEnabled) {
           this.twoFactorSecret.set(null);
