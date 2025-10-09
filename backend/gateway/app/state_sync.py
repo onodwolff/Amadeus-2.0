@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, String, Text, select, update
+from sqlalchemy import Boolean, DateTime, Float, String, Text, select, text, update
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -31,6 +32,17 @@ except ModuleNotFoundError:  # pragma: no cover - fallback import
 from .nautilus_engine_service import EngineEventBus
 
 LOGGER = logging.getLogger("gateway.state_sync")
+
+
+def _default_database_schema() -> str:
+    """Resolve the configured database schema lazily."""
+
+    try:  # pragma: no cover - support running from backend/ directory
+        from .config import settings as app_settings
+    except ModuleNotFoundError:  # pragma: no cover - fallback import
+        from backend.gateway.app.config import settings as app_settings
+
+    return app_settings.database_schema
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -84,7 +96,6 @@ def _json_default(value: Any) -> Any:
 
 class Base(DeclarativeBase):
     """Declarative base used for engine state tables."""
-
 
 class EngineOrder(Base):
     """Snapshot of an order emitted by the engine."""
@@ -207,10 +218,30 @@ class EngineStateSync:
         bus: EngineEventBus,
         database_url: str,
         *,
+        database_schema: str | None = None,
         redis_url: str | None = None,
     ) -> None:
         self._bus = bus
-        self._engine: AsyncEngine = create_async_engine(database_url, future=True)
+        url = make_url(database_url)
+        self._schema: str | None = None
+
+        connect_args: dict[str, Any] = {}
+        if url.get_backend_name() == "postgresql":
+            schema = database_schema
+            if schema is None:
+                schema = _default_database_schema()
+            self._schema = schema
+            if schema:
+                connect_args["server_settings"] = {"search_path": schema}
+
+        engine_kwargs: dict[str, Any] = {"future": True}
+        if connect_args:
+            engine_kwargs["connect_args"] = connect_args
+
+        self._engine: AsyncEngine = create_async_engine(
+            database_url,
+            **engine_kwargs,
+        )
         self._session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
             self._engine,
             expire_on_commit=False,
@@ -233,6 +264,13 @@ class EngineStateSync:
         async def bootstrap() -> None:
             try:
                 async with self._engine.begin() as connection:
+                    schema = self._schema
+                    if schema:
+                        escaped_schema = schema.replace('"', '""')
+                        await connection.execute(
+                            text(f'CREATE SCHEMA IF NOT EXISTS "{escaped_schema}"')
+                        )
+                        await connection.execute(text(f'SET search_path TO "{escaped_schema}"'))
                     await connection.run_sync(Base.metadata.create_all)
             except Exception as exc:  # pragma: no cover - defensive guard
                 LOGGER.warning("state_sync_initialisation_failed", exc_info=exc)
