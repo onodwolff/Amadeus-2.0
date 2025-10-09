@@ -2,7 +2,7 @@
 
 export interface UserProfile {
   id: string;
-  name: string;
+  name: string | null;
   email: string;
   role: 'admin' | 'member' | 'viewer';
   active: boolean;
@@ -21,7 +21,7 @@ export interface UserResponse {
 export interface UserCreateRequest {
   email: string;
   password: string;
-  name?: string;
+  name?: string | null;
   role: 'admin' | 'member' | 'viewer';
 }
 
@@ -30,7 +30,7 @@ export interface AccountResponse {
 }
 
 export interface AccountUpdateRequest {
-  name?: string;
+  name?: string | null;
   email?: string;
 }
 

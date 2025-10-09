@@ -78,13 +78,16 @@ export class AdminUsersPage {
 
       return (
         item.email.toLowerCase().includes(term) ||
-        (item.name ?? '').toLowerCase().includes(term) ||
+        this.normalizeName(item.name).includes(term) ||
         item.role.toLowerCase().includes(term) ||
         item.id.toLowerCase().includes(term)
       );
     };
 
     this.dataSource.sortingDataAccessor = (item, property) => {
+      if (property === 'name') {
+        return this.normalizeName(item.name);
+      }
       if (property === 'created_at' || property === 'updated_at') {
         return new Date(item[property] ?? '').getTime();
       }
@@ -154,6 +157,15 @@ export class AdminUsersPage {
     return item.id;
   }
 
+  formatUserName(user: UserProfile | null | undefined): string {
+    if (!user) {
+      return '—';
+    }
+
+    const trimmed = user.name?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : '—';
+  }
+
   private resolveErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof HttpErrorResponse) {
       const apiMessage = (error.error as { message?: string } | null)?.message;
@@ -163,5 +175,9 @@ export class AdminUsersPage {
     }
 
     return fallback;
+  }
+
+  private normalizeName(value: string | null | undefined): string {
+    return value?.trim().toLowerCase() ?? '';
   }
 }
