@@ -78,6 +78,18 @@ async def test_create_user_rejects_duplicate_email_or_username(db_session):
         await auth.create_user(payload=duplicate_email, current_user=admin, db=db_session)
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
 
+    duplicate_email_case = auth.UserCreatePayload(
+        email="Existing@Example.com",
+        username="unique-case",
+        password="Password123",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.create_user(
+            payload=duplicate_email_case, current_user=admin, db=db_session
+        )
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+
     duplicate_username = auth.UserCreatePayload(
         email="unique@example.com",
         username="existing",
@@ -86,6 +98,18 @@ async def test_create_user_rejects_duplicate_email_or_username(db_session):
 
     with pytest.raises(HTTPException) as exc_info:
         await auth.create_user(payload=duplicate_username, current_user=admin, db=db_session)
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+
+    duplicate_username_case = auth.UserCreatePayload(
+        email="unique-case@example.com",
+        username="Existing",
+        password="Password123",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.create_user(
+            payload=duplicate_username_case, current_user=admin, db=db_session
+        )
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
 
 
