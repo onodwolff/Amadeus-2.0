@@ -145,6 +145,8 @@ export class RiskPage implements OnInit {
   readonly loadError = signal<string | null>(null);
   readonly riskUsage = signal<RiskLimit[]>([]);
   readonly drawdownUsage = signal<RiskLimit[]>([]);
+  readonly advancedControlsExpanded = signal(false);
+  readonly advancedControlsPanelId = 'risk-controls-advanced';
 
   readonly moduleStatusOptions = RiskPage.allowedStatuses.map((value) => ({
     value,
@@ -222,6 +224,10 @@ export class RiskPage implements OnInit {
     return control.hasError(error) && (control.dirty || control.touched);
   }
 
+  toggleAdvancedControls(): void {
+    this.advancedControlsExpanded.update((expanded) => !expanded);
+  }
+
   addPositionLimit(): void {
     const group = this.createPositionLimitGroup();
     if (!this.positionLimitsGroup.controls.enabled.value) {
@@ -264,6 +270,9 @@ export class RiskPage implements OnInit {
 
   onSubmit(): void {
     this.markAllAsTouched(this.form);
+    if (this.controlsGroup.invalid && !this.advancedControlsExpanded()) {
+      this.advancedControlsExpanded.set(true);
+    }
     if (this.form.invalid) {
       this.notifications.warning('Resolve validation issues before saving.', 'Risk controls');
       return;

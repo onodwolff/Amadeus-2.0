@@ -295,6 +295,70 @@
   gap: 1rem;
 }
 
+.risk-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.risk-advanced--open {
+  gap: 0.75rem;
+}
+
+.risk-advanced__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.risk-advanced__toggle:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+.risk-advanced__chevron {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.25s ease;
+}
+
+.risk-advanced__content {
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  padding: 0;
+  background: rgba(248, 250, 252, 0.85);
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-0.25rem);
+  transition: max-height 0.3s ease, opacity 0.2s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+
+.risk-advanced--open .risk-advanced__content {
+  max-height: 1000px;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  border-color: #cbd5f5;
+  padding: 1rem;
+}
+
+.risk-advanced--open .risk-advanced__chevron {
+  transform: rotate(-135deg);
+}
+
 .risk-controls-grid__fieldset {
   border: 1px solid #cbd5f5;
   border-radius: 0.75rem;

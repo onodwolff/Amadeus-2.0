@@ -241,32 +241,50 @@
               <p class="risk-module__subtitle">Configure breach escalation and automated halts.</p>
             </div>
           </header>
-          <div class="risk-module__body risk-controls-grid">
-            <label class="module-toggle module-toggle--inline">
-              <input type="checkbox" formControlName="halt_on_breach" />
-              <span>Halt node automatically on critical breach</span>
-            </label>
-            <label class="module-toggle module-toggle--inline">
-              <input type="checkbox" formControlName="notify_on_recovery" />
-              <span>Send notification when the limit recovers</span>
-            </label>
-            <fieldset class="risk-controls-grid__fieldset" formGroupName="escalation">
-              <legend>Escalation thresholds</legend>
-              <div class="risk-controls-grid__inputs">
-                <label>
-                  Warn after
-                  <input type="number" formControlName="warn_after" min="1" step="1" />
+          <div class="risk-module__body">
+            <div class="risk-advanced" [class.risk-advanced--open]="advancedControlsExpanded()">
+              <button
+                type="button"
+                class="risk-advanced__toggle"
+                (click)="toggleAdvancedControls()"
+                [attr.aria-expanded]="advancedControlsExpanded()"
+                [attr.aria-controls]="advancedControlsPanelId"
+              >
+                Advanced
+                <span class="risk-advanced__chevron" aria-hidden="true"></span>
+              </button>
+              <div
+                class="risk-advanced__content risk-controls-grid"
+                [attr.id]="advancedControlsPanelId"
+                [attr.aria-hidden]="!advancedControlsExpanded()"
+              >
+                <label class="module-toggle module-toggle--inline">
+                  <input type="checkbox" formControlName="halt_on_breach" />
+                  <span>Halt node automatically on critical breach</span>
                 </label>
-                <label>
-                  Halt after
-                  <input type="number" formControlName="halt_after" min="1" step="1" />
+                <label class="module-toggle module-toggle--inline">
+                  <input type="checkbox" formControlName="notify_on_recovery" />
+                  <span>Send notification when the limit recovers</span>
                 </label>
-                <label>
-                  Reset window (minutes)
-                  <input type="number" formControlName="reset_minutes" min="1" step="1" />
-                </label>
+                <fieldset class="risk-controls-grid__fieldset" formGroupName="escalation">
+                  <legend>Escalation thresholds</legend>
+                  <div class="risk-controls-grid__inputs">
+                    <label>
+                      Warn after
+                      <input type="number" formControlName="warn_after" min="1" step="1" />
+                    </label>
+                    <label>
+                      Halt after
+                      <input type="number" formControlName="halt_after" min="1" step="1" />
+                    </label>
+                    <label>
+                      Reset window (minutes)
+                      <input type="number" formControlName="reset_minutes" min="1" step="1" />
+                    </label>
+                  </div>
+                </fieldset>
               </div>
-            </fieldset>
+            </div>
           </div>
         </section>
 
