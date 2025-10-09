@@ -10,6 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import {
+  AbstractControl,
   FormBuilder,
   FormControl,
   FormGroup,
@@ -309,6 +310,14 @@ export class SettingsPage implements OnInit {
 
   toggleEditAdvanced(): void {
     this.isEditAdvancedOpen.update((current) => !current);
+  }
+
+  showControlError(control: AbstractControl | null): boolean {
+    return !!control && control.invalid && (control.touched || control.dirty);
+  }
+
+  fieldHasError(control: AbstractControl | null, errorCode: string): boolean {
+    return !!control && control.hasError(errorCode) && (control.touched || control.dirty);
   }
 
   private loadExchangeCatalog(): void {

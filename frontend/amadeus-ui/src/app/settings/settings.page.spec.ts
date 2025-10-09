@@ -187,4 +187,42 @@ describe('SettingsPage advanced settings', () => {
     expect(advanced?.querySelector('[formControlName="label"]')).not.toBeNull();
     expect(advanced?.querySelector('[formControlName="passphraseHint"]')).not.toBeNull();
   });
+
+  it('should surface helper guidance for credential secrets and passphrases', () => {
+    component.openCreateDialog();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const createPanel = host.querySelector('[aria-labelledby="createKeyTitle"]') as HTMLElement | null;
+    expect(createPanel).withContext('create dialog should be present').not.toBeNull();
+
+    const secretHelp = createPanel?.querySelector('#create-api-secret-help');
+    expect(secretHelp?.textContent ?? '').toContain('Paste the exact secret string issued by your exchange');
+
+    const passphraseHelp = createPanel?.querySelector('#create-passphrase-help');
+    expect(passphraseHelp?.textContent ?? '').toContain('Use a unique passphrase with eight or more characters');
+  });
+
+  it('should display validation feedback when credential fields are invalid', () => {
+    component.openCreateDialog();
+    fixture.detectChanges();
+
+    component.createForm.controls.apiSecret.markAsTouched();
+    component.createForm.controls.apiSecret.setValue('');
+    component.createForm.controls.apiSecret.updateValueAndValidity();
+
+    component.createForm.controls.passphrase.setValue('short');
+    component.createForm.controls.passphrase.markAsTouched();
+    component.createForm.controls.passphrase.updateValueAndValidity();
+
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const createPanel = host.querySelector('[aria-labelledby="createKeyTitle"]') as HTMLElement | null;
+    expect(createPanel).withContext('create dialog should be present').not.toBeNull();
+
+    expect(createPanel?.querySelector('[data-testid="create-api-secret-error-required"]')).not.toBeNull();
+    expect(createPanel?.querySelector('[data-testid="create-passphrase-error-minlength"]')).not.toBeNull();
+    expect(createPanel?.querySelector('[data-testid="create-passphrase-error-required"]')).toBeNull();
+  });
 });
