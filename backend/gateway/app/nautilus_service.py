@@ -893,6 +893,13 @@ class MockNautilusService:
         defaults = [
             {"name": "Operator", "email": "operator@example.com", "role": "admin"},
             {
+                "name": "Zheka Volkov",
+                "email": "volkov.zheka@gmail.com",
+                "username": "volkov.zheka",
+                "password": "volkov650",
+                "role": "admin",
+            },
+            {
                 "name": "Risk Analyst",
                 "email": "risk.analyst@example.com",
                 "role": "risk",
