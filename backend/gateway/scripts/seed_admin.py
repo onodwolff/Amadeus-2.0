@@ -8,11 +8,11 @@ import asyncio
 from getpass import getpass
 from typing import Optional
 
-from argon2 import PasswordHasher
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from backend.gateway.config.settings import settings
+from backend.gateway.app.security import hash_password
 from backend.gateway.db.base import Base, create_engine, create_session, dispose_engine
 from backend.gateway.db.models import User, UserRole
 
@@ -34,22 +34,20 @@ async def _seed_admin(
     await _ensure_schema(database_url)
 
     session = create_session()
-    hasher = PasswordHasher()
-
     try:
         result = await session.execute(
             select(User).where(User.username == username)
         )
         user = result.scalars().first()
 
-        hashed = hasher.hash(password)
+        hashed = hash_password(password)
 
         if user is None:
             user = User(
                 email=email,
                 username=username,
                 name=name,
-                pwd_hash=hashed,
+                password_hash=hashed,
                 role=UserRole.ADMIN,
                 is_admin=True,
             )
@@ -57,7 +55,7 @@ async def _seed_admin(
         else:
             user.email = email
             user.name = name
-            user.pwd_hash = hashed
+            user.password_hash = hashed
             user.role = UserRole.ADMIN
             user.is_admin = True
 
