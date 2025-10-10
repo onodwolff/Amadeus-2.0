@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Utility for applying Alembic migrations with development-friendly defaults."""
 from __future__ import annotations
 
