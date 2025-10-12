@@ -296,7 +296,12 @@ async def get_current_user(
     if user_id is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    stmt = select(User).where(User.id == int(user_id))
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+    stmt = select(User).where(User.id == user_id_int)
     result = await db.execute(stmt)
     user = result.scalars().first()
     if user is None:
