@@ -46,7 +46,7 @@ class AccountResource(BaseModel):
     name: str | None = None
     email: str
     role: str
-    active: bool = True
+    active: bool
     created_at: datetime
     updated_at: datetime
 
@@ -93,7 +93,7 @@ def _serialize_account(user: User) -> AccountResource:
         name=user.name,
         email=user.email,
         role=user.role.value if getattr(user, "role", None) else "member",
-        active=True,
+        active=bool(getattr(user, "active", True)),
         created_at=user.created_at,
         updated_at=user.updated_at,
     )

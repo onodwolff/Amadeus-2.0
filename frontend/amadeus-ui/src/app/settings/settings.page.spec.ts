@@ -17,6 +17,7 @@ function createAuthUser(): AuthUser {
   return {
     id: 'user-1',
     email: 'user@example.com',
+    active: true,
     isAdmin: false,
     emailVerified: true,
     mfaEnabled: false,
@@ -31,7 +32,7 @@ function createUserProfile(): UserProfile {
     id: 'user-1',
     name: 'Test User',
     email: 'user@example.com',
-    role: 'user',
+    role: 'member',
     active: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

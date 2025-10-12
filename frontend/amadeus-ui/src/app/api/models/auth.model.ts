@@ -1,6 +1,7 @@
 export interface AuthUser {
   id: string;
   email: string;
+  active: boolean;
   isAdmin: boolean;
   emailVerified: boolean;
   mfaEnabled: boolean;

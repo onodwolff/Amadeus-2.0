@@ -18,6 +18,16 @@
   width: 100%;
 }
 
+.create-user-form__toggle {
+  margin-top: 12px;
+}
+
+.create-user-form__toggle-hint {
+  margin: -8px 0 0;
+  font-size: 0.875rem;
+  color: rgba(148, 163, 184, 0.9);
+}
+
 .create-user-form__button-content {
   display: inline-flex;
   align-items: center;

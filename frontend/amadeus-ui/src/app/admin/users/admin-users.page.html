@@ -53,6 +53,19 @@
         <td mat-cell *matCellDef="let user" class="users-table__role">{{ user.role | titlecase }}</td>
       </ng-container>
 
+      <ng-container matColumnDef="active">
+        <th mat-header-cell *matHeaderCellDef>Active</th>
+        <td mat-cell *matCellDef="let user" class="users-table__active">
+          <mat-slide-toggle
+            [checked]="user.active"
+            (change)="toggleUserActive(user, $event)"
+            [disabled]="isToggleDisabled(user.id)"
+          >
+            {{ user.active ? 'Active' : 'Suspended' }}
+          </mat-slide-toggle>
+        </td>
+      </ng-container>
+
       <ng-container matColumnDef="createdAt">
         <th mat-header-cell *matHeaderCellDef mat-sort-header>Created</th>
         <td mat-cell *matCellDef="let user">{{ user.createdAt | date: 'medium' }}</td>

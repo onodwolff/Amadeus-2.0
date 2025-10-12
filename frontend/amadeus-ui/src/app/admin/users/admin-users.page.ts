@@ -16,6 +16,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSlideToggleChange, MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { debounceTime, finalize } from 'rxjs';
 
@@ -40,6 +41,7 @@ import { AdminUserCreateDialogComponent } from './create-user-dialog.component';
     MatDialogModule,
     MatSnackBarModule,
     MatProgressSpinnerModule,
+    MatSlideToggleModule,
   ],
 })
 export class AdminUsersPage {
@@ -49,12 +51,14 @@ export class AdminUsersPage {
 
   readonly isLoading = signal(false);
   readonly error = signal<string | null>(null);
+  readonly togglingUserIds = signal<Set<string>>(new Set());
 
   readonly displayedColumns: (keyof AdminUser)[] = [
     'id',
     'email',
     'name',
     'role',
+    'active',
     'createdAt',
     'updatedAt',
   ];
@@ -80,6 +84,7 @@ export class AdminUsersPage {
         item.email.toLowerCase().includes(term) ||
         this.normalizeName(item.name).includes(term) ||
         item.role.toLowerCase().includes(term) ||
+        (item.active ? 'active' : 'suspended').includes(term) ||
         item.username.toLowerCase().includes(term) ||
         item.id.toLowerCase().includes(term)
       );
@@ -158,6 +163,42 @@ export class AdminUsersPage {
     return item.id;
   }
 
+  isToggleDisabled(userId: string): boolean {
+    return this.isLoading() || this.togglingUserIds().has(userId);
+  }
+
+  toggleUserActive(user: AdminUser, change: MatSlideToggleChange): void {
+    const nextActive = change.checked;
+    const previousActive = user.active;
+
+    if (nextActive === previousActive) {
+      return;
+    }
+
+    this.updateUserRow(user.id, { active: nextActive });
+    this.markToggling(user.id, true);
+
+    this.usersApi
+      .updateUser(user.id, { active: nextActive })
+      .pipe(finalize(() => this.markToggling(user.id, false)))
+      .subscribe({
+        next: () => {
+          const message = nextActive
+            ? 'User account reactivated.'
+            : 'User account suspended.';
+          this.snackBar.open(message, 'Dismiss', { duration: 4000 });
+        },
+        error: (err: unknown) => {
+          this.updateUserRow(user.id, { active: previousActive });
+          const message = this.resolveErrorMessage(
+            err,
+            nextActive ? 'Unable to reactivate user.' : 'Unable to suspend user.',
+          );
+          this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+        },
+      });
+  }
+
   formatUserName(user: AdminUser | null | undefined): string {
     if (!user) {
       return '—';
@@ -180,5 +221,23 @@ export class AdminUsersPage {
 
   private normalizeName(value: string | null | undefined): string {
     return value?.trim().toLowerCase() ?? '';
+  }
+
+  private markToggling(userId: string, toggling: boolean): void {
+    this.togglingUserIds.update((current) => {
+      const next = new Set(current);
+      if (toggling) {
+        next.add(userId);
+      } else {
+        next.delete(userId);
+      }
+      return next;
+    });
+  }
+
+  private updateUserRow(userId: string, changes: Partial<AdminUser>): void {
+    this.dataSource.data = this.dataSource.data.map((entry) =>
+      entry.id === userId ? { ...entry, ...changes } : entry,
+    );
   }
 }

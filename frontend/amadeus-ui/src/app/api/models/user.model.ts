@@ -16,6 +16,7 @@ export interface AdminUser {
   username: string;
   name: string | null;
   role: 'admin' | 'member' | 'viewer';
+  active: boolean;
   isAdmin: boolean;
   emailVerified: boolean;
   mfaEnabled: boolean;
@@ -36,6 +37,16 @@ export interface UserCreateRequest {
   password: string;
   name?: string | null;
   role: 'admin' | 'member' | 'viewer';
+  active: boolean;
+}
+
+export interface UserManagementUpdateRequest {
+  name?: string | null;
+  email?: string;
+  username?: string;
+  role?: 'admin' | 'member' | 'viewer';
+  active?: boolean;
+  password?: string;
 }
 
 export interface AccountResponse {

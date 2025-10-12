@@ -137,6 +137,12 @@ class User(Base):
         default=False,
         server_default=text("false"),
     )
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     mfa_secret: Mapped[Optional[str]] = mapped_column(Text)

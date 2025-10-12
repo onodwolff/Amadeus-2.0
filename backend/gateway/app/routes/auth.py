@@ -43,6 +43,7 @@ class UserResource(BaseModel):
 
     id: str
     email: EmailStr
+    active: bool
     is_admin: bool = Field(alias="isAdmin")
     email_verified: bool = Field(alias="emailVerified")
     mfa_enabled: bool = Field(alias="mfaEnabled")
@@ -205,6 +206,7 @@ def _serialize_user(user: User) -> UserResource:
     return UserResource(
         id=str(user.id),
         email=user.email,
+        active=bool(getattr(user, "active", True)),
         is_admin=user.is_admin,
         email_verified=user.email_verified,
         mfa_enabled=user.mfa_enabled,
@@ -316,6 +318,10 @@ async def login(
     if user is None or not verify_password(user.password_hash, payload.password):
         _register_failed_login(rate_key)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    if not getattr(user, "active", True):
+        _register_failed_login(rate_key)
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
     if user.mfa_enabled:
         if not payload.totp_code:

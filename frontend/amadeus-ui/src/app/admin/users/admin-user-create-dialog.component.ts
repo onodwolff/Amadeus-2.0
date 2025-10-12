@@ -267,6 +267,7 @@ export class AdminUserCreateDialogComponent {
       email: email.trim().toLowerCase(),
       password,
       role: role.trim().toLowerCase() as UserCreateRequest['role'],
+      active: true,
     };
 
     const trimmedName = name?.trim();
