@@ -20,7 +20,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { debounceTime, finalize } from 'rxjs';
 
 import { UsersApi } from '../../api/clients/users.api';
-import { UserProfile } from '../../api/models';
+import { AdminUser } from '../../api/models';
 import { AdminUserCreateDialogComponent } from './create-user-dialog.component';
 
 @Component({
@@ -50,17 +50,17 @@ export class AdminUsersPage {
   readonly isLoading = signal(false);
   readonly error = signal<string | null>(null);
 
-  readonly displayedColumns: (keyof UserProfile)[] = [
+  readonly displayedColumns: (keyof AdminUser)[] = [
     'id',
     'email',
     'name',
     'role',
-    'created_at',
-    'updated_at',
+    'createdAt',
+    'updatedAt',
   ];
 
   readonly filterControl = new FormControl('', { nonNullable: true });
-  readonly dataSource = new MatTableDataSource<UserProfile>([]);
+  readonly dataSource = new MatTableDataSource<AdminUser>([]);
 
   @ViewChild(MatSort)
   set matSort(sort: MatSort | null) {
@@ -88,8 +88,11 @@ export class AdminUsersPage {
       if (property === 'name') {
         return this.normalizeName(item.name);
       }
-      if (property === 'created_at' || property === 'updated_at') {
-        return new Date(item[property] ?? '').getTime();
+      if (property === 'createdAt') {
+        return new Date(item.createdAt).getTime();
+      }
+      if (property === 'updatedAt') {
+        return new Date(item.updatedAt).getTime();
       }
 
       const value = (item as unknown as Record<string, unknown>)[property];
@@ -153,11 +156,11 @@ export class AdminUsersPage {
     this.filterControl.setValue('');
   }
 
-  trackByUserId(_: number, item: UserProfile): string {
+  trackByUserId(_: number, item: AdminUser): string {
     return item.id;
   }
 
-  formatUserName(user: UserProfile | null | undefined): string {
+  formatUserName(user: AdminUser | null | undefined): string {
     if (!user) {
       return '—';
     }
