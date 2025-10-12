@@ -7,7 +7,7 @@ import {
   AccountUpdateRequest,
   UserCreateRequest,
   PasswordUpdateRequest,
-  UsersResponse,
+  AdminUsersResponse,
   UserResponse,
 } from '../models';
 
@@ -15,8 +15,8 @@ import {
 export class UsersApi {
   private readonly http = inject(HttpClient);
 
-  listUsers(): Observable<UsersResponse> {
-    return this.http.get<UsersResponse>(buildApiUrl('/users'));
+  listUsers(): Observable<AdminUsersResponse> {
+    return this.http.get<AdminUsersResponse>(buildApiUrl('/users'));
   }
 
   createUser(payload: UserCreateRequest): Observable<UserResponse> {

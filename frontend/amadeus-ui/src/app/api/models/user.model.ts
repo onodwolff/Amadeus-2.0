@@ -10,8 +10,21 @@ export interface UserProfile {
   updated_at: string;
 }
 
-export interface UsersResponse {
-  users: UserProfile[];
+export interface AdminUser {
+  id: string;
+  email: string;
+  username: string;
+  name: string | null;
+  role: 'admin' | 'member' | 'viewer';
+  isAdmin: boolean;
+  emailVerified: boolean;
+  mfaEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
 }
 
 export interface UserResponse {
