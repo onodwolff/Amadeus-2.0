@@ -47,6 +47,7 @@ class AdminUserResource(BaseModel):
     username: str
     name: str | None = None
     role: str
+    active: bool
     is_admin: bool = Field(alias="isAdmin")
     email_verified: bool = Field(alias="emailVerified")
     mfa_enabled: bool = Field(alias="mfaEnabled")
@@ -70,6 +71,7 @@ class AdminUserCreateRequest(BaseModel):
     username: str | None = Field(default=None, min_length=3, max_length=64)
     name: str | None = Field(default=None, max_length=255)
     role: UserRole = Field(default=UserRole.MEMBER)
+    active: bool = Field(default=True)
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -107,6 +109,7 @@ def _serialize_user(user: User) -> AdminUserResource:
         username=user.username,
         name=user.name,
         role=(user.role.value if getattr(user, "role", None) else UserRole.MEMBER.value),
+        active=bool(getattr(user, "active", True)),
         is_admin=bool(user.is_admin),
         email_verified=bool(user.email_verified),
         mfa_enabled=bool(user.mfa_enabled),
@@ -174,6 +177,7 @@ async def create_user(
         name=payload.name,
         password_hash=hash_password(payload.password),
         role=payload.role,
+        active=payload.active,
         is_admin=False,
         email_verified=False,
         mfa_enabled=False,

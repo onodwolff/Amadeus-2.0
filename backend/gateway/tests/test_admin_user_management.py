@@ -131,6 +131,7 @@ async def test_create_user_as_admin(db_session):
     assert resource.username == "new-user"
     assert resource.name == "New User"
     assert resource.role == UserRole.VIEWER.value
+    assert resource.active is True
     assert resource.is_admin is False
     assert resource.email_verified is False
     assert resource.mfa_enabled is False
@@ -140,12 +141,46 @@ async def test_create_user_as_admin(db_session):
     assert user.username == "new-user"
     assert user.name == "New User"
     assert user.role == UserRole.VIEWER
+    assert user.active is True
     assert user.is_admin is False
     assert verify_password(user.password_hash, "S3curePass!")
     assert user.email_verified is False
     assert user.mfa_enabled is False
     assert user.mfa_secret is None
     assert user.last_login_at is None
+
+
+@pytest.mark.asyncio
+async def test_create_user_can_set_inactive(db_session):
+    admin = User(
+        email="admin@example.com",
+        username="admin",
+        name="Admin",
+        password_hash=hash_password("admin-pass-123"),
+        role=UserRole.ADMIN,
+        is_admin=True,
+    )
+    db_session.add(admin)
+    await db_session.commit()
+
+    payload = admin_users.AdminUserCreateRequest(
+        email="inactive@example.com",
+        password="S3curePass!",
+        name="Inactive User",
+        role=UserRole.VIEWER,
+        active=False,
+    )
+
+    response = await admin_users.create_user(
+        payload=payload, session=db_session, current_user=admin
+    )
+
+    resource = response.user
+    assert resource.active is False
+
+    result = await db_session.execute(select(User).where(User.id == int(resource.id)))
+    created = result.scalar_one()
+    assert created.active is False
 
 
 @pytest.mark.asyncio

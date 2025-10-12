@@ -47,6 +47,13 @@
       </mat-select>
       <mat-error *ngIf="form.controls.role.hasError('required')">Role selection is required.</mat-error>
     </mat-form-field>
+
+    <mat-slide-toggle formControlName="active" class="create-user-form__toggle">
+      Active account
+    </mat-slide-toggle>
+    <p class="create-user-form__toggle-hint">
+      Suspended accounts retain their history but cannot sign in until reactivated by an administrator.
+    </p>
   </mat-dialog-content>
 
   <mat-dialog-actions align="end">

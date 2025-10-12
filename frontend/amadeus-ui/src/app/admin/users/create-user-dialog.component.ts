@@ -21,6 +21,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatButtonModule } from '@angular/material/button';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { finalize } from 'rxjs';
 
 import { UsersApi } from '../../api/clients/users.api';
@@ -35,6 +36,7 @@ type CreateUserFormGroup = FormGroup<{
   password: FormControl<string>;
   confirmPassword: FormControl<string>;
   role: FormControl<ProvisionableRole>;
+  active: FormControl<boolean>;
 }>;
 
 const matchPasswordsValidator: ValidatorFn = (control) => {
@@ -64,6 +66,7 @@ const matchPasswordsValidator: ValidatorFn = (control) => {
     MatButtonModule,
     MatSnackBarModule,
     MatProgressSpinnerModule,
+    MatSlideToggleModule,
   ],
 })
 export class AdminUserCreateDialogComponent {
@@ -132,6 +135,7 @@ export class AdminUserCreateDialogComponent {
         password: ['', [Validators.required, Validators.minLength(8)]],
         confirmPassword: ['', [Validators.required]],
         role: this.fb.nonNullable.control<ProvisionableRole>('member', Validators.required),
+        active: this.fb.nonNullable.control(true),
       },
       { validators: matchPasswordsValidator },
     );

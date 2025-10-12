@@ -9,6 +9,7 @@ import {
   PasswordUpdateRequest,
   AdminUsersResponse,
   UserResponse,
+  UserManagementUpdateRequest,
 } from '../models';
 
 @Injectable({ providedIn: 'root' })
@@ -23,7 +24,7 @@ export class UsersApi {
     return this.http.post<UserResponse>(buildApiUrl('/users'), payload);
   }
 
-  updateUser(userId: string, payload: AccountUpdateRequest): Observable<UserResponse> {
+  updateUser(userId: string, payload: UserManagementUpdateRequest): Observable<UserResponse> {
     return this.http.put<UserResponse>(buildApiUrl(`/users/${encodeURIComponent(userId)}`), payload);
   }
 

@@ -59,6 +59,7 @@ async def test_ensure_admin_creates_user(admin_credentials, db_session) -> None:
     assert user.username == "volkov.zheka"
     assert user.role == UserRole.ADMIN
     assert user.is_admin is True
+    assert user.active is True
     assert user.email_verified is True
     assert user.mfa_enabled is False
     assert user.mfa_secret is None
@@ -94,6 +95,7 @@ async def test_ensure_admin_updates_existing_user(admin_credentials, db_session)
     assert verify_password(existing.password_hash, "NewSecret456")
     assert existing.role == UserRole.ADMIN
     assert existing.is_admin is True
+    assert existing.active is True
     assert existing.email_verified is True
     assert existing.mfa_enabled is False
     assert existing.mfa_secret is None
@@ -127,3 +129,4 @@ async def test_ensure_admin_generates_unique_username(admin_credentials, db_sess
     admin = result.scalars().one()
 
     assert admin.username == "volkov.zheka2"
+    assert admin.active is True
