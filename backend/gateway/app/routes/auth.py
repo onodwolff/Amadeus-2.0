@@ -306,6 +306,10 @@ async def get_current_user(
     user = result.scalars().first()
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
+    if not getattr(user, "active", True):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="Account is suspended"
+        )
     return user
 
 
