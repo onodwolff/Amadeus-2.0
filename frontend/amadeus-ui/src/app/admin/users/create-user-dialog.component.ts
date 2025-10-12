@@ -26,12 +26,15 @@ import { finalize } from 'rxjs';
 import { UsersApi } from '../../api/clients/users.api';
 import { UserCreateRequest } from '../../api/models';
 
+const PROVISIONABLE_ROLES = ['member', 'viewer'] as const;
+type ProvisionableRole = (typeof PROVISIONABLE_ROLES)[number];
+
 type CreateUserFormGroup = FormGroup<{
   email: FormControl<string>;
   name: FormControl<string>;
   password: FormControl<string>;
   confirmPassword: FormControl<string>;
-  role: FormControl<UserCreateRequest['role']>;
+  role: FormControl<ProvisionableRole>;
 }>;
 
 const matchPasswordsValidator: ValidatorFn = (control) => {
@@ -71,7 +74,7 @@ export class AdminUserCreateDialogComponent {
 
   readonly isSubmitting = signal(false);
 
-  readonly roles: ReadonlyArray<UserCreateRequest['role']> = ['admin', 'member', 'viewer'];
+  readonly roles = PROVISIONABLE_ROLES;
 
   readonly form: CreateUserFormGroup = this.createForm();
 
@@ -82,6 +85,15 @@ export class AdminUserCreateDialogComponent {
     }
 
     const { confirmPassword, ...value } = this.form.getRawValue();
+
+    if (!PROVISIONABLE_ROLES.includes(value.role as ProvisionableRole)) {
+      this.snackBar.open('The admin role cannot be assigned through this interface.', 'Dismiss', {
+        duration: 5000,
+      });
+      this.form.controls.role.setValue(PROVISIONABLE_ROLES[0]);
+      return;
+    }
+
     const payload: UserCreateRequest = value;
 
     this.isSubmitting.set(true);
@@ -119,7 +131,7 @@ export class AdminUserCreateDialogComponent {
         name: ['', [Validators.required, Validators.minLength(2)]],
         password: ['', [Validators.required, Validators.minLength(8)]],
         confirmPassword: ['', [Validators.required]],
-        role: this.fb.nonNullable.control<UserCreateRequest['role']>('member', Validators.required),
+        role: this.fb.nonNullable.control<ProvisionableRole>('member', Validators.required),
       },
       { validators: matchPasswordsValidator },
     );
