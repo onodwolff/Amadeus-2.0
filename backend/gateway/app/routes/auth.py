@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.app.config import settings
 from gateway.app.dependencies import get_session
 from gateway.app.security import hash_password, verify_password
-from gateway.db.models import AuthSession, EmailChangeRequest, User, UserRole
+from gateway.db.models import AuthSession, EmailChangeRequest, User
 
 
 _LOGIN_WINDOW_SECONDS = 60
@@ -63,57 +63,6 @@ class TokenResponse(BaseModel):
     user: UserResource
 
     model_config = ConfigDict(populate_by_name=True)
-
-
-class UserCreatePayload(BaseModel):
-    email: EmailStr
-    username: str = Field(min_length=3, max_length=64)
-    password: str = Field(min_length=8)
-    name: Optional[str] = Field(default=None, max_length=255)
-    role: UserRole = Field(default=UserRole.MEMBER)
-    is_admin: bool = Field(default=False, alias="isAdmin")
-    email_verified: bool = Field(default=False, alias="emailVerified")
-
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
-
-    @field_validator("username")
-    @classmethod
-    def _normalise_username(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("Username cannot be empty")
-        return trimmed
-
-    @field_validator("name")
-    @classmethod
-    def _normalise_name(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        trimmed = value.strip()
-        return trimmed or None
-
-    @field_validator("role", mode="before")
-    @classmethod
-    def _coerce_role(cls, value: UserRole | str | None) -> UserRole:
-        if value is None:
-            return UserRole.MEMBER
-        if isinstance(value, UserRole):
-            return value
-        raw = getattr(value, "value", value)
-        candidate = str(raw).strip().lower()
-        try:
-            return UserRole(candidate)
-        except ValueError as exc:  # pragma: no cover - defensive validation
-            raise ValueError("Invalid role specified") from exc
-
-    @field_validator("password")
-    @classmethod
-    def _validate_password(cls, value: str) -> str:
-        if len(value) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        if not _PASSWORD_COMPLEXITY_PATTERN.search(value):
-            raise ValueError("Password must include letters and digits")
-        return value
 
 
 class LoginRequest(BaseModel):
@@ -324,43 +273,6 @@ async def _ensure_email_available(
         )
 
 
-async def _ensure_user_identifiers_available(
-    db: AsyncSession, *, email: str, username: str
-) -> None:
-    normalized_email = email.lower()
-    normalized_username = username.strip().lower()
-
-    stmt = select(User.email, User.username).where(
-        or_(
-            func.lower(User.email) == normalized_email,
-            func.lower(User.username) == normalized_username,
-        )
-    )
-    result = await db.execute(stmt)
-    matches = result.all()
-
-    email_conflict = any(
-        (record_email or "").lower() == normalized_email
-        for record_email, _ in matches
-    )
-    username_conflict = any(
-        (record_username or "").lower() == normalized_username
-        for _, record_username in matches
-    )
-
-    if email_conflict:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email is already associated with another account.",
-        )
-
-    if username_conflict:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username is already associated with another account.",
-        )
-
-
 async def _decode_token(credentials: HTTPAuthorizationCredentials | None) -> dict[str, object]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -388,45 +300,6 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
     return user
-
-
-@router.post("/auth/users", response_model=UserResource, status_code=status.HTTP_201_CREATED)
-async def create_user(
-    payload: UserCreatePayload,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_session),
-) -> UserResource:
-    if not current_user.is_admin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
-
-    email = _normalize_email(str(payload.email))
-    await _ensure_user_identifiers_available(
-        db, email=email, username=payload.username
-    )
-
-    is_admin = bool(payload.is_admin)
-    role = payload.role
-    if is_admin:
-        role = UserRole.ADMIN
-    elif role == UserRole.ADMIN:
-        role = UserRole.MEMBER
-
-    user = User(
-        email=email,
-        username=payload.username,
-        name=payload.name,
-        password_hash=hash_password(payload.password),
-        role=role,
-        is_admin=is_admin,
-        email_verified=payload.email_verified,
-        mfa_enabled=False,
-        mfa_secret=None,
-        last_login_at=None,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return _serialize_user(user)
 
 
 @router.post("/auth/login", response_model=TokenResponse)
