@@ -1,6 +1,7 @@
 """Tests for authentication routes and behaviours."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import sys
 from types import SimpleNamespace
 
@@ -90,3 +91,95 @@ def test_tampered_sub_returns_unauthorized(monkeypatch):
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert response.json() == {"detail": "Invalid token"}
+
+
+def test_suspended_account_cannot_access_authenticated_routes(monkeypatch):
+    """Inactive users should receive a 403 when accessing protected endpoints."""
+
+    monkeypatch.setattr(settings.auth, "enabled", True)
+
+    suspended_user = SimpleNamespace(id=123, active=False)
+
+    class _DummyResult:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return suspended_user
+
+    class _SuspendedSession:
+        async def execute(self, *_args, **_kwargs):
+            return _DummyResult()
+
+    async def _suspended_session_dependency():
+        yield _SuspendedSession()
+
+    app = FastAPI()
+    app.include_router(auth.router, prefix="/api")
+    app.dependency_overrides[get_session] = _suspended_session_dependency
+
+    async def _fake_decode_token(_credentials):
+        return {"sub": "123"}
+
+    monkeypatch.setattr(auth, "_decode_token", _fake_decode_token)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/me", headers={"Authorization": "Bearer valid-token"}
+        )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.json() == {"detail": "Account is suspended"}
+
+
+def test_active_account_still_accesses_authenticated_routes(monkeypatch):
+    """Active users should continue accessing endpoints protected by the guard."""
+
+    monkeypatch.setattr(settings.auth, "enabled", True)
+
+    now = datetime.now(timezone.utc)
+    active_user = SimpleNamespace(
+        id=321,
+        active=True,
+        email="active@example.com",
+        is_admin=False,
+        email_verified=True,
+        mfa_enabled=False,
+        created_at=now,
+        updated_at=now,
+        last_login_at=None,
+    )
+
+    class _DummyResult:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return active_user
+
+    class _ActiveSession:
+        async def execute(self, *_args, **_kwargs):
+            return _DummyResult()
+
+    async def _active_session_dependency():
+        yield _ActiveSession()
+
+    app = FastAPI()
+    app.include_router(auth.router, prefix="/api")
+    app.dependency_overrides[get_session] = _active_session_dependency
+
+    async def _fake_decode_token(_credentials):
+        return {"sub": "321"}
+
+    monkeypatch.setattr(auth, "_decode_token", _fake_decode_token)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/me", headers={"Authorization": "Bearer valid-token"}
+        )
+
+    assert response.status_code == status.HTTP_200_OK
+    payload = response.json()
+    assert payload["id"] == str(active_user.id)
+    assert payload["email"] == active_user.email
+    assert payload["active"] is True
