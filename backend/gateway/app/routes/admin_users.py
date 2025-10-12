@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.app.dependencies import get_session
+from gateway.app.logging import get_logger
 from gateway.app.security import hash_password
 from gateway.config import settings
 from gateway.db.models import User, UserRole
@@ -17,6 +18,8 @@ from .auth import get_current_user
 
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+logger = get_logger("gateway.admin.users")
 
 
 async def _anonymous_user() -> User | None:
@@ -183,6 +186,21 @@ async def create_user(
     session.add(user)
     await session.commit()
     await session.refresh(user)
+
+    actor_id = (
+        str(current_user.id)
+        if current_user is not None and getattr(current_user, "id", None) is not None
+        else None
+    )
+    logger.info(
+        "admin_user.created",
+        actor_id=actor_id,
+        actor_email=getattr(current_user, "email", None),
+        user_id=str(user.id),
+        user_email=user.email,
+        user_username=user.username,
+        user_role=user.role.value if getattr(user, "role", None) else UserRole.MEMBER.value,
+    )
 
     return AdminUserResponse(user=_serialize_user(user))
 

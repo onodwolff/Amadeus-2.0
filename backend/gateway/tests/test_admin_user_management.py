@@ -100,8 +100,22 @@ def enable_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.auth, "enabled", True)
 
 
+@pytest.fixture
+def log_events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object]]]:
+    """Capture structured logging emitted by the admin user routes."""
+
+    events: list[tuple[str, dict[str, object]]] = []
+
+    class _Logger:
+        def info(self, event: str, **kwargs: object) -> None:
+            events.append((event, kwargs))
+
+    monkeypatch.setattr(admin_users, "logger", _Logger())
+    return events
+
+
 @pytest.mark.asyncio
-async def test_create_user_as_admin(db_session):
+async def test_create_user_as_admin(db_session, log_events):
     admin = User(
         email="admin@example.com",
         username="admin",
@@ -146,6 +160,17 @@ async def test_create_user_as_admin(db_session):
     assert user.mfa_enabled is False
     assert user.mfa_secret is None
     assert user.last_login_at is None
+
+    assert any(
+        event == "admin_user.created"
+        and details["actor_id"] == str(admin.id)
+        and details["actor_email"] == admin.email
+        and details["user_id"] == resource.id
+        and details["user_email"] == resource.email
+        and details["user_username"] == resource.username
+        and details["user_role"] == resource.role
+        for event, details in log_events
+    )
 
 
 @pytest.mark.asyncio
