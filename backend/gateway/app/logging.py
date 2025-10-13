@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util as importlib_util
 import json
 import logging
 import sys
@@ -15,7 +16,7 @@ except ModuleNotFoundError:  # запуск из backend/
 
 StructlogModule = Any
 
-_structlog_spec = importlib.util.find_spec("structlog")
+_structlog_spec = importlib_util.find_spec("structlog")
 if _structlog_spec is not None:
     structlog: StructlogModule = importlib.import_module("structlog")
 else:  # pragma: no cover
