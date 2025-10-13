@@ -352,6 +352,194 @@ async def test_user_admin_role_consistency_enforced(db_session):
         await db_session.commit()
     await db_session.rollback()
 
+
+@pytest.mark.asyncio
+async def test_update_user_toggle_active_and_name(db_session, log_events):
+    admin = User(
+        email="admin@example.com",
+        username="admin",
+        password_hash=hash_password("admin-pass-123"),
+        role=UserRole.ADMIN,
+        is_admin=True,
+    )
+    target = User(
+        email="member@example.com",
+        username="member",
+        name="Member User",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.MEMBER,
+        active=True,
+    )
+    db_session.add_all([admin, target])
+    await db_session.commit()
+
+    deactivate = admin_users.AdminUserUpdateRequest(active=False, name="  New Name  ")
+    response = await admin_users.update_user(
+        user_id=target.id,
+        payload=deactivate,
+        session=db_session,
+        current_user=admin,
+    )
+
+    assert response.user.active is False
+    assert response.user.name == "New Name"
+
+    refreshed = await db_session.get(User, target.id)
+    assert refreshed is not None
+    await db_session.refresh(refreshed)
+    assert refreshed.active is False
+    assert refreshed.name == "New Name"
+
+    assert any(
+        event == "admin_user.updated"
+        and details["user_id"] == str(target.id)
+        and "active" in details["changed_fields"]
+        for event, details in log_events
+    )
+
+    reactivate = admin_users.AdminUserUpdateRequest(active=True)
+    result = await admin_users.update_user(
+        user_id=target.id,
+        payload=reactivate,
+        session=db_session,
+        current_user=admin,
+    )
+
+    assert result.user.active is True
+
+
+@pytest.mark.asyncio
+async def test_update_user_rejects_duplicate_username(db_session):
+    admin = User(
+        email="admin@example.com",
+        username="admin",
+        password_hash=hash_password("admin-pass-123"),
+        role=UserRole.ADMIN,
+        is_admin=True,
+    )
+    target = User(
+        email="member@example.com",
+        username="member",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.MEMBER,
+    )
+    other = User(
+        email="someone@example.com",
+        username="someone",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.MEMBER,
+    )
+    db_session.add_all([admin, target, other])
+    await db_session.commit()
+
+    payload = admin_users.AdminUserUpdateRequest(username="Someone")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_users.update_user(
+            user_id=target.id,
+            payload=payload,
+            session=db_session,
+            current_user=admin,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_update_user_prevents_admin_role_assignment(db_session):
+    admin = User(
+        email="admin@example.com",
+        username="admin",
+        password_hash=hash_password("admin-pass-123"),
+        role=UserRole.ADMIN,
+        is_admin=True,
+    )
+    target = User(
+        email="member@example.com",
+        username="member",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.MEMBER,
+    )
+    db_session.add_all([admin, target])
+    await db_session.commit()
+
+    payload = admin_users.AdminUserUpdateRequest(role=UserRole.ADMIN)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_users.update_user(
+            user_id=target.id,
+            payload=payload,
+            session=db_session,
+            current_user=admin,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_update_user_requires_admin_privileges(db_session):
+    actor = User(
+        email="user@example.com",
+        username="user",
+        password_hash=hash_password("user-pass-123"),
+        role=UserRole.MEMBER,
+        is_admin=False,
+    )
+    target = User(
+        email="member@example.com",
+        username="member",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.MEMBER,
+    )
+    db_session.add_all([actor, target])
+    await db_session.commit()
+
+    payload = admin_users.AdminUserUpdateRequest(active=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_users.update_user(
+            user_id=target.id,
+            payload=payload,
+            session=db_session,
+            current_user=actor,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_update_user_updates_password(db_session):
+    admin = User(
+        email="admin@example.com",
+        username="admin",
+        password_hash=hash_password("admin-pass-123"),
+        role=UserRole.ADMIN,
+        is_admin=True,
+    )
+    target = User(
+        email="member@example.com",
+        username="member",
+        password_hash=hash_password("Password123!"),
+        role=UserRole.MEMBER,
+    )
+    db_session.add_all([admin, target])
+    await db_session.commit()
+
+    payload = admin_users.AdminUserUpdateRequest(password="NewSecurePass123")
+
+    response = await admin_users.update_user(
+        user_id=target.id,
+        payload=payload,
+        session=db_session,
+        current_user=admin,
+    )
+
+    refreshed = await db_session.get(User, target.id)
+    assert refreshed is not None
+    await db_session.refresh(refreshed)
+    assert verify_password(refreshed.password_hash, "NewSecurePass123")
+    assert response.user.id == str(target.id)
+
     inconsistent_role = User(
         email="admin-role@example.com",
         username="admin-role",
