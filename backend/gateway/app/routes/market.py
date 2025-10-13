@@ -84,10 +84,15 @@ async def _stream_bus_topic(websocket: WebSocket, topic: str) -> None:
     server_loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     stop_event = asyncio.Event()
+    subscription_ready = asyncio.Event()
 
     async def pump_bus_messages() -> None:
         try:
             async with svc.bus.subscribe(topic) as subscription:
+                try:
+                    server_loop.call_soon_threadsafe(subscription_ready.set)
+                except RuntimeError:  # pragma: no cover - defensive guard
+                    subscription_ready.set()
                 async for payload in subscription:
                     if stop_event.is_set():
                         break
@@ -100,12 +105,17 @@ async def _stream_bus_topic(websocket: WebSocket, topic: str) -> None:
                     except Exception:
                         break
         finally:
+            try:
+                server_loop.call_soon_threadsafe(subscription_ready.set)
+            except RuntimeError:  # pragma: no cover - defensive guard
+                subscription_ready.set()
             server_loop.call_soon_threadsafe(queue.put_nowait, None)
 
     bus_future = asyncio.run_coroutine_threadsafe(
         pump_bus_messages(), svc.bus.loop
     )
 
+    await subscription_ready.wait()
     await websocket.accept()
     try:
         while True:
