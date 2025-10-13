@@ -1,4 +1,4 @@
 """Router modules exposed by the gateway API."""
-from . import admin, auth, users
+from . import admin, auth, market, users
 
-__all__ = ["admin", "auth", "users"]
+__all__ = ["admin", "auth", "market", "users"]
