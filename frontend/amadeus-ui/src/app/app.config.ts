@@ -12,11 +12,13 @@ import { provideAnimations } from '@angular/platform-browser/animations';
 import { routes } from './app.routes';
 import { tokenInterceptor } from './auth/token-interceptor';
 import { AuthService } from './auth/auth.service';
+import { provideOAuthClient } from 'angular-oauth2-oidc';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideZonelessChangeDetection(),
+    provideOAuthClient(),
     provideHttpClient(withFetch(), withInterceptors([tokenInterceptor])),
     provideAnimations(),
     provideRouter(routes),

@@ -1,11 +1,5 @@
 import { CommonModule } from '@angular/common';
-import {
-  ChangeDetectionStrategy,
-  Component,
-  Inject,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import {
   AbstractControl,
   FormBuilder,
@@ -83,8 +77,7 @@ export class AdminUserCreateDialogComponent {
   private readonly usersApi = inject(UsersApi);
   private readonly dialogRef = inject(MatDialogRef<AdminUserCreateDialogComponent>);
   private readonly snackBar = inject(MatSnackBar);
-
-  constructor(@Inject(MAT_DIALOG_DATA) private readonly data: CreateDialogData) {}
+  private readonly data = inject<CreateDialogData>(MAT_DIALOG_DATA);
 
   readonly isSubmitting = signal(false);
   readonly submissionError = signal<string | null>(null);
