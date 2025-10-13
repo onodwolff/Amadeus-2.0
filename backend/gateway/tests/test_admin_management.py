@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from backend.gateway.app.security import create_test_access_token
 from backend.gateway.db.models import UserRole
 
 from .utils import create_user
@@ -37,6 +38,32 @@ async def test_viewer_cannot_create_user(app, db_session):
         )
     assert create_response.status_code == 403
     assert create_response.json()["detail"] == "Insufficient role"
+
+
+@pytest.mark.asyncio
+async def test_forged_admin_token_does_not_escalate_privileges(app, db_session):
+    viewer = await create_user(
+        db_session,
+        email="forged@example.com",
+        username="forged",
+        password="password",
+        roles=[UserRole.VIEWER.value],
+    )
+
+    forged_token, _ = create_test_access_token(
+        subject=viewer.id,
+        roles=[UserRole.ADMIN.value],
+        scopes=["gateway.admin"],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(
+            "/admin/roles",
+            headers={"Authorization": f"Bearer {forged_token}"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Insufficient role"
 
 
 @pytest.mark.asyncio
