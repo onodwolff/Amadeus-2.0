@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,8 +17,8 @@ except ModuleNotFoundError:  # pragma: no cover
 from ..config import settings
 from ..dependencies import get_current_user, get_session
 from ..security import (
-    create_access_token,
-    create_refresh_token,
+    create_test_access_token,
+    create_test_refresh_token,
     hash_refresh_token,
     verify_password,
 )
@@ -121,8 +121,12 @@ async def _issue_tokens(
     user: User,
     request: Request | None,
 ) -> TokenResponse:
-    access_token, access_expires = create_access_token(subject=user.id)
-    refresh_token, refresh_expires = create_refresh_token()
+    access_token, access_expires = create_test_access_token(
+        subject=user.id,
+        roles=user.role_slugs,
+        scopes=user.permissions,
+    )
+    refresh_token, refresh_expires = create_test_refresh_token()
 
     session_record = AuthSession(
         user_id=user.id,
@@ -147,6 +151,8 @@ async def _issue_tokens(
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, request: Request, db: AsyncSession = Depends(get_session)) -> TokenResponse:
+    if not settings.auth.allow_test_tokens:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     email = str(payload.email).strip().lower()
     user = await _fetch_user_by_email(db, email)
     if user is None or not verify_password(user.password_hash, payload.password):
@@ -166,6 +172,8 @@ async def refresh_tokens(
     request: Request,
     db: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
+    if not settings.auth.allow_test_tokens:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     token_hash = hash_refresh_token(payload.refresh_token)
     stmt = (
         select(AuthSession)
@@ -196,6 +204,8 @@ async def logout(
     payload: LogoutRequest,
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
+    if not settings.auth.allow_test_tokens:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     token_hash = hash_refresh_token(payload.refresh_token)
     stmt = select(AuthSession).where(AuthSession.refresh_token_hash == token_hash)
     result = await db.execute(stmt)
@@ -207,5 +217,5 @@ async def logout(
 
 
 @router.get("/me", response_model=UserResource)
-async def get_me(current_user: User = Depends(get_current_user)) -> UserResource:
+async def get_me(current_user: User = Security(get_current_user)) -> UserResource:
     return serialize_user(current_user)

@@ -160,7 +160,14 @@ def _serialize_role(role: Role) -> RoleResource:
 @router.post(
     "/users",
     response_model=UserResource,
-    dependencies=[Depends(RequirePermissions(_MANAGE_USERS_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _MANAGE_USERS_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def create_user(payload: AdminUserCreate, db: AsyncSession = Depends(get_session)) -> UserResource:
     email = str(payload.email).strip().lower()
@@ -191,7 +198,14 @@ async def create_user(payload: AdminUserCreate, db: AsyncSession = Depends(get_s
 @router.patch(
     "/users/{user_id}",
     response_model=UserResource,
-    dependencies=[Depends(RequirePermissions(_MANAGE_USERS_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _MANAGE_USERS_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def update_user(
     user_id: int,
@@ -232,7 +246,14 @@ async def update_user(
 @router.get(
     "/users",
     response_model=list[UserResource],
-    dependencies=[Depends(RequirePermissions("gateway.users.view"))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                "gateway.users.view",
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def list_users(db: AsyncSession = Depends(get_session)) -> list[UserResource]:
     stmt = (
@@ -248,7 +269,14 @@ async def list_users(db: AsyncSession = Depends(get_session)) -> list[UserResour
 @router.get(
     "/users/{user_id}",
     response_model=UserResource,
-    dependencies=[Depends(RequirePermissions("gateway.users.view"))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                "gateway.users.view",
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def get_user(user_id: int, db: AsyncSession = Depends(get_session)) -> UserResource:
     user = await _load_user(db, user_id)
@@ -258,7 +286,14 @@ async def get_user(user_id: int, db: AsyncSession = Depends(get_session)) -> Use
 @router.post(
     "/users/{user_id}/roles/{role_slug}",
     response_model=UserResource,
-    dependencies=[Depends(RequirePermissions(_MANAGE_USERS_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _MANAGE_USERS_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def assign_role(
     user_id: int,
@@ -277,7 +312,14 @@ async def assign_role(
 @router.delete(
     "/users/{user_id}/roles/{role_slug}",
     response_model=UserResource,
-    dependencies=[Depends(RequirePermissions(_MANAGE_USERS_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _MANAGE_USERS_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def remove_role(
     user_id: int,
@@ -295,7 +337,14 @@ async def remove_role(
 @router.get(
     "/permissions",
     response_model=list[PermissionResource],
-    dependencies=[Depends(RequirePermissions(_MANAGE_USERS_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _MANAGE_USERS_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def list_permissions(db: AsyncSession = Depends(get_session)) -> list[PermissionResource]:
     stmt = select(Permission).order_by(Permission.code.asc())
@@ -307,7 +356,14 @@ async def list_permissions(db: AsyncSession = Depends(get_session)) -> list[Perm
 @router.post(
     "/permissions",
     response_model=PermissionResource,
-    dependencies=[Depends(RequirePermissions(_ADMIN_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _ADMIN_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def create_permission(
     payload: PermissionCreate,
@@ -333,7 +389,14 @@ async def create_permission(
 @router.get(
     "/roles",
     response_model=list[RoleResource],
-    dependencies=[Depends(RequirePermissions(_MANAGE_USERS_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _MANAGE_USERS_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def list_roles(db: AsyncSession = Depends(get_session)) -> list[RoleResource]:
     stmt = select(Role).options(selectinload(Role.permissions)).order_by(Role.id.asc())
@@ -345,7 +408,14 @@ async def list_roles(db: AsyncSession = Depends(get_session)) -> list[RoleResour
 @router.post(
     "/roles/{role_slug}/permissions",
     response_model=RoleResource,
-    dependencies=[Depends(RequirePermissions(_ADMIN_PERMISSION))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _ADMIN_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def set_role_permissions(
     role_slug: str,
