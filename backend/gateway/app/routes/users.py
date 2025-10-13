@@ -56,14 +56,7 @@ async def change_my_password(
 @router.get(
     "",
     response_model=list[UserResource],
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                "gateway.users.view",
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
+    dependencies=[Depends(RequirePermissions("gateway.users.view"))],
 )
 async def list_users(db: AsyncSession = Depends(get_session)) -> list[UserResource]:
     stmt = (
@@ -79,14 +72,7 @@ async def list_users(db: AsyncSession = Depends(get_session)) -> list[UserResour
 @router.get(
     "/{user_id}",
     response_model=UserResource,
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                "gateway.users.view",
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
+    dependencies=[Depends(RequirePermissions("gateway.users.view"))],
 )
 async def get_user(user_id: int, db: AsyncSession = Depends(get_session)) -> UserResource:
     stmt = (
