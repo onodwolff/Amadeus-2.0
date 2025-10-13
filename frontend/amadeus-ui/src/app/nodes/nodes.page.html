@@ -8,7 +8,7 @@
       </p>
     </div>
     <div class="nodes-page__actions">
-      <div class="nodes-page__launch">
+      <div class="nodes-page__launch" *ngIf="authState.hasRole('trader')">
         <label class="nodes-page__launch-label" for="launchModeSelect">Launch mode</label>
         <div class="nodes-page__launch-control">
           <select
@@ -27,6 +27,7 @@
       <button
         type="button"
         class="btn btn--primary"
+        *ngIf="authState.hasRole('trader')"
         (click)="openWizard(launchDialog, launchMode())"
         [disabled]="isLaunching()"
       >
@@ -169,7 +170,8 @@
                   </ng-container>
                 </td>
                 <ng-template #noLatency>—</ng-template>
-                <td data-label="Controls" class="actions">
+              <td data-label="Controls" class="actions">
+                <ng-container *ngIf="authState.hasRole('trader'); else controlsLocked">
                   <button
                     type="button"
                     class="btn btn--ghost"
@@ -204,7 +206,11 @@
                   >
                     {{ deletingNodeId() === node.id ? 'Deleting…' : 'Delete' }}
                   </button>
-                </td>
+                </ng-container>
+                <ng-template #controlsLocked>
+                  <span class="nodes-page__controls-lock" data-testid="nodes-controls-locked">Trader role required</span>
+                </ng-template>
+              </td>
               </tr>
             </tbody>
           </table>

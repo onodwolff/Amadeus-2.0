@@ -6,17 +6,24 @@
         Configure a historical simulation, choose the dataset window and fine tune engine parameters before launching a run.
       </p>
     </div>
-    <button class="btn btn--primary" type="submit" form="backtestForm" [disabled]="form.invalid || isSubmitting()">
+    <button
+      *ngIf="authState.hasRole('trader')"
+      class="btn btn--primary"
+      type="submit"
+      form="backtestForm"
+      [disabled]="form.invalid || isSubmitting()"
+    >
       {{ isSubmitting() ? 'Creating…' : 'Launch backtest' }}
     </button>
   </header>
 
-  <form class="backtest-form" [formGroup]="form" (ngSubmit)="submit()" id="backtestForm">
-    <section class="form-section" aria-labelledby="run-meta">
-      <div class="section-header">
-        <h2 id="run-meta">Run metadata</h2>
-        <p>Give the backtest run a friendly name for the analytics list.</p>
-      </div>
+  <ng-container *ngIf="authState.hasRole('trader'); else backtestRestricted">
+    <form class="backtest-form" [formGroup]="form" (ngSubmit)="submit()" id="backtestForm">
+      <section class="form-section" aria-labelledby="run-meta">
+        <div class="section-header">
+          <h2 id="run-meta">Run metadata</h2>
+          <p>Give the backtest run a friendly name for the analytics list.</p>
+        </div>
       <div class="field">
         <label for="run-name">Run name</label>
         <input
@@ -206,5 +213,11 @@
         {{ isSubmitting() ? 'Creating…' : 'Create backtest run' }}
       </button>
     </div>
-  </form>
+    </form>
+  </ng-container>
+  <ng-template #backtestRestricted>
+    <p class="backtest-page__notice" data-testid="backtest-locked">
+      Trader role required to configure and launch backtests.
+    </p>
+  </ng-template>
 </section>

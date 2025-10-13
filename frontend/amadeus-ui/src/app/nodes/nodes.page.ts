@@ -21,6 +21,7 @@ import { NodeLaunchDialogComponent } from './node-launch-dialog.component';
 import { NodeDetailComponent } from './node-detail.component';
 import { Subscription } from 'rxjs';
 import { EquitySparklineComponent } from './components/equity-sparkline/equity-sparkline.component';
+import { AuthStateService } from '../shared/auth/auth-state.service';
 
 @Component({
   standalone: true,
@@ -55,6 +56,7 @@ export class NodesPage implements OnInit, OnDestroy {
   private readonly nodesApi = inject(NodesApi);
   private readonly systemApi = inject(SystemApi);
   private readonly ws = inject(WsService);
+  protected readonly authState = inject(AuthStateService);
 
   private logStreamSubscription: Subscription | null = null;
   private logStreamStateSubscription: Subscription | null = null;

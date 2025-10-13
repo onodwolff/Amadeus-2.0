@@ -1,13 +1,17 @@
 import { provideZonelessChangeDetection } from '@angular/core';
-import { signal } from '@angular/core';
+import { Signal, WritableSignal, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { RouterTestingModule } from '@angular/router/testing';
 import { AppComponent } from './app.component';
 import { AuthStateService } from './shared/auth/auth-state.service';
 
 describe('AppComponent', () => {
+  let permissionsSignal: WritableSignal<string[]>;
+  let rolesSignal: WritableSignal<string[]>;
+
   beforeEach(async () => {
-    const permissionsSignal = signal<string[]>([]);
+    permissionsSignal = signal<string[]>([]);
+    rolesSignal = signal<string[]>([]);
     await TestBed.configureTestingModule({
       imports: [AppComponent, RouterTestingModule],
       providers: [
@@ -17,7 +21,13 @@ describe('AppComponent', () => {
           useValue: {
             initialize: jasmine.createSpy('initialize'),
             permissions: permissionsSignal,
-          } satisfies Partial<AuthStateService>,
+            roles: rolesSignal as Signal<string[]>,
+            hasRole: (role: string) => rolesSignal().includes(role),
+          } satisfies Partial<AuthStateService> & {
+            permissions: Signal<string[]>;
+            roles: Signal<string[]>;
+            hasRole: (role: string) => boolean;
+          },
         },
       ],
     }).compileComponents();
@@ -29,8 +39,9 @@ describe('AppComponent', () => {
     expect(app).toBeTruthy();
   });
 
-  it('should render main navigation', () => {
+  it('should render trader navigation when role is present', () => {
     const fixture = TestBed.createComponent(AppComponent);
+    rolesSignal.set(['trader']);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
     const navLinks = Array.from(
@@ -49,5 +60,16 @@ describe('AppComponent', () => {
       'Risk',
       'Settings',
     ]);
+  });
+
+  it('should hide trader navigation for non-trader users', () => {
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const navLinks = Array.from(
+      compiled.querySelectorAll('.app-sidebar__link'),
+    ).map((link) => link.textContent?.trim());
+
+    expect(navLinks).toEqual(['Data', 'Settings']);
   });
 });

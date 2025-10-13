@@ -33,6 +33,7 @@ import {
   TimeSeriesChartComponent,
   TimeSeriesChartSeries,
 } from '../shared/components/time-series-chart/time-series-chart.component';
+import { AuthStateService } from '../shared/auth/auth-state.service';
 
 type ParameterRangeGroup = FormGroup<{
   key: FormControl<string>;
@@ -73,6 +74,7 @@ type DatasetOption = {
 export class StrategyTestingPage implements OnDestroy {
   private readonly fb = inject(FormBuilder);
   private readonly api = inject(StrategyTestsApi);
+  protected readonly authState = inject(AuthStateService);
 
   private pollSub?: Subscription;
 

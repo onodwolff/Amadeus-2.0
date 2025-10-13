@@ -15,6 +15,7 @@ import { Router } from '@angular/router';
 import { finalize } from 'rxjs';
 import { BacktestsApi, DataApi } from '../api/clients';
 import { BacktestRunCreateRequest, BacktestStrategyParameterDto, HistoricalDatasetDto } from '../api/models';
+import { AuthStateService } from '../shared/auth/auth-state.service';
 
 type StrategyParameterGroup = FormGroup<{ key: FormControl<string>; value: FormControl<string> }>;
 
@@ -72,6 +73,7 @@ export class BacktestPage implements OnInit {
   private readonly api = inject(BacktestsApi);
   private readonly dataApi = inject(DataApi);
   private readonly router = inject(Router);
+  protected readonly authState = inject(AuthStateService);
 
   readonly isSubmitting = signal(false);
   readonly submissionError = signal<string | null>(null);

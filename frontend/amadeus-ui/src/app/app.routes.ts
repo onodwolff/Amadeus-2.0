@@ -12,13 +12,30 @@ export const routes: Routes = [
     canActivateChild: [AuthGuard],
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
-      { path: 'dashboard', loadComponent: () => import('./nodes/nodes.page').then(m => m.NodesPage) },
+      {
+        path: 'dashboard',
+        data: { requiredRoles: ['trader'] },
+        loadComponent: () => import('./nodes/nodes.page').then(m => m.NodesPage),
+      },
       { path: 'nodes', redirectTo: 'dashboard', pathMatch: 'full' },
-      { path: 'market', loadComponent: () => import('./market/market.page').then(m => m.MarketPage) },
-      { path: 'portfolio', loadComponent: () => import('./portfolio/portfolio.page').then(m => m.PortfolioPage) },
-      { path: 'orders', loadComponent: () => import('./orders/orders.page').then(m => m.OrdersPage) },
+      {
+        path: 'market',
+        data: { requiredRoles: ['trader'] },
+        loadComponent: () => import('./market/market.page').then(m => m.MarketPage),
+      },
+      {
+        path: 'portfolio',
+        data: { requiredRoles: ['trader'] },
+        loadComponent: () => import('./portfolio/portfolio.page').then(m => m.PortfolioPage),
+      },
+      {
+        path: 'orders',
+        data: { requiredRoles: ['trader'] },
+        loadComponent: () => import('./orders/orders.page').then(m => m.OrdersPage),
+      },
       {
         path: 'backtest',
+        data: { requiredRoles: ['trader'] },
         children: [
           { path: '', loadComponent: () => import('./backtest/backtest.page').then(m => m.BacktestPage) },
           { path: 'runs/:runId', redirectTo: '/backtest/:runId', pathMatch: 'full' },
@@ -30,9 +47,14 @@ export const routes: Routes = [
       },
       {
         path: 'strategy-tests',
+        data: { requiredRoles: ['trader'] },
         loadComponent: () => import('./strategies/strategy-testing.page').then(m => m.StrategyTestingPage),
       },
-      { path: 'risk', loadComponent: () => import('./risk/risk.page').then(m => m.RiskPage) },
+      {
+        path: 'risk',
+        data: { requiredRoles: ['trader'] },
+        loadComponent: () => import('./risk/risk.page').then(m => m.RiskPage),
+      },
       {
         path: 'data',
         loadComponent: () => import('./data/historical-data.page').then(m => m.HistoricalDataPage),

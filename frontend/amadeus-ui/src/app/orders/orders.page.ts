@@ -12,6 +12,7 @@ import {
 import { observeOrdersStream } from '../ws';
 import { WsConnectionState, WsService } from '../ws.service';
 import { OrderTicketComponent } from './components/order-ticket/order-ticket.component';
+import { AuthStateService } from '../shared/auth/auth-state.service';
 
 @Component({
   standalone: true,
@@ -23,6 +24,7 @@ import { OrderTicketComponent } from './components/order-ticket/order-ticket.com
 export class OrdersPage implements OnInit {
   private readonly ordersApi = inject(OrdersApi);
   private readonly ws = inject(WsService);
+  protected readonly authState = inject(AuthStateService);
 
   readonly isLoading = signal(true);
   readonly errorText = signal<string | null>(null);
