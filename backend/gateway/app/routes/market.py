@@ -5,13 +5,18 @@ import asyncio
 import contextlib
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket
+from fastapi import APIRouter, HTTPException, Query, Security, WebSocket
 from fastapi.websockets import WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..dependencies import get_current_user
 from ..nautilus_service import svc
 
 router = APIRouter(tags=["market"])
+
+
+VIEWER_SCOPES = ["viewer", "trader", "manager"]
+TRADER_SCOPES = ["trader", "manager"]
 
 
 class InstrumentResource(BaseModel):
@@ -118,19 +123,27 @@ async def _stream_bus_topic(websocket: WebSocket, topic: str) -> None:
 
 
 @router.get("/market/instruments", response_model=InstrumentListResponse)
-async def list_instruments(venue: str | None = Query(default=None, min_length=1)) -> InstrumentListResponse:
+async def list_instruments(
+    venue: str | None = Query(default=None, min_length=1),
+    current_user=Security(get_current_user, scopes=VIEWER_SCOPES),
+) -> InstrumentListResponse:
     payload = svc.list_instruments(venue=venue)
     return InstrumentListResponse.model_validate(payload)
 
 
 @router.get("/market/watchlist", response_model=WatchlistResponse)
-async def get_watchlist() -> WatchlistResponse:
+async def get_watchlist(
+    current_user=Security(get_current_user, scopes=VIEWER_SCOPES),
+) -> WatchlistResponse:
     payload = svc.get_watchlist()
     return WatchlistResponse.model_validate(payload)
 
 
 @router.put("/market/watchlist", response_model=WatchlistResponse)
-async def update_watchlist(update: WatchlistUpdate) -> WatchlistResponse:
+async def update_watchlist(
+    update: WatchlistUpdate,
+    current_user=Security(get_current_user, scopes=TRADER_SCOPES),
+) -> WatchlistResponse:
     payload = svc.update_watchlist(update.favorites)
     return WatchlistResponse.model_validate(payload)
 
@@ -145,6 +158,7 @@ async def get_historical_bars(
     limit: int | None = Query(default=None, ge=1, le=1000),
     start: datetime | None = Query(default=None),
     end: datetime | None = Query(default=None),
+    current_user=Security(get_current_user, scopes=VIEWER_SCOPES),
 ) -> HistoricalBarsResponse:
     try:
         payload = svc.get_historical_bars(

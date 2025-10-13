@@ -1,13 +1,46 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import uuid4
 from unittest.mock import Mock
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from backend.gateway.app.nautilus_service import NodeHandle
 from backend.gateway.app.routes import nodes as nodes_routes
+from backend.gateway.app.security import create_test_access_token
+from backend.gateway.db import models as db_models
+from backend.gateway.db.base import Base as GatewayBase
+
+try:  # pragma: no cover - optional import when package layout allows
+    from gateway.db import models as alt_db_models
+    from gateway.db.base import Base as AltGatewayBase
+except ModuleNotFoundError:  # pragma: no cover - running from backend package only
+    alt_db_models = None
+    AltGatewayBase = None
+
+from .utils import create_user
+
+# Ensure tables do not carry PostgreSQL schemas when using SQLite
+GatewayBase.metadata.schema = None
+for table in GatewayBase.metadata.tables.values():
+    table.schema = None
+
+db_models.Base.metadata.schema = None
+for table in db_models.Base.metadata.tables.values():
+    table.schema = None
+
+if AltGatewayBase is not None:  # pragma: no cover - exercised in integration tests
+    AltGatewayBase.metadata.schema = None
+    for table in AltGatewayBase.metadata.tables.values():
+        table.schema = None
+
+if alt_db_models is not None:  # pragma: no cover - exercised in integration tests
+    alt_db_models.Base.metadata.schema = None
+    for table in alt_db_models.Base.metadata.tables.values():
+        table.schema = None
 
 
 @pytest.fixture(autouse=True)
@@ -63,10 +96,45 @@ def override_nautilus_service(monkeypatch: pytest.MonkeyPatch):
     return stub
 
 
+@pytest_asyncio.fixture
+async def trader_headers(db_session):
+    user = await create_user(
+        db_session,
+        email=f"trader-{uuid4()}@example.com",
+        username=f"trader-{uuid4().hex[:8]}",
+        password="password",
+        roles=[db_models.UserRole.MEMBER.value],
+    )
+    token, _ = create_test_access_token(subject=user.id, roles=[db_models.UserRole.MEMBER.value], scopes=["trader"])
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def viewer_headers(db_session):
+    user = await create_user(
+        db_session,
+        email=f"viewer-{uuid4()}@example.com",
+        username=f"viewer-{uuid4().hex[:8]}",
+        password="password",
+        roles=[db_models.UserRole.VIEWER.value],
+    )
+    token, _ = create_test_access_token(subject=user.id, roles=[db_models.UserRole.VIEWER.value], scopes=["viewer"])
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest.mark.asyncio
-async def test_list_nodes_returns_handles(app, override_nautilus_service):
+async def test_list_nodes_rejects_without_trader_scope(app, viewer_headers):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.get("/nodes")
+        response = await client.get("/nodes", headers=viewer_headers)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Insufficient role"
+
+
+@pytest.mark.asyncio
+async def test_list_nodes_returns_handles(app, override_nautilus_service, trader_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/nodes", headers=trader_headers)
     assert response.status_code == 200
     payload = response.json()
     assert payload["nodes"]
@@ -87,6 +155,7 @@ async def test_launch_node_dispatches_to_correct_service(
     service_method: str,
     app,
     override_nautilus_service,
+    trader_headers,
 ):
     payload = {
         "type": node_type,
@@ -116,14 +185,14 @@ async def test_launch_node_dispatches_to_correct_service(
     }
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.post("/nodes/launch", json=payload)
+        response = await client.post("/nodes/launch", json=payload, headers=trader_headers)
 
     assert response.status_code == 201
     getattr(override_nautilus_service, service_method).assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_launch_node_rejects_unknown_type(app, override_nautilus_service):
+async def test_launch_node_rejects_unknown_type(app, override_nautilus_service, trader_headers):
     payload = {
         "type": "unknown",
         "strategy": {
@@ -143,7 +212,7 @@ async def test_launch_node_rejects_unknown_type(app, override_nautilus_service):
     }
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.post("/nodes/launch", json=payload)
+        response = await client.post("/nodes/launch", json=payload, headers=trader_headers)
 
     assert response.status_code == 400
     override_nautilus_service.start_backtest.assert_not_called()
@@ -152,40 +221,40 @@ async def test_launch_node_rejects_unknown_type(app, override_nautilus_service):
 
 
 @pytest.mark.asyncio
-async def test_stop_node_invokes_service(app, override_nautilus_service):
+async def test_stop_node_invokes_service(app, override_nautilus_service, trader_headers):
     node_id = "bt-11111111"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.post(f"/nodes/{node_id}/stop")
+        response = await client.post(f"/nodes/{node_id}/stop", headers=trader_headers)
 
     assert response.status_code == 200
     override_nautilus_service.stop_node.assert_called_once_with(node_id)
 
 
 @pytest.mark.asyncio
-async def test_restart_node_invokes_service(app, override_nautilus_service):
+async def test_restart_node_invokes_service(app, override_nautilus_service, trader_headers):
     node_id = "bt-11111111"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.post(f"/nodes/{node_id}/restart")
+        response = await client.post(f"/nodes/{node_id}/restart", headers=trader_headers)
 
     assert response.status_code == 200
     override_nautilus_service.restart_node.assert_called_once_with(node_id)
 
 
 @pytest.mark.asyncio
-async def test_delete_node_returns_no_content(app, override_nautilus_service):
+async def test_delete_node_returns_no_content(app, override_nautilus_service, trader_headers):
     node_id = "bt-11111111"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.post(f"/nodes/{node_id}/delete")
+        response = await client.post(f"/nodes/{node_id}/delete", headers=trader_headers)
 
     assert response.status_code == 204
     override_nautilus_service.delete_node.assert_called_once_with(node_id)
 
 
 @pytest.mark.asyncio
-async def test_get_node_detail_uses_service(app, override_nautilus_service):
+async def test_get_node_detail_uses_service(app, override_nautilus_service, trader_headers):
     node_id = "bt-11111111"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.get(f"/nodes/{node_id}")
+        response = await client.get(f"/nodes/{node_id}", headers=trader_headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -194,10 +263,10 @@ async def test_get_node_detail_uses_service(app, override_nautilus_service):
 
 
 @pytest.mark.asyncio
-async def test_export_logs_returns_plain_text(app, override_nautilus_service):
+async def test_export_logs_returns_plain_text(app, override_nautilus_service, trader_headers):
     node_id = "bt-11111111"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.get(f"/nodes/{node_id}/logs")
+        response = await client.get(f"/nodes/{node_id}/logs", headers=trader_headers)
 
     assert response.status_code == 200
     assert response.text == "log-entry"
@@ -205,10 +274,10 @@ async def test_export_logs_returns_plain_text(app, override_nautilus_service):
 
 
 @pytest.mark.asyncio
-async def test_get_node_logs_streams_snapshot(app, override_nautilus_service):
+async def test_get_node_logs_streams_snapshot(app, override_nautilus_service, trader_headers):
     node_id = "bt-11111111"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.get(f"/nodes/{node_id}/logs/entries")
+        response = await client.get(f"/nodes/{node_id}/logs/entries", headers=trader_headers)
 
     assert response.status_code == 200
     data = response.json()
