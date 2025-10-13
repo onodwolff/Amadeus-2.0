@@ -2,11 +2,13 @@ import { Routes } from '@angular/router';
 
 import { AdminGuard } from './shared/auth/admin.guard';
 import { AuthGuard } from './shared/auth/auth.guard';
+import { RoleGuard } from './auth/role.guard';
 
 export const routes: Routes = [
   { path: 'login', loadComponent: () => import('./auth/login.page').then(m => m.LoginPage) },
   {
     path: '',
+    canMatch: [RoleGuard],
     canActivateChild: [AuthGuard],
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
@@ -38,8 +40,12 @@ export const routes: Routes = [
       { path: 'settings', loadComponent: () => import('./settings/settings.page').then(m => m.SettingsPage) },
       {
         path: 'admin/users',
+        canMatch: [RoleGuard],
         canActivate: [AdminGuard],
         providers: [AdminGuard],
+        data: {
+          requiredRoles: ['admin'],
+        },
         loadComponent: () => import('./admin/users').then(m => m.AdminUsersPage),
       },
       { path: '**', redirectTo: 'dashboard' },
