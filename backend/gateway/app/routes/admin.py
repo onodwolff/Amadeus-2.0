@@ -10,12 +10,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 try:
-    from gateway.db.models import Permission, Role, User, UserRole  # type: ignore
+    from gateway.db.models import Permission, Role, User, UserRole, UserTokenPurpose  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover
-    from backend.gateway.db.models import Permission, Role, User, UserRole  # type: ignore
+    from backend.gateway.db.models import (  # type: ignore
+        Permission,
+        Role,
+        User,
+        UserRole,
+        UserTokenPurpose,
+    )
 
-from ..dependencies import RequirePermissions, get_session
+from ..config import settings
+from ..dependencies import RequirePermissions, get_email_dispatcher, get_session
+from ..email import EmailDispatcher
 from ..security import hash_password
+from ..token_service import TokenService
 from .auth import UserResource, serialize_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -169,7 +178,11 @@ def _serialize_role(role: Role) -> RoleResource:
         )
     ],
 )
-async def create_user(payload: AdminUserCreate, db: AsyncSession = Depends(get_session)) -> UserResource:
+async def create_user(
+    payload: AdminUserCreate,
+    db: AsyncSession = Depends(get_session),
+    email_dispatcher: EmailDispatcher = Depends(get_email_dispatcher),
+) -> UserResource:
     email = str(payload.email).strip().lower()
     username = _clean_username(email, payload.username)
     name = _clean_name(payload.name)
@@ -189,9 +202,25 @@ async def create_user(payload: AdminUserCreate, db: AsyncSession = Depends(get_s
     db.add(user)
     await db.flush()
     await _apply_roles(db, user, payload.roles)
+    verification_record = None
+    verification_token: str | None = None
+    if not user.email_verified:
+        token_service = TokenService(db)
+        verification_record, verification_token = await token_service.issue(
+            user=user,
+            purpose=UserTokenPurpose.EMAIL_VERIFICATION,
+            ttl_seconds=settings.auth.email_verification_token_ttl_seconds,
+        )
     await db.commit()
 
     created = await _load_user(db, user.id)
+    if verification_record is not None and verification_token is not None:
+        await db.refresh(verification_record)
+        await email_dispatcher.send_email_verification(
+            email=created.email,
+            token=verification_token,
+            expires_at=verification_record.expires_at,
+        )
     return serialize_user(created)
 
 

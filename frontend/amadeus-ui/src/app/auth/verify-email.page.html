@@ -1,0 +1,13 @@
+<div class="auth-page">
+  <div
+    class="auth-form auth-form--status"
+    [class.auth-form--success]="status() === 'success'"
+    [class.auth-form--error]="status() === 'error'"
+  >
+    <h1 class="auth-form__title">
+      {{ status() === 'success' ? 'Email verified' : status() === 'error' ? 'Verification failed' : 'Verifying email' }}
+    </h1>
+    <p class="auth-form__description">{{ message() }}</p>
+    <a routerLink="/login" class="auth-form__link">Return to sign in</a>
+  </div>
+</div>

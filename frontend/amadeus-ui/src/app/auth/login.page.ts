@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
+import { RouterModule } from '@angular/router';
 
 import { AuthService } from './auth.service';
 import { AuthStateService } from '../shared/auth/auth-state.service';
@@ -8,7 +9,7 @@ import { AuthStateService } from '../shared/auth/auth-state.service';
 @Component({
   standalone: true,
   selector: 'app-login-page',
-  imports: [CommonModule],
+  imports: [CommonModule, RouterModule],
   templateUrl: './login.page.html',
   styleUrls: ['./login.page.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

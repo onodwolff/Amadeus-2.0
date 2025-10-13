@@ -105,6 +105,37 @@ class AuthSettings(BaseModel):
         validation_alias=AliasChoices("AUTH_ALLOW_TEST_TOKENS", "AUTH__ALLOW_TEST_TOKENS"),
         description="Enable legacy locally signed tokens for test environments.",
     )
+    public_base_url: str = Field(
+        default="http://localhost:8000",
+        validation_alias=AliasChoices("AUTH_PUBLIC_BASE_URL", "AUTH__PUBLIC_BASE_URL"),
+        description="External URL where password reset and verification endpoints are exposed.",
+    )
+    password_reset_path: str = Field(
+        default="/auth/reset-password",
+        validation_alias=AliasChoices("AUTH_PASSWORD_RESET_PATH", "AUTH__PASSWORD_RESET_PATH"),
+    )
+    email_verification_path: str = Field(
+        default="/auth/verify-email",
+        validation_alias=AliasChoices("AUTH_EMAIL_VERIFICATION_PATH", "AUTH__EMAIL_VERIFICATION_PATH"),
+    )
+    password_reset_token_ttl_seconds: int = Field(
+        default=3_600,
+        ge=300,
+        le=86_400,
+        validation_alias=AliasChoices(
+            "AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS",
+            "AUTH__PASSWORD_RESET_TOKEN_TTL_SECONDS",
+        ),
+    )
+    email_verification_token_ttl_seconds: int = Field(
+        default=172_800,
+        ge=300,
+        le=604_800,
+        validation_alias=AliasChoices(
+            "AUTH_EMAIL_VERIFICATION_TOKEN_TTL_SECONDS",
+            "AUTH__EMAIL_VERIFICATION_TOKEN_TTL_SECONDS",
+        ),
+    )
     admin_email: EmailStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ADMIN_EMAIL", "AUTH__ADMIN_EMAIL"),
@@ -129,6 +160,28 @@ class AuthSettings(BaseModel):
             return None
         normalised = str(value).strip().lower()
         return _EMAIL_STR_ADAPTER.validate_python(normalised)
+
+    @field_validator("public_base_url", mode="before")
+    @classmethod
+    def _normalise_public_base_url(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("AUTH_PUBLIC_BASE_URL must be provided")
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("AUTH_PUBLIC_BASE_URL must be a non-empty string")
+        return cleaned.rstrip("/") or cleaned
+
+    @field_validator("password_reset_path", "email_verification_path", mode="before")
+    @classmethod
+    def _normalise_paths(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("Endpoint paths must be provided")
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Endpoint paths must be non-empty strings")
+        if not cleaned.startswith("/"):
+            cleaned = f"/{cleaned}"
+        return cleaned
 
     @field_validator("idp_algorithms", mode="before")
     @classmethod

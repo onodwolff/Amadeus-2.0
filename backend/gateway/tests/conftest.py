@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import AsyncIterator, Callable, Iterator
+from datetime import timezone
+from typing import Any
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -16,7 +18,8 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from backend.gateway.app.main import create_app
-from backend.gateway.app.dependencies import get_session
+from backend.gateway.app.dependencies import get_email_dispatcher, get_session
+from backend.gateway.app.email import EmailDispatcher
 from backend.gateway.config import settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -31,6 +34,47 @@ class SQLiteJSONB(sa.JSON):
 
 postgresql.JSONB = SQLiteJSONB  # type: ignore[attr-defined]
 
+
+class InMemoryEmailDispatcher(EmailDispatcher):
+    def __init__(self) -> None:
+        super().__init__()
+        self.outbox: list[dict[str, Any]] = []
+
+    async def send_password_reset_email(
+        self,
+        *,
+        email: str,
+        token: str,
+        expires_at,
+    ) -> None:
+        normalized = expires_at if getattr(expires_at, "tzinfo", None) else expires_at.replace(tzinfo=timezone.utc)
+        self.outbox.append(
+            {
+                "type": "password_reset",
+                "email": email,
+                "token": token,
+                "expires_at": normalized,
+                "url": self.password_reset_url(token),
+            }
+        )
+
+    async def send_email_verification(
+        self,
+        *,
+        email: str,
+        token: str,
+        expires_at,
+    ) -> None:
+        normalized = expires_at if getattr(expires_at, "tzinfo", None) else expires_at.replace(tzinfo=timezone.utc)
+        self.outbox.append(
+            {
+                "type": "email_verification",
+                "email": email,
+                "token": token,
+                "expires_at": normalized,
+                "url": self.email_verification_url(token),
+            }
+        )
 
 
 def _patch_jsonb(metadata: sa.MetaData) -> None:
@@ -284,9 +328,22 @@ def app(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(settings.auth, "enabled", True)
     application = create_app()
+    email_dispatcher = InMemoryEmailDispatcher()
 
     async def _override_session():
         yield db_session
 
+    def _override_email_dispatcher() -> EmailDispatcher:
+        return email_dispatcher
+
     application.dependency_overrides[get_session] = _override_session
+    application.dependency_overrides[get_email_dispatcher] = _override_email_dispatcher
+    application.state.email_dispatcher = email_dispatcher
     return application
+
+
+@pytest.fixture
+def email_outbox(app) -> list[dict[str, Any]]:
+    dispatcher: InMemoryEmailDispatcher = app.state.email_dispatcher
+    dispatcher.outbox.clear()
+    return dispatcher.outbox

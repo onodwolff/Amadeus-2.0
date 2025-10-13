@@ -30,6 +30,7 @@ async def test_login_and_refresh_flow(app, db_session):
         assert token_payload["tokenType"] == "bearer"
         assert token_payload["expiresIn"] > 0
         assert token_payload["user"]["isAdmin"] is True
+        assert token_payload["user"]["emailVerified"] is False
         assert "refreshToken" not in token_payload
 
         refresh_cookie = login_response.cookies.get("refreshToken")
@@ -46,6 +47,7 @@ async def test_login_and_refresh_flow(app, db_session):
         assert me_payload["email"] == "admin@example.com"
         assert set(me_payload["roles"]) == {UserRole.ADMIN.value}
         assert "gateway.admin" in me_payload["permissions"]
+        assert me_payload["emailVerified"] is False
 
         refresh_response = await client.post(
             "/auth/refresh",
@@ -56,6 +58,7 @@ async def test_login_and_refresh_flow(app, db_session):
         assert refreshed["accessToken"]
         assert isinstance(refreshed["accessToken"], str)
         assert refreshed["user"]["email"] == "admin@example.com"
+        assert refreshed["user"]["emailVerified"] is False
         assert "refreshToken" not in refreshed
 
         refreshed_cookie = refresh_response.cookies.get("refreshToken")
