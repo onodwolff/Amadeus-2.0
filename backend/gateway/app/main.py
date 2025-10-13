@@ -6,10 +6,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from gateway.app.logging import setup_logging
+try:  # pragma: no cover - prefer local backend package in tests
+    from backend.gateway.app.logging import setup_logging  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - production installs
+    from gateway.app.logging import setup_logging
 
 from .config import settings
-from .routes import admin, auth, market, nodes, system, users
+from .routes import admin, api_keys, auth, integrations, market, nodes, system, users
 
 setup_logging()
 
@@ -63,16 +66,20 @@ def create_app(*, api_prefix: str | None = None) -> FastAPI:
         app.include_router(auth.router, prefix=router_prefix)
         app.include_router(users.router, prefix=router_prefix)
         app.include_router(admin.router, prefix=router_prefix)
+        app.include_router(api_keys.router, prefix=router_prefix)
         app.include_router(market.router, prefix=router_prefix)
         app.include_router(nodes.router, prefix=router_prefix)
         app.include_router(system.router, prefix=router_prefix)
+        app.include_router(integrations.router, prefix=router_prefix)
     else:
         app.include_router(auth.router)
         app.include_router(users.router)
         app.include_router(admin.router)
+        app.include_router(api_keys.router)
         app.include_router(market.router)
         app.include_router(nodes.router)
         app.include_router(system.router)
+        app.include_router(integrations.router)
 
     return app
 
