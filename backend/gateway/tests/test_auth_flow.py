@@ -30,9 +30,12 @@ async def test_login_and_refresh_flow(app, db_session):
         assert token_payload["tokenType"] == "bearer"
         assert token_payload["expiresIn"] > 0
         assert token_payload["user"]["isAdmin"] is True
+        assert "refreshToken" not in token_payload
+
+        refresh_cookie = login_response.cookies.get("refreshToken")
+        assert refresh_cookie
 
         access_token = token_payload["accessToken"]
-        refresh_token = token_payload["refreshToken"]
 
         me_response = await client.get(
             "/auth/me",
@@ -46,13 +49,18 @@ async def test_login_and_refresh_flow(app, db_session):
 
         refresh_response = await client.post(
             "/auth/refresh",
-            json={"refreshToken": refresh_token},
+            cookies={"refreshToken": refresh_cookie},
         )
         assert refresh_response.status_code == 200
         refreshed = refresh_response.json()
         assert refreshed["accessToken"]
         assert isinstance(refreshed["accessToken"], str)
         assert refreshed["user"]["email"] == "admin@example.com"
+        assert "refreshToken" not in refreshed
+
+        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        assert refreshed_cookie
+        assert refreshed_cookie != refresh_cookie
 
     result = await db_session.execute(select(AuthSession))
     sessions = result.scalars().all()
@@ -95,14 +103,17 @@ async def test_logout_revokes_refresh_token(app, db_session):
             "/auth/login",
             json={"email": "viewer@example.com", "password": "logout-pass"},
         )
-        refresh_token = login_response.json()["refreshToken"]
+        refresh_cookie = login_response.cookies.get("refreshToken")
+        assert refresh_cookie
 
         logout_response = await client.post(
             "/auth/logout",
-            json={"refreshToken": refresh_token},
+            cookies={"refreshToken": refresh_cookie},
         )
         assert logout_response.status_code == 200
         assert logout_response.json()["detail"] == "Logged out"
+        cookie_header = logout_response.headers.get("set-cookie", "")
+        assert "refreshToken=" in cookie_header
 
     result = await db_session.execute(select(AuthSession))
     sessions = result.scalars().all()
