@@ -163,7 +163,7 @@ def _verify_passphrase(secret_payload: dict[str, Any], provided_hash: str) -> No
 async def list_keys(
     current_user: User = Security(
         get_current_user,
-        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+        scopes=[UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.MEMBER.value],
     ),
     db: AsyncSession = Depends(get_session),
 ) -> ApiKeysResponse:
@@ -182,7 +182,7 @@ async def create_key(
     payload: KeyCreateRequest,
     current_user: User = Security(
         get_current_user,
-        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+        scopes=[UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.MEMBER.value],
     ),
     db: AsyncSession = Depends(get_session),
 ) -> ApiKeyResource:
@@ -233,7 +233,7 @@ async def update_key(
     payload: KeyUpdateRequest,
     current_user: User = Security(
         get_current_user,
-        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+        scopes=[UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.MEMBER.value],
     ),
     db: AsyncSession = Depends(get_session),
 ) -> ApiKeyResource:
@@ -277,7 +277,7 @@ async def delete_key(
     payload: KeyDeleteRequest,
     current_user: User = Security(
         get_current_user,
-        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+        scopes=[UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.MEMBER.value],
     ),
     db: AsyncSession = Depends(get_session),
 ) -> Response:

@@ -34,6 +34,8 @@ class UserRole(str, enum.Enum):
     """Role associated with a user account."""
 
     ADMIN = "admin"
+    MANAGER = "manager"
+    TRADER = "trader"
     MEMBER = "member"
     VIEWER = "viewer"
 
@@ -294,7 +296,13 @@ class User(Base):
     def primary_role(self) -> UserRole:
         """Return the most privileged configured role for the user."""
 
-        for candidate in (UserRole.ADMIN, UserRole.MEMBER, UserRole.VIEWER):
+        for candidate in (
+            UserRole.ADMIN,
+            UserRole.MANAGER,
+            UserRole.MEMBER,
+            UserRole.TRADER,
+            UserRole.VIEWER,
+        ):
             if self.has_role(candidate):
                 return candidate
         return UserRole.MEMBER

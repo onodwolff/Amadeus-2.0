@@ -36,7 +36,7 @@ async def test_viewer_cannot_create_user(app, db_session):
             headers={"Authorization": f"Bearer {viewer_token}"},
         )
     assert create_response.status_code == 403
-    assert create_response.json()["detail"] == "Insufficient permissions"
+    assert create_response.json()["detail"] == "Insufficient role"
 
 
 @pytest.mark.asyncio
@@ -115,6 +115,10 @@ async def test_admin_manages_users_roles_and_permissions(app, db_session):
         roles_payload = roles_response.json()
         member_role = next(role for role in roles_payload if role["slug"] == UserRole.MEMBER.value)
         assert set(member_role["permissions"]) == {"gateway.users.view", "gateway.reports.view"}
+        manager_role = next(role for role in roles_payload if role["slug"] == UserRole.MANAGER.value)
+        assert set(manager_role["permissions"]) == {"gateway.users.manage", "gateway.users.view"}
+        trader_role = next(role for role in roles_payload if role["slug"] == UserRole.TRADER.value)
+        assert set(trader_role["permissions"]) == {"gateway.users.view"}
 
         login_managed = await client.post(
             "/auth/login",
@@ -123,3 +127,38 @@ async def test_admin_manages_users_roles_and_permissions(app, db_session):
         assert login_managed.status_code == 200
         managed_payload = login_managed.json()["user"]
         assert set(managed_payload["permissions"]) == {"gateway.users.view", "gateway.reports.view"}
+
+
+@pytest.mark.asyncio
+async def test_manager_and_trader_permissions(app, db_session):
+    await create_user(
+        db_session,
+        email="manager@example.com",
+        username="manager",
+        password="password",
+        roles=[UserRole.MANAGER.value],
+    )
+    await create_user(
+        db_session,
+        email="trader@example.com",
+        username="trader",
+        password="password",
+        roles=[UserRole.TRADER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        manager_login = await client.post(
+            "/auth/login",
+            json={"email": "manager@example.com", "password": "password"},
+        )
+        assert manager_login.status_code == 200
+        manager_permissions = set(manager_login.json()["user"]["permissions"])
+        assert manager_permissions == {"gateway.users.manage", "gateway.users.view"}
+
+        trader_login = await client.post(
+            "/auth/login",
+            json={"email": "trader@example.com", "password": "password"},
+        )
+        assert trader_login.status_code == 200
+        trader_permissions = set(trader_login.json()["user"]["permissions"])
+        assert trader_permissions == {"gateway.users.view"}

@@ -109,6 +109,16 @@ _DEFAULT_ROLES = [
         "description": "Full administrative control over the gateway.",
     },
     {
+        "slug": db_models.UserRole.MANAGER.value,
+        "name": "Manager",
+        "description": "Operational management capabilities for trading teams.",
+    },
+    {
+        "slug": db_models.UserRole.TRADER.value,
+        "name": "Trader",
+        "description": "Trading-focused access for launching and monitoring nodes.",
+    },
+    {
         "slug": db_models.UserRole.MEMBER.value,
         "name": "Member",
         "description": "Standard user with management capabilities.",
@@ -124,6 +134,13 @@ _DEFAULT_ROLE_PERMISSIONS = {
     db_models.UserRole.ADMIN.value: {
         "gateway.admin",
         "gateway.users.manage",
+        "gateway.users.view",
+    },
+    db_models.UserRole.MANAGER.value: {
+        "gateway.users.manage",
+        "gateway.users.view",
+    },
+    db_models.UserRole.TRADER.value: {
         "gateway.users.view",
     },
     db_models.UserRole.MEMBER.value: {
