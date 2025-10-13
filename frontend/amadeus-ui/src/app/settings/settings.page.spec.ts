@@ -1,4 +1,4 @@
-import { provideZonelessChangeDetection, signal } from '@angular/core';
+import { provideZonelessChangeDetection, signal, WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 
@@ -52,6 +52,10 @@ function createUserProfile(): UserProfile {
 describe('SettingsPage advanced settings', () => {
   let fixture: ComponentFixture<SettingsPage>;
   let component: SettingsPage;
+  let usersApiStub: jasmine.SpyObj<UsersApi>;
+  let authStateStub: Partial<AuthStateService>;
+  let currentUserSignal: WritableSignal<AuthUser | null>;
+  let permissionsSignal: WritableSignal<string[]>;
 
   beforeEach(async () => {
     const authApiStub = jasmine.createSpyObj<AuthApi>('AuthApi', [
@@ -112,9 +116,14 @@ describe('SettingsPage advanced settings', () => {
     const marketApiStub = jasmine.createSpyObj<MarketApi>('MarketApi', ['listInstruments']);
     marketApiStub.listInstruments.and.returnValue(of({ instruments: [] }));
 
-    const usersApiStub = jasmine.createSpyObj<UsersApi>('UsersApi', ['getAccount', 'updatePassword']);
+    usersApiStub = jasmine.createSpyObj<UsersApi>('UsersApi', [
+      'getAccount',
+      'updatePassword',
+      'changePassword',
+    ]);
     usersApiStub.getAccount.and.returnValue(of(createUserProfile()));
     usersApiStub.updatePassword.and.returnValue(of(createUserProfile()));
+    usersApiStub.changePassword.and.returnValue(of(void 0));
 
     const integrationsApiStub = jasmine.createSpyObj<IntegrationsApi>('IntegrationsApi', ['listExchanges']);
     integrationsApiStub.listExchanges.and.returnValue(of({ exchanges: [] as ExchangeDescriptor[] }));
@@ -124,14 +133,15 @@ describe('SettingsPage advanced settings', () => {
       ['success', 'info', 'warning', 'error'],
     );
 
-    const currentUserSignal = signal<AuthUser | null>(createAuthUser());
+    currentUserSignal = signal<AuthUser | null>(createAuthUser());
+    permissionsSignal = signal<string[]>(createAuthUser().permissions);
 
-    const authStateStub: Partial<AuthStateService> = {
+    authStateStub = {
       initialize: jasmine.createSpy('initialize'),
       setCurrentUser: jasmine.createSpy('setCurrentUser'),
       clear: jasmine.createSpy('clear'),
       currentUser: currentUserSignal,
-      permissions: signal<string[]>(createAuthUser().permissions),
+      permissions: permissionsSignal,
     };
 
     await TestBed.configureTestingModule({
@@ -200,6 +210,34 @@ describe('SettingsPage advanced settings', () => {
     expect(advanced).withContext('advanced section should be visible').not.toBeNull();
     expect(advanced?.querySelector('[formControlName="label"]')).not.toBeNull();
     expect(advanced?.querySelector('[formControlName="passphraseHint"]')).not.toBeNull();
+  });
+
+  it('allows viewer users to change their own password', async () => {
+    const viewer = {
+      ...createAuthUser(),
+      permissions: ['gateway.users.view'],
+      roles: ['viewer'],
+    };
+    currentUserSignal.set(viewer);
+    permissionsSignal.set(viewer.permissions);
+
+    component.passwordForm.setValue({
+      currentPassword: 'current-password',
+      password: 'new-password',
+      confirmPassword: 'new-password',
+    });
+
+    await component.changePassword();
+
+    expect(usersApiStub.changePassword).toHaveBeenCalledWith({
+      currentPassword: 'current-password',
+      newPassword: 'new-password',
+    });
+    expect(usersApiStub.updatePassword).not.toHaveBeenCalled();
+    expect(usersApiStub.getAccount).toHaveBeenCalled();
+    expect(authStateStub.setCurrentUser).toHaveBeenCalledWith(
+      jasmine.objectContaining({ id: viewer.id }),
+    );
   });
 
   it('should surface helper guidance for credential secrets and passphrases', () => {

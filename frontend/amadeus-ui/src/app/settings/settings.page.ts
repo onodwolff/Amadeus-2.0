@@ -600,12 +600,10 @@ export class SettingsPage implements OnInit {
         throw new Error('No active session found. Please sign in again.');
       }
 
-      const passwordResponse = await firstValueFrom(
-        this.usersApi.updatePassword(currentUser.id, passwordPayload),
-      );
-      const latestAccount = passwordResponse ?? null;
+      await firstValueFrom(this.usersApi.changePassword(passwordPayload));
+      const latestAccount = await firstValueFrom(this.usersApi.getAccount());
       this.activeUser.set(latestAccount);
-      this.authState.setCurrentUser({ ...currentUser, ...(latestAccount ?? {}) });
+      this.authState.setCurrentUser({ ...currentUser, ...latestAccount });
 
       this.passwordForm.reset({
         currentPassword: '',
