@@ -8,11 +8,13 @@ export class AdminGuard implements CanActivate {
   private readonly authState = inject(AuthStateService);
   private readonly router = inject(Router);
 
-  canActivate(): boolean | UrlTree {
+  async canActivate(): Promise<boolean | UrlTree> {
+    await this.authState.initialize();
+
     if (this.authState.hasAnyPermission(['gateway.users.manage', 'gateway.admin'])) {
       return true;
     }
 
-    return this.router.createUrlTree(['/dashboard']);
+    return this.router.parseUrl('/403');
   }
 }
