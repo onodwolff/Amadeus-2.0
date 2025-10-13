@@ -66,6 +66,12 @@ _install_logging_stub()
 _install_email_validator_stub()
 
 try:
+    import gateway  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+    import backend.gateway as gateway  # type: ignore[no-redef]
+
+
+try:
     from gateway.config import settings
 except ModuleNotFoundError:  # pragma: no cover
     from backend.gateway.config import settings  # type: ignore
@@ -159,7 +165,7 @@ def upgrade() -> None:
     sa.Column('timeframe', sa.String(length=32), nullable=False),
     sa.Column('date_from', sa.DateTime(timezone=True), nullable=False),
     sa.Column('date_to', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('status', sa.Enum('pending', 'running', 'ready', 'failed', name='historical_data_status'), server_default='pending', nullable=False),
+    sa.Column('status', sa.Enum('PENDING', 'RUNNING', 'READY', 'FAILED', name='historical_data_status'), server_default='PENDING', nullable=False),
     sa.Column('source', sa.String(length=64), nullable=True),
     sa.Column('path', sa.String(length=255), nullable=True),
     sa.Column('size_bytes', sa.Integer(), nullable=True),
@@ -285,7 +291,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('mode', sa.Enum('backtest', 'sandbox', 'live', name='node_mode'), nullable=False),
     sa.Column('strategy_id', sa.String(length=128), nullable=True),
-    sa.Column('status', sa.Enum('created', 'running', 'stopped', 'error', name='node_status'), server_default='created', nullable=False),
+    sa.Column('status', sa.Enum('CREATED', 'RUNNING', 'STOPPED', 'ERROR', name='node_status'), server_default='CREATED', nullable=False),
     sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('stopped_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('summary', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("('{}'::jsonb)"), nullable=False),
