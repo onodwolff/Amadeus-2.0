@@ -73,8 +73,8 @@ class AuthSettings(BaseModel):
         validation_alias=AliasChoices("AUTH_ENABLED", "AUTH__ENABLED"),
     )
     jwt_secret: str = Field(default="change-me", min_length=8)
-    access_token_ttl_seconds: int = Field(default=900, ge=60)
-    refresh_token_ttl_seconds: int = Field(default=86400, ge=300)
+    access_token_ttl_seconds: int = Field(default=900, ge=300, le=900)
+    refresh_token_ttl_seconds: int = Field(default=1_209_600, ge=604_800, le=2_592_000)
     idp_issuer: str | None = Field(
         default=None,
         validation_alias=AliasChoices("AUTH_IDP_ISSUER", "AUTH__IDP_ISSUER"),
