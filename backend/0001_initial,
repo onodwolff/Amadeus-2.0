@@ -42,7 +42,7 @@ JOIN public.permissions AS p ON p.code = 'gateway.users.view'
 WHERE r.slug IN ('admin', 'member', 'viewer')
 ON CONFLICT DO NOTHING;
 
--- Bootstrap administrator account
+-- Bootstrap administrator account (default password: "admin")
 INSERT INTO public.users (
     email,
     username,
@@ -55,7 +55,7 @@ INSERT INTO public.users (
     'admin@example.com',
     'admin',
     'Default Administrator',
-    'argon2$dummy',
+    '$argon2id$v=19$m=65536,t=3,p=4$WMSxbwaAXsdyluBHods7Rw$GQZp64W69MUeBpvqtvUJ6dg4pncm3uKtCwSSBz/Hm50',
     TRUE,
     TRUE,
     FALSE
