@@ -19,32 +19,32 @@ export class AuthApi {
   private readonly http = inject(HttpClient);
 
   getCurrentUser(): Observable<AuthUser> {
-    return this.http.get<AuthUser>(buildApiUrl('/auth/me'));
+    return this.http.get<AuthUser>(buildApiUrl('/api/auth/me'));
   }
 
   requestEmailChange(payload: EmailChangeRequest): Observable<EmailChangeResponse> {
-    return this.http.patch<EmailChangeResponse>(buildApiUrl('/auth/me/email'), payload);
+    return this.http.patch<EmailChangeResponse>(buildApiUrl('/api/auth/me/email'), payload);
   }
 
   confirmEmailChange(payload: EmailChangeConfirmRequest): Observable<AuthUser> {
-    return this.http.post<AuthUser>(buildApiUrl('/auth/me/email/confirm'), payload);
+    return this.http.post<AuthUser>(buildApiUrl('/api/auth/me/email/confirm'), payload);
   }
 
   setupMfa(): Observable<MfaSetupResponse> {
-    return this.http.post<MfaSetupResponse>(buildApiUrl('/auth/me/mfa/setup'), {});
+    return this.http.post<MfaSetupResponse>(buildApiUrl('/api/auth/me/mfa/setup'), {});
   }
 
   enableMfa(payload: MfaEnableRequest): Observable<OperationStatus> {
-    return this.http.post<OperationStatus>(buildApiUrl('/auth/me/mfa/enable'), payload);
+    return this.http.post<OperationStatus>(buildApiUrl('/api/auth/me/mfa/enable'), payload);
   }
 
   disableMfa(payload: MfaDisableRequest): Observable<OperationStatus> {
-    return this.http.request<OperationStatus>('DELETE', buildApiUrl('/auth/me/mfa'), {
+    return this.http.request<OperationStatus>('DELETE', buildApiUrl('/api/auth/me/mfa'), {
       body: payload,
     });
   }
 
   revokeAllSessions(payload: SessionsRevokeRequest): Observable<OperationStatus> {
-    return this.http.post<OperationStatus>(buildApiUrl('/auth/me/sessions/revoke_all'), payload);
+    return this.http.post<OperationStatus>(buildApiUrl('/api/auth/me/sessions/revoke_all'), payload);
   }
 }
