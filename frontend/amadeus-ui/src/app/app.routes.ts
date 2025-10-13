@@ -38,6 +38,7 @@ export const routes: Routes = [
         loadComponent: () => import('./data/historical-data.page').then(m => m.HistoricalDataPage),
       },
       { path: 'settings', loadComponent: () => import('./settings/settings.page').then(m => m.SettingsPage) },
+      { path: '403', loadComponent: () => import('./forbidden/forbidden.page').then(m => m.ForbiddenPage) },
       {
         path: 'admin/users',
         canMatch: [RoleGuard],

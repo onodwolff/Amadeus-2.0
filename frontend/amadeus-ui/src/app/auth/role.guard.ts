@@ -34,7 +34,7 @@ export class RoleGuard implements CanMatch {
       return true;
     }
 
-    return this.router.parseUrl('/dashboard');
+    return this.router.parseUrl('/403');
   }
 
   private extractRoles(): Set<string> {
