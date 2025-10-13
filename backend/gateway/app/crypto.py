@@ -1,6 +1,6 @@
 """Encryption helpers for securing stored API credentials."""
 from __future__ import annotations
-
+import os
 import os
 from typing import Final, Optional
 
