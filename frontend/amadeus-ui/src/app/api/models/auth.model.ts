@@ -7,7 +7,7 @@ export interface AuthUser {
   permissions: string[];
   active: boolean;
   isAdmin: boolean;
-  emailVerified?: boolean;
+  emailVerified: boolean;
   mfaEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -47,4 +47,13 @@ export interface OperationStatus {
 
 export interface SessionsRevokeRequest {
   password: string;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPassword: string;
 }

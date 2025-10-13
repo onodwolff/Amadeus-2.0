@@ -92,6 +92,13 @@ class OrderStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class UserTokenPurpose(str, enum.Enum):
+    """Purpose associated with a one-time user token."""
+
+    PASSWORD_RESET = "password_reset"
+    EMAIL_VERIFICATION = "email_verification"
+
+
 JSON_EMPTY_OBJECT = text("'{}'::jsonb")
 JSON_EMPTY_ARRAY = text("'[]'::jsonb")
 
@@ -261,6 +268,9 @@ class User(Base):
     )
     sessions: Mapped[List["AuthSession"]] = relationship(
         "AuthSession", back_populates="user", cascade="all, delete-orphan"
+    )
+    tokens: Mapped[List["UserToken"]] = relationship(
+        "UserToken", back_populates="user", cascade="all, delete-orphan"
     )
     pending_email_change: Mapped[Optional["EmailChangeRequest"]] = relationship(
         "EmailChangeRequest", back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -654,6 +664,32 @@ class Watchlist(Base):
     items: Mapped[List["WatchlistItem"]] = relationship(
         "WatchlistItem", back_populates="watchlist", cascade="all, delete-orphan"
     )
+
+
+class UserToken(Base):
+    """Single-use token associated with a user account."""
+
+    __tablename__ = "user_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_user_tokens_hash"),
+        Index("ix_user_tokens_user_purpose", "user_id", "purpose", "consumed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    purpose: Mapped[UserTokenPurpose] = mapped_column(
+        Enum(UserTokenPurpose, name="user_token_purpose"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship("User", back_populates="tokens")
 
 
 class AuthSession(Base):

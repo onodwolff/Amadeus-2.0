@@ -5,6 +5,9 @@ import { AuthGuard } from './shared/auth/auth.guard';
 import { RoleGuard } from './auth/role.guard';
 
 export const routes: Routes = [
+  { path: 'forgot-password', loadComponent: () => import('./auth/forgot-password.page').then(m => m.ForgotPasswordPage) },
+  { path: 'reset-password', loadComponent: () => import('./auth/reset-password.page').then(m => m.ResetPasswordPage) },
+  { path: 'verify-email', loadComponent: () => import('./auth/verify-email.page').then(m => m.VerifyEmailPage) },
   { path: 'login', loadComponent: () => import('./auth/login.page').then(m => m.LoginPage) },
   {
     path: '',

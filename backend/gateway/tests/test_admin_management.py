@@ -96,6 +96,7 @@ async def test_admin_manages_users_roles_and_permissions(app, db_session):
         assert create_response.status_code == 200
         managed_user = create_response.json()
         assert managed_user["roles"] == [UserRole.VIEWER.value]
+        assert managed_user["emailVerified"] is False
         managed_user_id = managed_user["id"]
 
         assign_response = await client.post(
@@ -154,6 +155,7 @@ async def test_admin_manages_users_roles_and_permissions(app, db_session):
         assert login_managed.status_code == 200
         managed_payload = login_managed.json()["user"]
         assert set(managed_payload["permissions"]) == {"gateway.users.view", "gateway.reports.view"}
+        assert managed_payload["emailVerified"] is False
 
 
 @pytest.mark.asyncio

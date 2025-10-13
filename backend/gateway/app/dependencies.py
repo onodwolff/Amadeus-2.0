@@ -16,6 +16,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback when running from bac
     from backend.gateway.db.base import create_session  # type: ignore
     from backend.gateway.db.models import Role, User, UserRole, user_roles_table  # type: ignore
 
+from .email import EmailDispatcher
 from .security import TokenData, validate_bearer_token
 
 
@@ -30,6 +31,15 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)
+
+
+_email_dispatcher = EmailDispatcher()
+
+
+def get_email_dispatcher() -> EmailDispatcher:
+    """Return the configured e-mail dispatcher instance."""
+
+    return _email_dispatcher
 
 
 _ROLE_SLUGS = {role.value for role in UserRole}

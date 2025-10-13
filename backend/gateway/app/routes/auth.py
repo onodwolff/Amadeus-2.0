@@ -23,6 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - production installs
 AuthSession = db_models.AuthSession
 Role = db_models.Role
 User = db_models.User
+UserTokenPurpose = db_models.UserTokenPurpose
 
 if db_models.__name__.startswith("backend."):
     sys.modules.setdefault("gateway.db.models", db_models)
@@ -41,13 +42,16 @@ def _ensure_test_schema() -> None:
         table.schema = None
 
 from ..config import settings
-from ..dependencies import get_current_user, get_session
+from ..dependencies import get_current_user, get_email_dispatcher, get_session
+from ..email import EmailDispatcher
 from ..security import (
     create_test_access_token,
     create_test_refresh_token,
+    hash_password,
     hash_refresh_token,
     verify_password,
 )
+from ..token_service import TokenService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -63,6 +67,7 @@ class UserResource(BaseModel):
     permissions: list[str]
     active: bool
     is_admin: bool = Field(alias="isAdmin")
+    email_verified: bool = Field(alias="emailVerified")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
     last_login_at: datetime | None = Field(default=None, alias="lastLoginAt")
@@ -91,6 +96,19 @@ class OperationStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16)
+    new_password: str = Field(min_length=8, max_length=255, alias="newPassword")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 def serialize_user(user: User) -> UserResource:
     return UserResource(
         id=user.id,
@@ -101,6 +119,7 @@ def serialize_user(user: User) -> UserResource:
         permissions=user.permissions,
         active=user.active,
         is_admin=user.is_admin,
+        email_verified=user.email_verified,
         created_at=user.created_at,
         updated_at=user.updated_at,
         last_login_at=user.last_login_at,
@@ -197,6 +216,83 @@ async def _revoke_session_family(db: AsyncSession, family_id: str) -> int:
         .values(revoked_at=now)
     )
     return result.rowcount or 0
+
+
+@router.post("/forgot-password", response_model=OperationStatus)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_session),
+    email_dispatcher: EmailDispatcher = Depends(get_email_dispatcher),
+) -> OperationStatus:
+    email = str(payload.email).strip().lower()
+    user = await _fetch_user_by_email(db, email)
+
+    detail = "If the account exists, password reset instructions have been sent."
+    if user is None or not user.active:
+        return OperationStatus(detail=detail)
+
+    token_service = TokenService(db)
+    record, token = await token_service.issue(
+        user=user,
+        purpose=UserTokenPurpose.PASSWORD_RESET,
+        ttl_seconds=settings.auth.password_reset_token_ttl_seconds,
+    )
+    await db.commit()
+    await db.refresh(record)
+
+    await email_dispatcher.send_password_reset_email(
+        email=user.email,
+        token=token,
+        expires_at=record.expires_at,
+    )
+    return OperationStatus(detail=detail)
+
+
+@router.post("/reset-password", response_model=OperationStatus)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_session),
+) -> OperationStatus:
+    token_service = TokenService(db)
+    record = await token_service.consume(
+        token=payload.token,
+        purpose=UserTokenPurpose.PASSWORD_RESET,
+    )
+    if record is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    user = record.user
+    if user is None:
+        user = await _load_user(db, record.user_id)
+
+    user.password_hash = hash_password(payload.new_password)
+    await db.flush()
+    await db.commit()
+    return OperationStatus(detail="Password updated")
+
+
+@router.get("/verify-email", response_model=OperationStatus)
+async def verify_email(
+    token: str,
+    db: AsyncSession = Depends(get_session),
+) -> OperationStatus:
+    token_service = TokenService(db)
+    record = await token_service.consume(
+        token=token,
+        purpose=UserTokenPurpose.EMAIL_VERIFICATION,
+    )
+    if record is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    user = record.user
+    if user is None:
+        user = await _load_user(db, record.user_id)
+
+    if not user.email_verified:
+        user.email_verified = True
+    await db.flush()
+    await db.commit()
+    return OperationStatus(detail="Email verified")
 
 
 @router.post("/login", response_model=TokenResponse)

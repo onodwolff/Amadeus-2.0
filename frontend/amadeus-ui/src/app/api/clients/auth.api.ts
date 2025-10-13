@@ -7,10 +7,12 @@ import {
   EmailChangeConfirmRequest,
   EmailChangeRequest,
   EmailChangeResponse,
+  ForgotPasswordRequest,
   MfaDisableRequest,
   MfaEnableRequest,
   MfaSetupResponse,
   OperationStatus,
+  ResetPasswordRequest,
   SessionsRevokeRequest,
 } from '../models';
 
@@ -46,5 +48,19 @@ export class AuthApi {
 
   revokeAllSessions(payload: SessionsRevokeRequest): Observable<OperationStatus> {
     return this.http.post<OperationStatus>(buildApiUrl('/api/auth/me/sessions/revoke_all'), payload);
+  }
+
+  requestPasswordReset(payload: ForgotPasswordRequest): Observable<OperationStatus> {
+    return this.http.post<OperationStatus>(buildApiUrl('/api/auth/forgot-password'), payload);
+  }
+
+  resetPassword(payload: ResetPasswordRequest): Observable<OperationStatus> {
+    return this.http.post<OperationStatus>(buildApiUrl('/api/auth/reset-password'), payload);
+  }
+
+  verifyEmail(token: string): Observable<OperationStatus> {
+    return this.http.get<OperationStatus>(buildApiUrl('/api/auth/verify-email'), {
+      params: { token },
+    });
   }
 }
