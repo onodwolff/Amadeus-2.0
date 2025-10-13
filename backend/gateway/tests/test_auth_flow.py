@@ -67,6 +67,8 @@ async def test_login_and_refresh_flow(app, db_session):
     assert len(sessions) == 2
     revoked = [session for session in sessions if session.revoked_at is not None]
     assert len(revoked) == 1
+    family_ids = {session.family_id for session in sessions}
+    assert len(family_ids) == 1
 
 
 @pytest.mark.asyncio
@@ -89,7 +91,7 @@ async def test_login_rejects_invalid_credentials(app, db_session):
 
 
 @pytest.mark.asyncio
-async def test_logout_revokes_refresh_token(app, db_session):
+async def test_logout_revokes_entire_family(app, db_session):
     await create_user(
         db_session,
         email="viewer@example.com",
@@ -106,9 +108,16 @@ async def test_logout_revokes_refresh_token(app, db_session):
         refresh_cookie = login_response.cookies.get("refreshToken")
         assert refresh_cookie
 
+        refresh_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": refresh_cookie},
+        )
+        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        assert refreshed_cookie
+
         logout_response = await client.post(
             "/auth/logout",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={"refreshToken": refreshed_cookie},
         )
         assert logout_response.status_code == 200
         assert logout_response.json()["detail"] == "Logged out"
@@ -117,5 +126,50 @@ async def test_logout_revokes_refresh_token(app, db_session):
 
     result = await db_session.execute(select(AuthSession))
     sessions = result.scalars().all()
-    assert len(sessions) == 1
-    assert sessions[0].revoked_at is not None
+    assert len(sessions) == 2
+    assert all(session.revoked_at is not None for session in sessions)
+    family_ids = {session.family_id for session in sessions}
+    assert len(family_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_revokes_new_generation(app, db_session):
+    await create_user(
+        db_session,
+        email="reuse@example.com",
+        username="reuse",
+        password="reuse-pass",
+        roles=[UserRole.MANAGER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": "reuse@example.com", "password": "reuse-pass"},
+        )
+        assert login_response.status_code == 200
+        original_cookie = login_response.cookies.get("refreshToken")
+        assert original_cookie
+
+        refresh_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": original_cookie},
+        )
+        assert refresh_response.status_code == 200
+        fresh_cookie = refresh_response.cookies.get("refreshToken")
+        assert fresh_cookie and fresh_cookie != original_cookie
+
+        reuse_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": original_cookie},
+        )
+
+        assert reuse_response.status_code == 401
+        assert reuse_response.json()["detail"] == "Invalid refresh token"
+
+    result = await db_session.execute(select(AuthSession))
+    sessions = result.scalars().all()
+    assert len(sessions) == 2
+    assert all(session.revoked_at is not None for session in sessions)
+    family_ids = {session.family_id for session in sessions}
+    assert len(family_ids) == 1
