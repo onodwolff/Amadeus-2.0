@@ -1,7 +1,7 @@
 """Common FastAPI dependency helpers."""
 from __future__ import annotations
 
-from typing import AsyncIterator, Iterable, Set
+from typing import AsyncIterator, Iterable, Set, Tuple
 
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
@@ -30,6 +30,47 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)
+
+
+_ROLE_SLUGS = {role.value for role in UserRole}
+
+
+def _normalise_scope(scope: str) -> str | None:
+    """Return a lowercase trimmed representation of ``scope``."""
+
+    cleaned = scope.strip()
+    if not cleaned:
+        return None
+    return cleaned.lower()
+
+
+def _classify_required_scopes(scopes: Iterable[str]) -> Tuple[set[str], set[str]]:
+    """Split required scopes into role slugs and permission codes."""
+
+    required_roles: set[str] = set()
+    required_permissions: set[str] = set()
+    for raw in scopes:
+        normalised = _normalise_scope(raw)
+        if not normalised:
+            continue
+        if normalised in _ROLE_SLUGS:
+            required_roles.add(normalised)
+        else:
+            required_permissions.add(normalised)
+    return required_roles, required_permissions
+
+
+def _scope_grants_permission(scope: str, permission: str) -> bool:
+    """Return ``True`` when the provided OAuth scope grants ``permission``."""
+
+    normalised_scope = _normalise_scope(scope)
+    if normalised_scope is None:
+        return False
+    target = permission.lower()
+    if normalised_scope == target:
+        return True
+    transformed = normalised_scope.replace(":", ".").replace("/", ".")
+    return transformed == target
 
 
 async def _get_token_data(
@@ -106,13 +147,27 @@ async def get_current_user(
     if not user.active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
-    required_scopes = set(security_scopes.scopes)
-    if required_scopes:
-        granted_roles = set(token.roles)
-        granted_roles.update(token.scopes)
-        granted_roles.update(role.slug for role in user.roles)
-        if required_scopes.isdisjoint(granted_roles):
+    required_roles, required_permissions = _classify_required_scopes(security_scopes.scopes)
+    if required_roles:
+        user_roles = {role.slug for role in user.roles}
+        if user_roles.isdisjoint(required_roles):
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient role")
+
+    if required_permissions:
+        user_permissions = {permission.lower() for permission in user.permissions}
+        missing_permissions = required_permissions - user_permissions
+        if missing_permissions:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+
+        token_scopes = [scope for scope in token.scopes if _normalise_scope(scope)]
+        if token_scopes:
+            missing_scopes = {
+                permission
+                for permission in required_permissions
+                if not any(_scope_grants_permission(scope, permission) for scope in token_scopes)
+            }
+            if missing_scopes:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient scope")
 
     setattr(user, "token_data", token)
     return user
