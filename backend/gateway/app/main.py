@@ -6,8 +6,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from gateway.app.logging import setup_logging
+
 from .config import settings
 from .routes import admin, auth, users
+
+setup_logging()
 
 try:  # pragma: no cover - support running from backend/
     from gateway.db.base import create_engine, dispose_engine

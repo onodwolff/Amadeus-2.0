@@ -5,14 +5,9 @@ import importlib
 import importlib.util as importlib_util
 import json
 import logging
+import os
 import sys
 from typing import Any
-
-# Импорт settings работает и из корня, и из папки backend
-try:
-    from backend.gateway.config import settings  # запуск из корня
-except ModuleNotFoundError:  # запуск из backend/
-    from gateway.config import settings
 
 StructlogModule = Any
 
@@ -68,7 +63,8 @@ def _resolve_log_level(level: str | int | None) -> int:
     return logging.INFO
 
 def setup_logging(*, level: str | int | None = None) -> None:
-    resolved = _resolve_log_level(level or settings.engine.log_level)
+    env_level = os.getenv("LOG_LEVEL")
+    resolved = _resolve_log_level(level or env_level)
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=resolved, force=True)
     if structlog is None:
         logging.getLogger(__name__).warning(
