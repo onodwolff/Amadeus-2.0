@@ -1,61 +1,56 @@
 // User models
 
-export interface UserProfile {
-  id: string;
-  name: string | null;
-  email: string;
-  role: 'admin' | 'member' | 'viewer';
-  active: boolean;
-  created_at: string;
-  updated_at: string;
+export interface PermissionSummary {
+  code: string;
+  name: string;
+  description: string | null;
 }
 
-export interface AdminUser {
-  id: string;
+export interface RoleSummary {
+  slug: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+}
+
+export interface UserProfile {
+  id: number;
   email: string;
   username: string;
   name: string | null;
-  role: 'admin' | 'member' | 'viewer';
+  roles: string[];
+  permissions: string[];
   active: boolean;
   isAdmin: boolean;
-  emailVerified: boolean;
-  mfaEnabled: boolean;
   createdAt: string;
   updatedAt: string;
+  lastLoginAt: string | null;
 }
 
-export interface AdminUsersResponse {
-  users: AdminUser[];
-}
-
-export interface UserResponse {
-  user: UserProfile;
-}
+export type AdminUser = UserProfile;
 
 export interface UserCreateRequest {
   email: string;
   password: string;
   name?: string | null;
-  role: 'admin' | 'member' | 'viewer';
-  active: boolean;
+  username?: string | null;
+  roles?: string[];
+  active?: boolean;
 }
 
-export interface UserManagementUpdateRequest {
-  name?: string | null;
+export interface UserUpdateRequest {
   email?: string;
   username?: string;
-  role?: 'admin' | 'member' | 'viewer';
+  name?: string | null;
+  roles?: string[];
   active?: boolean;
   password?: string;
 }
 
-export interface AccountResponse {
-  account: UserProfile;
-}
-
 export interface AccountUpdateRequest {
-  name?: string | null;
   email?: string;
+  username?: string;
+  name?: string | null;
 }
 
 export interface PasswordUpdateRequest {

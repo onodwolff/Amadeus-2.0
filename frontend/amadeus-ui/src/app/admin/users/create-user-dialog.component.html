@@ -3,7 +3,8 @@
 <form class="create-user-form" [formGroup]="form" (ngSubmit)="submit()">
   <mat-dialog-content class="create-user-form__content">
     <p class="create-user-form__helper">
-      Invite a teammate to help administer deployments. Passwords must contain at least eight characters.
+      Invite a teammate to help administer deployments. Passwords must contain at least eight
+      characters and roles control what areas of the platform they can access.
     </p>
 
     <mat-form-field appearance="outline" class="create-user-form__field">
@@ -37,16 +38,39 @@
       <mat-error *ngIf="form.controls.confirmPassword.hasError('required')">
         Confirmation is required.
       </mat-error>
-      <mat-error *ngIf="passwordMismatch">Passwords must match.</mat-error>
+      <mat-error *ngIf="form.hasError('passwordMismatch')">Passwords must match.</mat-error>
     </mat-form-field>
 
-    <mat-form-field appearance="outline" class="create-user-form__field">
-      <mat-label>Role</mat-label>
-      <mat-select formControlName="role" required>
-        <mat-option *ngFor="let role of roles" [value]="role">{{ role | titlecase }}</mat-option>
-      </mat-select>
-      <mat-error *ngIf="form.controls.role.hasError('required')">Role selection is required.</mat-error>
-    </mat-form-field>
+    <section class="create-user-form__roles" aria-labelledby="create-user-roles-title">
+      <h3 id="create-user-roles-title">Assign roles</h3>
+      <p class="create-user-form__roles-helper">
+        Roles determine the permissions granted to the account. Select at least one to continue.
+      </p>
+      <div class="create-user-form__roles-grid" *ngIf="availableRoles.length; else noRoles">
+        <label
+          class="create-user-form__role-option"
+          *ngFor="let role of availableRoles"
+          [attr.data-role]="role.slug"
+        >
+          <mat-checkbox
+            [checked]="isRoleSelected(role)"
+            (change)="toggleRole(role, $event)"
+            [disabled]="isSubmitting()"
+          >
+            {{ role.name }}
+          </mat-checkbox>
+          <span class="create-user-form__role-description">
+            {{ role.permissions.length ? role.permissions.join(', ') : 'No permissions' }}
+          </span>
+        </label>
+      </div>
+      <ng-template #noRoles>
+        <p class="create-user-form__roles-empty">
+          No assignable roles are available. Ask an administrator to configure roles first.
+        </p>
+      </ng-template>
+      <p class="create-user-form__roles-error" *ngIf="rolesInvalid">Select at least one role.</p>
+    </section>
 
     <mat-slide-toggle formControlName="active" class="create-user-form__toggle">
       Active account
@@ -54,11 +78,13 @@
     <p class="create-user-form__toggle-hint">
       Suspended accounts retain their history but cannot sign in until reactivated by an administrator.
     </p>
+
+    <p class="create-user-form__error" *ngIf="submissionError()">{{ submissionError() }}</p>
   </mat-dialog-content>
 
   <mat-dialog-actions align="end">
     <button mat-button type="button" (click)="cancel()" [disabled]="isSubmitting()">Cancel</button>
-    <button mat-flat-button color="primary" type="submit" [disabled]="isSubmitting()">
+    <button mat-flat-button color="primary" type="submit" [disabled]="isSubmitting() || !availableRoles.length">
       <ng-container *ngIf="!isSubmitting(); else submitting">Create user</ng-container>
     </button>
   </mat-dialog-actions>

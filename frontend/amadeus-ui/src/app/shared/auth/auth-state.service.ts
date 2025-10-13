@@ -13,6 +13,8 @@ export class AuthStateService {
 
   readonly currentUser = this.currentUserSignal.asReadonly();
   readonly isAdmin = computed(() => this.currentUserSignal()?.isAdmin ?? false);
+  readonly permissions = computed(() => this.currentUserSignal()?.permissions ?? []);
+  readonly roles = computed(() => this.currentUserSignal()?.roles ?? []);
   readonly isInitialized = this.isInitializedSignal.asReadonly();
   readonly isLoading = this.isLoadingSignal.asReadonly();
 
@@ -50,6 +52,34 @@ export class AuthStateService {
         this.isInitializedSignal.set(true);
         this.isLoadingSignal.set(false);
       });
+  }
+
+  hasPermission(permission: string): boolean {
+    return this.permissions().includes(permission);
+  }
+
+  hasAnyPermission(permissions: Iterable<string>): boolean {
+    const granted = new Set(this.permissions());
+    for (const permission of permissions) {
+      if (granted.has(permission)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  hasAllPermissions(permissions: Iterable<string>): boolean {
+    const granted = new Set(this.permissions());
+    for (const permission of permissions) {
+      if (!granted.has(permission)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  hasRole(role: string): boolean {
+    return this.roles().includes(role);
   }
 
   setCurrentUser(user: AuthUser | null): void {

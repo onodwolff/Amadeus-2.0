@@ -353,9 +353,16 @@ export class SettingsPage implements OnInit {
     this.passwordError.set(null);
     this.passwordSuccess.set(null);
     this.usersApi.getAccount().subscribe({
-      next: (response) => {
-        const account = response.account ?? null;
+      next: (profile) => {
+        const account = profile ?? null;
         this.activeUser.set(account);
+
+        const existingUser = this.authState.currentUser();
+        if (account) {
+          const merged = existingUser ? { ...existingUser, ...account } : (account as AuthUser);
+          this.authState.setCurrentUser(merged);
+        }
+
         if (this.isEmailDialogOpen()) {
           this.emailForm.reset({ email: '', password: '' });
           this.emailForm.markAsPristine();
@@ -588,9 +595,17 @@ export class SettingsPage implements OnInit {
         currentPassword,
         newPassword,
       };
-      const passwordResponse = await firstValueFrom(this.usersApi.updatePassword(passwordPayload));
-      const latestAccount = passwordResponse.account;
+      const currentUser = this.authState.currentUser();
+      if (!currentUser) {
+        throw new Error('No active session found. Please sign in again.');
+      }
+
+      const passwordResponse = await firstValueFrom(
+        this.usersApi.updatePassword(currentUser.id, passwordPayload),
+      );
+      const latestAccount = passwordResponse ?? null;
       this.activeUser.set(latestAccount);
+      this.authState.setCurrentUser({ ...currentUser, ...(latestAccount ?? {}) });
 
       this.passwordForm.reset({
         currentPassword: '',
@@ -1691,7 +1706,7 @@ export class SettingsPage implements OnInit {
       next: (user) => {
         this.authUser.set(user);
         this.authState.setCurrentUser(user);
-        this.isTwoFactorEnabled.set(user.mfaEnabled);
+        this.isTwoFactorEnabled.set(Boolean(user.mfaEnabled));
         if (user.mfaEnabled) {
           this.twoFactorSecret.set(null);
           this.twoFactorQr.set(null);

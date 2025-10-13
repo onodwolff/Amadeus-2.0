@@ -9,7 +9,7 @@ export class AdminGuard implements CanActivate {
   private readonly router = inject(Router);
 
   canActivate(): boolean | UrlTree {
-    if (this.authState.isAdmin()) {
+    if (this.authState.hasAnyPermission(['gateway.users.manage', 'gateway.admin'])) {
       return true;
     }
 

@@ -14,28 +14,38 @@ import { NotificationService } from '../shared/notifications/notification.servic
 import { SettingsPage } from './settings.page';
 
 function createAuthUser(): AuthUser {
+  const timestamp = new Date().toISOString();
   return {
-    id: 'user-1',
+    id: 1,
     email: 'user@example.com',
+    username: 'user',
+    name: 'Example User',
+    roles: ['member'],
+    permissions: ['gateway.users.manage', 'gateway.users.view'],
     active: true,
     isAdmin: false,
     emailVerified: true,
     mfaEnabled: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    lastLoginAt: new Date().toISOString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastLoginAt: timestamp,
   };
 }
 
 function createUserProfile(): UserProfile {
+  const timestamp = new Date().toISOString();
   return {
-    id: 'user-1',
-    name: 'Test User',
+    id: 1,
     email: 'user@example.com',
-    role: 'member',
+    username: 'user',
+    name: 'Example User',
+    roles: ['member'],
+    permissions: ['gateway.users.manage', 'gateway.users.view'],
     active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    isAdmin: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastLoginAt: timestamp,
   };
 }
 
@@ -103,8 +113,8 @@ describe('SettingsPage advanced settings', () => {
     marketApiStub.listInstruments.and.returnValue(of({ instruments: [] }));
 
     const usersApiStub = jasmine.createSpyObj<UsersApi>('UsersApi', ['getAccount', 'updatePassword']);
-    usersApiStub.getAccount.and.returnValue(of({ account: createUserProfile() }));
-    usersApiStub.updatePassword.and.returnValue(of({ account: createUserProfile() }));
+    usersApiStub.getAccount.and.returnValue(of(createUserProfile()));
+    usersApiStub.updatePassword.and.returnValue(of(createUserProfile()));
 
     const integrationsApiStub = jasmine.createSpyObj<IntegrationsApi>('IntegrationsApi', ['listExchanges']);
     integrationsApiStub.listExchanges.and.returnValue(of({ exchanges: [] as ExchangeDescriptor[] }));
@@ -114,11 +124,14 @@ describe('SettingsPage advanced settings', () => {
       ['success', 'info', 'warning', 'error'],
     );
 
+    const currentUserSignal = signal<AuthUser | null>(createAuthUser());
+
     const authStateStub: Partial<AuthStateService> = {
       initialize: jasmine.createSpy('initialize'),
       setCurrentUser: jasmine.createSpy('setCurrentUser'),
       clear: jasmine.createSpy('clear'),
-      isAdmin: signal(false),
+      currentUser: currentUserSignal,
+      permissions: signal<string[]>(createAuthUser().permissions),
     };
 
     await TestBed.configureTestingModule({

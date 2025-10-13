@@ -1,2 +1,2 @@
 export { AdminUsersPage } from './admin-users.page';
-export { AdminUserCreateDialogComponent } from './admin-user-create-dialog.component';
+export { AdminUserCreateDialogComponent } from './create-user-dialog.component';
