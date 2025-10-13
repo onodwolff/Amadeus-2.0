@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from backend.gateway.db.models import RiskLimit, User, UserRole
+from backend.gateway.db.models import RiskLimit, Role, User, UserRole
 
 
 class _StubRiskService:
@@ -49,13 +49,18 @@ async def test_risk_limits_save_and_load(db_session, session_factory, monkeypatc
     stub_service = _StubRiskService()
     monkeypatch.setattr(risk, "svc", stub_service)
 
+    admin_role = await db_session.scalar(
+        select(Role).where(Role.slug == UserRole.ADMIN.value)
+    )
+    assert admin_role is not None
+
     user = User(
         email="risk@example.com",
         username="risk-user",
         name="Risk Manager",
         pwd_hash="argon2$dummy",
-        role=UserRole.ADMIN,
     )
+    user.roles.append(admin_role)
     db_session.add(user)
     await db_session.commit()
 

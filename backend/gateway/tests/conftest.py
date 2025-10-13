@@ -56,6 +56,101 @@ _normalise_defaults(db_models.Base.metadata)
 _normalise_defaults(EngineBase.metadata)
 
 
+_DEFAULT_PERMISSIONS = [
+    {
+        "code": "gateway.admin",
+        "name": "Gateway administration",
+        "description": "Provides complete access to all administrative actions.",
+    },
+    {
+        "code": "gateway.users.manage",
+        "name": "Manage users",
+        "description": "Allows creating and editing standard user accounts.",
+    },
+    {
+        "code": "gateway.users.view",
+        "name": "View users",
+        "description": "Allows viewing basic user information.",
+    },
+]
+
+_DEFAULT_ROLES = [
+    {
+        "slug": db_models.UserRole.ADMIN.value,
+        "name": "Administrator",
+        "description": "Full administrative control over the gateway.",
+    },
+    {
+        "slug": db_models.UserRole.MEMBER.value,
+        "name": "Member",
+        "description": "Standard user with management capabilities.",
+    },
+    {
+        "slug": db_models.UserRole.VIEWER.value,
+        "name": "Viewer",
+        "description": "Read-only access to user and node data.",
+    },
+]
+
+_DEFAULT_ROLE_PERMISSIONS = {
+    db_models.UserRole.ADMIN.value: {
+        "gateway.admin",
+        "gateway.users.manage",
+        "gateway.users.view",
+    },
+    db_models.UserRole.MEMBER.value: {
+        "gateway.users.manage",
+        "gateway.users.view",
+    },
+    db_models.UserRole.VIEWER.value: {
+        "gateway.users.view",
+    },
+}
+
+
+async def _seed_access_control(session: AsyncSession) -> None:
+    permissions_result = await session.execute(sa.select(db_models.Permission))
+    permissions = {permission.code: permission for permission in permissions_result.scalars()}
+
+    for definition in _DEFAULT_PERMISSIONS:
+        permission = permissions.get(definition["code"])
+        if permission is None:
+            permission = db_models.Permission(**definition)
+            session.add(permission)
+            await session.flush()
+            permissions[permission.code] = permission
+        else:
+            permission.name = definition["name"]
+            permission.description = definition["description"]
+
+    roles_result = await session.execute(sa.select(db_models.Role))
+    roles = {role.slug: role for role in roles_result.scalars()}
+
+    for definition in _DEFAULT_ROLES:
+        role = roles.get(definition["slug"])
+        if role is None:
+            role = db_models.Role(**definition)
+            session.add(role)
+            await session.flush()
+            roles[role.slug] = role
+        else:
+            role.name = definition["name"]
+            role.description = definition["description"]
+
+    await session.execute(sa.delete(db_models.role_permissions_table))
+    role_permission_rows = []
+    for slug, permission_codes in _DEFAULT_ROLE_PERMISSIONS.items():
+        role = roles[slug]
+        for code in sorted(permission_codes):
+            role_permission_rows.append(
+                {"role_id": role.id, "permission_id": permissions[code].id}
+            )
+    if role_permission_rows:
+        await session.execute(
+            sa.insert(db_models.role_permissions_table), role_permission_rows
+        )
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
     """Provide a dedicated event loop for async pytest tests."""
@@ -83,6 +178,12 @@ async def db_engine(db_url: str) -> AsyncIterator[AsyncEngine]:
     async with engine.begin() as connection:
         await connection.run_sync(GatewayBase.metadata.create_all)
         await connection.run_sync(EngineBase.metadata.create_all)
+    session = create_session()
+    try:
+        async with session.begin():
+            await _seed_access_control(session)
+    finally:
+        await session.close()
     try:
         yield engine
     finally:

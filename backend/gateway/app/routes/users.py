@@ -92,7 +92,7 @@ def _serialize_account(user: User) -> AccountResource:
         id=str(user.id),
         name=user.name,
         email=user.email,
-        role=user.role.value if getattr(user, "role", None) else "member",
+        role=user.primary_role.value,
         active=bool(getattr(user, "active", True)),
         created_at=user.created_at,
         updated_at=user.updated_at,
