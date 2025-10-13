@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from gateway.app.logging import setup_logging
 
 from .config import settings
-from .routes import admin, auth, market, nodes, users
+from .routes import admin, auth, market, nodes, system, users
 
 setup_logging()
 
@@ -65,12 +65,14 @@ def create_app(*, api_prefix: str | None = None) -> FastAPI:
         app.include_router(admin.router, prefix=router_prefix)
         app.include_router(market.router, prefix=router_prefix)
         app.include_router(nodes.router, prefix=router_prefix)
+        app.include_router(system.router, prefix=router_prefix)
     else:
         app.include_router(auth.router)
         app.include_router(users.router)
         app.include_router(admin.router)
         app.include_router(market.router)
         app.include_router(nodes.router)
+        app.include_router(system.router)
 
     return app
 
