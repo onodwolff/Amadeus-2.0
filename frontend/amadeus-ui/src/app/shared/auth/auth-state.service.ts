@@ -10,6 +10,7 @@ export class AuthStateService {
   private readonly currentUserSignal = signal<AuthUser | null>(null);
   private readonly isInitializedSignal = signal(false);
   private readonly isLoadingSignal = signal(false);
+  private initializationPromise: Promise<void> | null = null;
 
   readonly currentUser = this.currentUserSignal.asReadonly();
   readonly isAdmin = computed(() => this.currentUserSignal()?.isAdmin ?? false);
@@ -40,18 +41,25 @@ export class AuthStateService {
     );
   }
 
-  initialize(): Promise<void> | void {
-    if (this.isInitializedSignal() || this.isLoadingSignal()) {
-      return;
+  initialize(): Promise<void> {
+    if (this.isInitializedSignal()) {
+      return Promise.resolve();
     }
 
-    this.isLoadingSignal.set(true);
-    return this.auth
-      .bootstrapMe()
-      .finally(() => {
+    if (this.isLoadingSignal()) {
+      return this.initializationPromise ?? Promise.resolve();
+    }
+
+    if (!this.initializationPromise) {
+      this.isLoadingSignal.set(true);
+      this.initializationPromise = this.auth.bootstrapMe().finally(() => {
         this.isInitializedSignal.set(true);
         this.isLoadingSignal.set(false);
+        this.initializationPromise = null;
       });
+    }
+
+    return this.initializationPromise ?? Promise.resolve();
   }
 
   hasPermission(permission: string): boolean {
@@ -90,6 +98,7 @@ export class AuthStateService {
   clear(): void {
     this.isInitializedSignal.set(false);
     this.isLoadingSignal.set(false);
+    this.initializationPromise = null;
   }
 
   logout(): void {
