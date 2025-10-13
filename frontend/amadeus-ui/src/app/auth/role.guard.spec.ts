@@ -1,10 +1,14 @@
-import { TestBed } from '@angular/core/testing';
+import { Component } from '@angular/core';
+import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { Route, Router, UrlSegment, UrlTree } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
 import { OAuthService } from 'angular-oauth2-oidc';
 
 import { RoleGuard } from './role.guard';
 import { AuthService } from './auth.service';
+
+@Component({ template: '' })
+class DummyComponent {}
 
 describe('RoleGuard', () => {
   let guard: RoleGuard;
@@ -26,7 +30,18 @@ describe('RoleGuard', () => {
     oauth.getGrantedScopes.and.returnValue({} as unknown as object);
 
     TestBed.configureTestingModule({
-      imports: [RouterTestingModule],
+      imports: [
+        RouterTestingModule.withRoutes([
+          {
+            path: 'dashboard',
+            canMatch: [RoleGuard],
+            data: { requiredRoles: ['trader'] },
+            component: DummyComponent,
+          },
+          { path: '403', component: DummyComponent },
+        ]),
+      ],
+      declarations: [DummyComponent],
       providers: [
         RoleGuard,
         { provide: AuthService, useValue: auth },
@@ -76,4 +91,22 @@ describe('RoleGuard', () => {
     expect(result instanceof UrlTree).toBeTrue();
     expect(router.serializeUrl(result as UrlTree)).toEqual(router.serializeUrl(router.parseUrl('/403')));
   });
+
+  it('redirects to /403 when navigating to /dashboard without the trader role', fakeAsync(() => {
+    oauth.getIdentityClaims.and.returnValue({ roles: ['viewer'] });
+
+    router.initialNavigation();
+    tick();
+
+    let navigationResult: boolean | undefined;
+    router.navigateByUrl('/dashboard').then(result => {
+      navigationResult = result;
+    });
+
+    tick();
+
+    expect(auth.bootstrapMe).toHaveBeenCalled();
+    expect(navigationResult).toBeTrue();
+    expect(router.url).toBe('/403');
+  }));
 });
