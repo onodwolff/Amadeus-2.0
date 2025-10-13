@@ -18,9 +18,14 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterable, List, Opti
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.config import settings
-from gateway.db.base import create_session
-from gateway.db.models import BacktestRun, BacktestRunStatus
+try:  # pragma: no cover - prefer local backend package in tests
+    from backend.gateway.config import settings  # type: ignore
+    from backend.gateway.db.base import create_session  # type: ignore
+    from backend.gateway.db.models import BacktestRun, BacktestRunStatus  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - production installs
+    from gateway.config import settings
+    from gateway.db.base import create_session
+    from gateway.db.models import BacktestRun, BacktestRunStatus
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .nautilus_service import NautilusService
