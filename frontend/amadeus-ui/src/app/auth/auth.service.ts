@@ -34,7 +34,7 @@ export class AuthService {
   readonly isBootstrapped = this.isBootstrappedSignal.asReadonly();
 
   login(payload: LoginRequest): Observable<AuthUser> {
-    return this.http.post<LoginResponse>(buildApiUrl('/auth/login'), payload).pipe(
+    return this.http.post<LoginResponse>(buildApiUrl('/api/auth/login'), payload).pipe(
       tap((response) => {
         this.storeAccessToken(response.accessToken);
         this.currentUserSignal.set(response.user);
