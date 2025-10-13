@@ -8,13 +8,13 @@ import asyncio
 from getpass import getpass
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from backend.gateway.config.settings import settings
 from backend.gateway.app.security import hash_password
 from backend.gateway.db.base import Base, create_engine, create_session, dispose_engine
-from backend.gateway.db.models import User, UserRole
+from backend.gateway.db.models import Role, User, UserRole
 
 
 async def _ensure_schema(database_url: str) -> None:
@@ -42,22 +42,33 @@ async def _seed_admin(
 
         hashed = hash_password(password)
 
+        role_stmt = select(Role).where(func.lower(Role.slug) == UserRole.ADMIN.value)
+        role_result = await session.execute(role_stmt)
+        admin_role = role_result.scalars().first()
+        if admin_role is None:
+            admin_role = Role(
+                slug=UserRole.ADMIN.value,
+                name="Administrator",
+                description="Full access to all administrative capabilities.",
+            )
+            session.add(admin_role)
+            await session.flush()
+
         if user is None:
             user = User(
                 email=email,
                 username=username,
                 name=name,
                 password_hash=hashed,
-                role=UserRole.ADMIN,
-                is_admin=True,
             )
+            user.roles.append(admin_role)
             session.add(user)
         else:
             user.email = email
             user.name = name
             user.password_hash = hashed
-            user.role = UserRole.ADMIN
-            user.is_admin = True
+            if all(role.slug != admin_role.slug for role in user.roles):
+                user.roles.append(admin_role)
 
         await session.commit()
     except IntegrityError as exc:  # pragma: no cover - interactive script guard

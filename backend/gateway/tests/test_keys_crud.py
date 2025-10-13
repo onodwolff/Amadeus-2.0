@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from backend.gateway.db.models import ApiKey, User, UserRole
+from backend.gateway.db.models import ApiKey, Role, User, UserRole
 
 
 @pytest.mark.asyncio
@@ -16,13 +16,18 @@ async def test_api_keys_crud_encryption_roundtrip(db_session, session_factory, m
     from backend.gateway.app.routes import keys
 
     # Seed a primary user required by the API layer.
+    admin_role = await db_session.scalar(
+        select(Role).where(Role.slug == UserRole.ADMIN.value)
+    )
+    assert admin_role is not None
+
     user = User(
         email="alice@example.com",
         username="alice",
         name="Alice",
         pwd_hash="argon2$dummy",
-        role=UserRole.ADMIN,
     )
+    user.roles.append(admin_role)
     db_session.add(user)
     await db_session.commit()
 
@@ -131,13 +136,18 @@ async def test_create_api_key_rejects_unknown_venue(db_session, monkeypatch):
 
     from backend.gateway.app.routes import keys
 
+    admin_role = await db_session.scalar(
+        select(Role).where(Role.slug == UserRole.ADMIN.value)
+    )
+    assert admin_role is not None
+
     user = User(
         email="bob@example.com",
         username="bob",
         name="Bob",
         pwd_hash="argon2$dummy",
-        role=UserRole.ADMIN,
     )
+    user.roles.append(admin_role)
     db_session.add(user)
     await db_session.commit()
 

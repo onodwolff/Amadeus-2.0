@@ -13,7 +13,7 @@ from gateway.app.dependencies import get_session
 from gateway.app.logging import get_logger
 from gateway.app.security import hash_password
 from gateway.config import settings
-from gateway.db.models import User, UserRole
+from gateway.db.models import Role, User, UserRole
 
 from .auth import get_current_user
 
@@ -51,6 +51,7 @@ class AdminUserResource(BaseModel):
     username: str
     name: str | None = None
     role: str
+    roles: list[str] = Field(default_factory=list)
     active: bool
     is_admin: bool = Field(alias="isAdmin")
     email_verified: bool = Field(alias="emailVerified")
@@ -158,7 +159,8 @@ def _serialize_user(user: User) -> AdminUserResource:
         email=user.email,
         username=user.username,
         name=user.name,
-        role=(user.role.value if getattr(user, "role", None) else UserRole.MEMBER.value),
+        role=user.primary_role.value,
+        roles=[role.slug for role in user.roles],
         active=bool(getattr(user, "active", True)),
         is_admin=bool(user.is_admin),
         email_verified=bool(user.email_verified),
@@ -217,6 +219,18 @@ async def _generate_username(session: AsyncSession, email: str) -> str:
     return candidate
 
 
+async def _load_role(session: AsyncSession, role: UserRole) -> Role:
+    stmt = select(Role).where(func.lower(Role.slug) == role.value.lower())
+    result = await session.execute(stmt)
+    role_obj = result.scalars().first()
+    if role_obj is None:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Role '{role.value}' has not been seeded",
+        )
+    return role_obj
+
+
 @router.post("", response_model=AdminUserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: AdminUserCreateRequest,
@@ -245,19 +259,20 @@ async def create_user(
                 detail="Username is already associated with another account.",
             )
 
+    role_obj = await _load_role(session, payload.role)
+
     user = User(
         email=email,
         username=username,
         name=payload.name,
         password_hash=hash_password(payload.password),
-        role=payload.role,
         active=payload.active,
-        is_admin=False,
         email_verified=False,
         mfa_enabled=False,
         mfa_secret=None,
         last_login_at=None,
     )
+    user.roles.append(role_obj)
     session.add(user)
     await session.commit()
     await session.refresh(user)
@@ -274,7 +289,7 @@ async def create_user(
         user_id=str(user.id),
         user_email=user.email,
         user_username=user.username,
-        user_role=user.role.value if getattr(user, "role", None) else UserRole.MEMBER.value,
+        user_role=user.primary_role.value,
     )
 
     return AdminUserResponse(user=_serialize_user(user))
@@ -335,7 +350,7 @@ async def update_user(
         user.username = payload.username
         changed_fields.add("username")
 
-    if payload.role is not None and payload.role != user.role:
+    if payload.role is not None and payload.role != user.primary_role:
         if payload.role == UserRole.ADMIN:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, detail="Cannot assign admin role"
@@ -344,7 +359,10 @@ async def update_user(
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, detail="Cannot modify administrator role"
             )
-        user.role = payload.role
+        role_obj = await _load_role(session, payload.role)
+        user.roles[:] = [role for role in user.roles if role.slug == UserRole.ADMIN.value]
+        if all(role.slug != role_obj.slug for role in user.roles):
+            user.roles.append(role_obj)
         changed_fields.add("role")
 
     if payload.password is not None:
@@ -363,7 +381,6 @@ async def update_user(
                 set_committed_value(instance, "name", user.name)
                 set_committed_value(instance, "email", user.email)
                 set_committed_value(instance, "username", user.username)
-                set_committed_value(instance, "role", user.role)
                 set_committed_value(instance, "password_hash", user.password_hash)
                 set_committed_value(instance, "updated_at", user.updated_at)
         resource = _serialize_user(user)

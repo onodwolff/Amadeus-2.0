@@ -4,10 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException, status
+from sqlalchemy import select
 
 from backend.gateway.app.routes import users
 from backend.gateway.app.security import hash_password
-from backend.gateway.db.models import User, UserRole
+from backend.gateway.db.models import Role, User, UserRole
 
 
 @pytest.fixture()
@@ -22,13 +23,17 @@ async def test_get_account_settings_requires_admin(
     db_session, enable_auth: None
 ) -> None:
     actor = SimpleNamespace(is_admin=False)
+    admin_role = await db_session.scalar(
+        select(Role).where(Role.slug == UserRole.ADMIN.value)
+    )
+    assert admin_role is not None
+
     user = User(
         email="admin@example.com",
         username="admin",
         password_hash=hash_password("password-123"),
-        role=UserRole.ADMIN,
-        is_admin=True,
     )
+    user.roles.append(admin_role)
     db_session.add(user)
     await db_session.commit()
 
@@ -43,13 +48,17 @@ async def test_update_account_settings_requires_admin(
     db_session, enable_auth: None
 ) -> None:
     actor = SimpleNamespace(is_admin=False)
+    admin_role = await db_session.scalar(
+        select(Role).where(Role.slug == UserRole.ADMIN.value)
+    )
+    assert admin_role is not None
+
     user = User(
         email="admin@example.com",
         username="admin",
         password_hash=hash_password("password-123"),
-        role=UserRole.ADMIN,
-        is_admin=True,
     )
+    user.roles.append(admin_role)
     db_session.add(user)
     await db_session.commit()
 
@@ -66,13 +75,17 @@ async def test_update_account_settings_requires_admin(
 @pytest.mark.asyncio
 async def test_update_password_requires_admin(db_session, enable_auth: None) -> None:
     actor = SimpleNamespace(is_admin=False)
+    admin_role = await db_session.scalar(
+        select(Role).where(Role.slug == UserRole.ADMIN.value)
+    )
+    assert admin_role is not None
+
     user = User(
         email="admin@example.com",
         username="admin",
         password_hash=hash_password("password-123"),
-        role=UserRole.ADMIN,
-        is_admin=True,
     )
+    user.roles.append(admin_role)
     db_session.add(user)
     await db_session.commit()
 

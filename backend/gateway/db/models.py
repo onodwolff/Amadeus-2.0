@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
     Boolean,
-    CheckConstraint,
+    Column,
     DateTime,
     Enum,
     ForeignKey,
@@ -17,6 +17,7 @@ from sqlalchemy import (
     LargeBinary,
     Numeric,
     String,
+    Table,
     Text,
     UniqueConstraint,
     func,
@@ -109,33 +110,118 @@ class CaseInsensitiveText(TypeDecorator):
         return dialect.type_descriptor(String(self.length))
 
 
+user_roles_table = Table(
+    "user_roles",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("role_id", ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "assigned_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+)
+
+
+role_permissions_table = Table(
+    "role_permissions",
+    Base.metadata,
+    Column(
+        "role_id",
+        ForeignKey("roles.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "permission_id",
+        ForeignKey("permissions.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "granted_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+)
+
+
+class Role(Base):
+    """High level access role assignable to users."""
+
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        server_onupdate=func.now(),
+    )
+
+    users: Mapped[List["User"]] = relationship(
+        "User",
+        secondary=lambda: user_roles_table,
+        back_populates="roles",
+    )
+    permissions: Mapped[List["Permission"]] = relationship(
+        "Permission",
+        secondary=lambda: role_permissions_table,
+        back_populates="roles",
+    )
+
+
+class Permission(Base):
+    """Fine grained permission assignable to roles."""
+
+    __tablename__ = "permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        server_onupdate=func.now(),
+    )
+
+    roles: Mapped[List[Role]] = relationship(
+        "Role",
+        secondary=lambda: role_permissions_table,
+        back_populates="permissions",
+    )
+
+
 class User(Base):
     """Registered user of the platform."""
 
     __tablename__ = "users"
-    __table_args__ = (
-        CheckConstraint(
-            "(is_admin AND role = 'ADMIN') OR (NOT is_admin AND role <> 'ADMIN')",
-            name="ck_users_admin_consistency",
-        ),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(CaseInsensitiveText(), unique=True, nullable=False)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String(255))
     password_hash: Mapped[str] = mapped_column("pwd_hash", String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole, name="user_role"),
-        nullable=False,
-        default=UserRole.MEMBER,
-        server_default=UserRole.MEMBER.value,
-    )
-    is_admin: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default=text("false"),
+    roles: Mapped[List[Role]] = relationship(
+        "Role",
+        secondary=lambda: user_roles_table,
+        back_populates="users",
+        lazy="selectin",
     )
     active: Mapped[bool] = mapped_column(
         Boolean,
@@ -178,12 +264,6 @@ class User(Base):
         "EmailChangeRequest", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
 
-    def __init__(self, **kwargs):
-        role = kwargs.get("role")
-        if "is_admin" not in kwargs and role == UserRole.ADMIN:
-            kwargs["is_admin"] = True
-        super().__init__(**kwargs)
-
     @property
     def pwd_hash(self) -> str:  # pragma: no cover - compatibility shim
         return self.password_hash
@@ -191,6 +271,43 @@ class User(Base):
     @pwd_hash.setter
     def pwd_hash(self, value: str) -> None:  # pragma: no cover - compatibility shim
         self.password_hash = value
+
+    @property
+    def role_slugs(self) -> List[str]:
+        """Return the slugs for all roles assigned to the user."""
+
+        return [role.slug for role in self.roles]
+
+    def has_role(self, role: UserRole | str) -> bool:
+        """Check whether the user has a given role slug or enum value."""
+
+        slug = role.value if isinstance(role, UserRole) else str(role)
+        return slug in {assigned.slug for assigned in self.roles}
+
+    @property
+    def is_admin(self) -> bool:
+        """Determine whether the user possesses the admin role."""
+
+        return self.has_role(UserRole.ADMIN)
+
+    @property
+    def primary_role(self) -> UserRole:
+        """Return the most privileged configured role for the user."""
+
+        for candidate in (UserRole.ADMIN, UserRole.MEMBER, UserRole.VIEWER):
+            if self.has_role(candidate):
+                return candidate
+        return UserRole.MEMBER
+
+    @property
+    def permissions(self) -> List[str]:
+        """Return the codes for all permissions granted via roles."""
+
+        seen: set[str] = set()
+        for role in self.roles:
+            for permission in role.permissions:
+                seen.add(permission.code)
+        return sorted(seen)
 
 
 class ApiKey(Base):
@@ -812,10 +929,12 @@ __all__ = [
     "NodeStatus",
     "Order",
     "OrderStatus",
+    "Permission",
     "Position",
     "PositionMode",
     "RiskAlert",
     "RiskLimit",
+    "Role",
     "User",
     "UserRole",
     "Watchlist",

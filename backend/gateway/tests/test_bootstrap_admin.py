@@ -19,7 +19,7 @@ sys.modules.setdefault("gateway.db.models", backend_db_models)
 from backend.gateway.app import main as app_main
 from backend.gateway.app.security import hash_password, verify_password
 from backend.gateway.config import settings
-from backend.gateway.db.models import User as DbUser, UserRole
+from backend.gateway.db.models import Role as DbRole, User as DbUser, UserRole
 
 app_main.create_session = backend_db_base.create_session  # type: ignore[attr-defined]
 app_main.DbUser = backend_db_models.User  # type: ignore[attr-defined]
@@ -57,7 +57,7 @@ async def test_ensure_admin_creates_user(admin_credentials, db_session) -> None:
 
     assert user.email == "volkov.zheka@example.com"
     assert user.username == "volkov.zheka"
-    assert user.role == UserRole.ADMIN
+    assert user.has_role(UserRole.ADMIN)
     assert user.is_admin is True
     assert user.active is True
     assert user.email_verified is True
@@ -70,17 +70,21 @@ async def test_ensure_admin_creates_user(admin_credentials, db_session) -> None:
 async def test_ensure_admin_updates_existing_user(admin_credentials, db_session) -> None:
     """Existing administrator records are updated instead of duplicated."""
 
+    member_role = await db_session.scalar(
+        select(DbRole).where(DbRole.slug == UserRole.MEMBER.value)
+    )
+    assert member_role is not None
+
     existing = DbUser(
         email="admin@example.com",
         username="admin",
         name="Existing Admin",
         password_hash=hash_password("initial"),
-        role=UserRole.MEMBER,
-        is_admin=False,
         email_verified=False,
         mfa_enabled=True,
         mfa_secret="secret",
     )
+    existing.roles.append(member_role)
     db_session.add(existing)
     await db_session.commit()
 
@@ -93,7 +97,7 @@ async def test_ensure_admin_updates_existing_user(admin_credentials, db_session)
 
     assert existing.email == "admin@example.com"
     assert verify_password(existing.password_hash, "NewSecret456")
-    assert existing.role == UserRole.ADMIN
+    assert existing.has_role(UserRole.ADMIN)
     assert existing.is_admin is True
     assert existing.active is True
     assert existing.email_verified is True
@@ -105,16 +109,20 @@ async def test_ensure_admin_updates_existing_user(admin_credentials, db_session)
 async def test_ensure_admin_generates_unique_username(admin_credentials, db_session) -> None:
     """Generated administrator username avoids collisions with existing users."""
 
+    member_role = await db_session.scalar(
+        select(DbRole).where(DbRole.slug == UserRole.MEMBER.value)
+    )
+    assert member_role is not None
+
     clash = DbUser(
         email="someone@example.com",
         username="volkov.zheka",
         name="Collision",
         password_hash=hash_password("password"),
-        role=UserRole.MEMBER,
-        is_admin=False,
         email_verified=False,
         mfa_enabled=False,
     )
+    clash.roles.append(member_role)
     db_session.add(clash)
     await db_session.commit()
 

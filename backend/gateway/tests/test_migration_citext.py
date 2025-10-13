@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.exc import ProgrammingError
 
 migration = importlib.import_module(
-    "backend.gateway.alembic.versions.0004_auth_users"
+    "backend.gateway.alembic.versions.c7f96b8e4e7c_initial_schema"
 )
 
 

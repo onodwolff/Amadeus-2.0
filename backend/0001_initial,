@@ -1,0 +1,73 @@
+-- Default access control bootstrap for the Amadeus gateway.
+-- Populates core roles, permissions, and a bootstrap administrator account.
+
+INSERT INTO public.roles (slug, name, description)
+VALUES
+    ('admin', 'Administrator', 'Full administrative control over the Amadeus gateway.'),
+    ('member', 'Member', 'Standard user with management privileges.'),
+    ('viewer', 'Viewer', 'Read-only access to gateway resources.')
+ON CONFLICT (slug) DO UPDATE
+SET name = EXCLUDED.name,
+    description = EXCLUDED.description,
+    updated_at = now();
+
+INSERT INTO public.permissions (code, name, description)
+VALUES
+    ('gateway.admin', 'Gateway administration', 'Grants access to all administrative functions.'),
+    ('gateway.users.manage', 'Manage users', 'Allows creating and updating standard user accounts.'),
+    ('gateway.users.view', 'View users', 'Allows viewing user account information.')
+ON CONFLICT (code) DO UPDATE
+SET name = EXCLUDED.name,
+    description = EXCLUDED.description,
+    updated_at = now();
+
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM public.roles AS r
+JOIN public.permissions AS p ON p.code = 'gateway.admin'
+WHERE r.slug = 'admin'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM public.roles AS r
+JOIN public.permissions AS p ON p.code = 'gateway.users.manage'
+WHERE r.slug IN ('admin', 'member')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM public.roles AS r
+JOIN public.permissions AS p ON p.code = 'gateway.users.view'
+WHERE r.slug IN ('admin', 'member', 'viewer')
+ON CONFLICT DO NOTHING;
+
+-- Bootstrap administrator account
+INSERT INTO public.users (
+    email,
+    username,
+    name,
+    pwd_hash,
+    active,
+    email_verified,
+    mfa_enabled
+) VALUES (
+    'admin@example.com',
+    'admin',
+    'Default Administrator',
+    'argon2$dummy',
+    TRUE,
+    TRUE,
+    FALSE
+)
+ON CONFLICT (email) DO UPDATE
+SET name = EXCLUDED.name,
+    username = EXCLUDED.username,
+    updated_at = now();
+
+INSERT INTO public.user_roles (user_id, role_id)
+SELECT u.id, r.id
+FROM public.users AS u
+JOIN public.roles AS r ON r.slug = 'admin'
+WHERE u.email = 'admin@example.com'
+ON CONFLICT DO NOTHING;

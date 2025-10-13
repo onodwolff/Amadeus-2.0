@@ -69,7 +69,7 @@ def _install_email_validator_stub() -> None:
 _install_email_validator_stub()
 
 from gateway.config import settings
-from gateway.db.base import Base
+from gateway.db.base import Base, DEFAULT_SCHEMA
 
 config = context.config
 
@@ -111,7 +111,8 @@ def run_migrations_online() -> None:
 
     async def _run_async_migrations() -> None:
         async with connectable.connect() as connection:
-            await connection.exec_driver_sql("SET search_path TO public")
+            if connection.dialect.name == "postgresql":
+                await connection.exec_driver_sql("SET search_path TO public")
             await connection.run_sync(_run_sync_migrations)
         await connectable.dispose()
 
@@ -119,13 +120,20 @@ def run_migrations_online() -> None:
 
 
 def _run_sync_migrations(sync_conn) -> None:
+    version_schema = VERSION_TABLE_SCHEMA
+    schema_translate_map = None
+    if sync_conn.dialect.name != "postgresql":
+        version_schema = None
+        schema_translate_map = {DEFAULT_SCHEMA: None}
+
     context.configure(
         connection=sync_conn,
         target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
         version_table=VERSION_TABLE,
-        version_table_schema=VERSION_TABLE_SCHEMA,
+        version_table_schema=version_schema,
+        schema_translate_map=schema_translate_map,
     )
 
     with context.begin_transaction():

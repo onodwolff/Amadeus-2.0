@@ -45,6 +45,7 @@ from gateway.db.models import (
     Node as DbNode,
     NodeMode as DbNodeMode,
     NodeStatus as DbNodeStatus,
+    Role,
     User as DbUser,
     UserRole,
 )
@@ -210,6 +211,12 @@ async def _ensure_admin_user() -> None:
     normalized_email = admin_email.lower()
     session = create_session()
     try:
+        admin_role_stmt = select(Role).where(func.lower(Role.slug) == UserRole.ADMIN.value)
+        admin_role_result = await session.execute(admin_role_stmt)
+        admin_role = admin_role_result.scalars().first()
+        if admin_role is None:
+            raise RuntimeError("Administrator role has not been initialised in the database")
+
         result = await session.execute(
             select(DbUser).where(func.lower(DbUser.email) == normalized_email)
         )
@@ -233,21 +240,20 @@ async def _ensure_admin_user() -> None:
                 username=candidate,
                 name="Administrator",
                 password_hash=password_hash,
-                role=UserRole.ADMIN,
-                is_admin=True,
                 email_verified=True,
                 mfa_enabled=False,
                 mfa_secret=None,
             )
+            user.roles.append(admin_role)
             session.add(user)
         else:
             user.email = normalized_email
             user.password_hash = password_hash
-            user.role = UserRole.ADMIN
-            user.is_admin = True
             user.email_verified = True
             user.mfa_enabled = False
             user.mfa_secret = None
+            if all(role.slug != admin_role.slug for role in user.roles):
+                user.roles.append(admin_role)
 
         await session.commit()
     finally:  # pragma: no cover - defensive cleanup
