@@ -1,11 +1,12 @@
 """Administrative user management routes."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.app.dependencies import get_session
@@ -105,6 +106,52 @@ class AdminUserCreateRequest(BaseModel):
         return trimmed or None
 
 
+class AdminUserUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    email: EmailStr | None = None
+    username: str | None = Field(default=None, min_length=3, max_length=64)
+    role: UserRole | None = None
+    active: bool | None = None
+    password: str | None = Field(default=None, min_length=8)
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @field_validator("password")
+    @classmethod
+    def _normalize_password(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if len(trimmed) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return trimmed
+
+    @field_validator("username")
+    @classmethod
+    def _normalize_username(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Username cannot be empty")
+        return trimmed
+
+    @field_validator("name")
+    @classmethod
+    def _normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: EmailStr | None) -> EmailStr | None:
+        if value is None:
+            return None
+        return EmailStr(str(value).strip().lower())
+
+
 def _serialize_user(user: User) -> AdminUserResource:
     return AdminUserResource(
         id=str(user.id),
@@ -129,6 +176,30 @@ async def _email_exists(session: AsyncSession, email: str) -> bool:
 
 async def _username_exists(session: AsyncSession, username: str) -> bool:
     stmt = select(User.id).where(func.lower(User.username) == username.lower())
+    result = await session.execute(stmt)
+    return result.scalars().first() is not None
+
+
+async def _email_in_use_by_other(
+    session: AsyncSession, email: str, user_id: int
+) -> bool:
+    stmt = (
+        select(User.id)
+        .where(func.lower(User.email) == email.lower())
+        .where(User.id != user_id)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().first() is not None
+
+
+async def _username_in_use_by_other(
+    session: AsyncSession, username: str, user_id: int
+) -> bool:
+    stmt = (
+        select(User.id)
+        .where(func.lower(User.username) == username.lower())
+        .where(User.id != user_id)
+    )
     result = await session.execute(stmt)
     return result.scalars().first() is not None
 
@@ -220,3 +291,95 @@ async def list_users(
     users = result.scalars().all()
     return AdminUsersResponse(users=[_serialize_user(user) for user in users])
 
+
+@router.put("/{user_id}", response_model=AdminUserResponse)
+async def update_user(
+    user_id: int,
+    payload: AdminUserUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User | None = _CURRENT_USER_DEP,
+) -> AdminUserResponse:
+    _ensure_admin(current_user)
+
+    user = await session.get(User, user_id, populate_existing=True)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    changed_fields: set[str] = set()
+
+    if payload.active is not None and payload.active != user.active:
+        user.active = payload.active
+        changed_fields.add("active")
+
+    if payload.name is not None and payload.name != user.name:
+        user.name = payload.name
+        changed_fields.add("name")
+
+    if payload.email is not None:
+        normalized_email = str(payload.email)
+        if normalized_email != user.email:
+            if await _email_in_use_by_other(session, normalized_email, user.id):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail="Email is already associated with another account.",
+                )
+            user.email = normalized_email
+            changed_fields.add("email")
+
+    if payload.username is not None and payload.username != user.username:
+        if await _username_in_use_by_other(session, payload.username, user.id):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="Username is already associated with another account.",
+            )
+        user.username = payload.username
+        changed_fields.add("username")
+
+    if payload.role is not None and payload.role != user.role:
+        if payload.role == UserRole.ADMIN:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail="Cannot assign admin role"
+            )
+        if user.is_admin:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail="Cannot modify administrator role"
+            )
+        user.role = payload.role
+        changed_fields.add("role")
+
+    if payload.password is not None:
+        user.password_hash = hash_password(payload.password)
+        changed_fields.add("password")
+
+    resource = _serialize_user(user)
+
+    if changed_fields:
+        user.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(user)
+        for instance in session.identity_map.values():
+            if isinstance(instance, User) and instance.id == user.id:
+                set_committed_value(instance, "active", user.active)
+                set_committed_value(instance, "name", user.name)
+                set_committed_value(instance, "email", user.email)
+                set_committed_value(instance, "username", user.username)
+                set_committed_value(instance, "role", user.role)
+                set_committed_value(instance, "password_hash", user.password_hash)
+                set_committed_value(instance, "updated_at", user.updated_at)
+        resource = _serialize_user(user)
+        actor_id = (
+            str(current_user.id)
+            if current_user is not None and getattr(current_user, "id", None) is not None
+            else None
+        )
+        logger.info(
+            "admin_user.updated",
+            actor_id=actor_id,
+            actor_email=getattr(current_user, "email", None),
+            user_id=str(user.id),
+            user_email=user.email,
+            user_username=user.username,
+            changed_fields=sorted(changed_fields),
+        )
+
+    return AdminUserResponse(user=resource)
