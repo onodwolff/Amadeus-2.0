@@ -42,8 +42,12 @@ export class AppComponent {
 
   protected readonly navLinks = computed(() => {
     const links = [...this.baseNavLinks];
+    const permissions = this.authState.permissions();
+    const canAccessUsers = permissions.some((permission) =>
+      ['gateway.users.view', 'gateway.users.manage', 'gateway.admin'].includes(permission),
+    );
 
-    if (this.authState.isAdmin()) {
+    if (canAccessUsers) {
       links.push({
         label: 'Users',
         route: '/admin/users',

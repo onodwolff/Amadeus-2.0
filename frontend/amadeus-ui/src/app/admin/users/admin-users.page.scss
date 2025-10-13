@@ -39,6 +39,16 @@
   text-transform: uppercase;
 }
 
+.users-page__roles-error {
+  margin: -8px 0 0;
+  max-width: 640px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  color: #fecdd3;
+}
+
 .users-page__content {
   background: rgba(15, 23, 42, 0.6);
   border-radius: 12px;
@@ -49,7 +59,7 @@
 
 .users-table {
   width: 100%;
-  min-width: 720px;
+  min-width: 840px;
 }
 
 .users-table__id {
@@ -58,7 +68,32 @@
   font-size: 0.8rem;
 }
 
-.users-table__role {
+.users-table__roles {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.users-table__role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(96, 165, 250, 0.15);
+  color: rgba(191, 219, 254, 0.95);
+}
+
+.users-table__role-chip--admin {
+  background: rgba(249, 115, 22, 0.2);
+  color: #fed7aa;
+}
+
+.users-table__role-toggle .mat-slide-toggle-label {
   font-weight: 600;
 }
 

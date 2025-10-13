@@ -229,10 +229,10 @@ export class AdminUserCreateDialogComponent {
     email: this.fb.nonNullable.control<string>('', [Validators.required, Validators.email]),
     password: this.fb.nonNullable.control<string>('', [Validators.required, Validators.minLength(8)]),
     name: this.fb.control<string>(''),
-    role: this.fb.nonNullable.control<UserCreateRequest['role']>('member', Validators.required),
+    role: this.fb.nonNullable.control<string>('member', Validators.required),
   });
 
-  readonly roleOptions: ReadonlyArray<{ value: UserCreateRequest['role']; label: string }> = [
+  readonly roleOptions: ReadonlyArray<{ value: string; label: string }> = [
     { value: 'member', label: 'Member' },
     { value: 'viewer', label: 'Viewer' },
   ];
@@ -266,7 +266,7 @@ export class AdminUserCreateDialogComponent {
     const payload: UserCreateRequest = {
       email: email.trim().toLowerCase(),
       password,
-      role: role.trim().toLowerCase() as UserCreateRequest['role'],
+      roles: [role.trim().toLowerCase()],
       active: true,
     };
 
@@ -279,11 +279,11 @@ export class AdminUserCreateDialogComponent {
     this.submissionError.set(null);
 
     this.usersApi.createUser(payload).subscribe({
-      next: (response) => {
+      next: (createdUser) => {
         this.isSubmitting.set(false);
         this.isOpen.set(false);
         this.resetForm();
-        this.created.emit(response.user);
+        this.created.emit(createdUser);
       },
       error: (error) => {
         let message = 'Failed to create user.';

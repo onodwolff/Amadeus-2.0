@@ -1,10 +1,14 @@
 export interface AuthUser {
-  id: string;
+  id: number;
   email: string;
+  username: string;
+  name: string | null;
+  roles: string[];
+  permissions: string[];
   active: boolean;
   isAdmin: boolean;
-  emailVerified: boolean;
-  mfaEnabled: boolean;
+  emailVerified?: boolean;
+  mfaEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;

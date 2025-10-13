@@ -3,40 +3,61 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
 import {
-  AccountResponse,
   AccountUpdateRequest,
-  UserCreateRequest,
   PasswordUpdateRequest,
-  AdminUsersResponse,
-  UserResponse,
-  UserManagementUpdateRequest,
+  PermissionSummary,
+  RoleSummary,
+  UserCreateRequest,
+  UserProfile,
+  UserUpdateRequest,
 } from '../models';
 
 @Injectable({ providedIn: 'root' })
 export class UsersApi {
   private readonly http = inject(HttpClient);
 
-  listUsers(): Observable<AdminUsersResponse> {
-    return this.http.get<AdminUsersResponse>(buildApiUrl('/users'));
+  listUsers(): Observable<UserProfile[]> {
+    return this.http.get<UserProfile[]>(buildApiUrl('/api/admin/users'));
   }
 
-  createUser(payload: UserCreateRequest): Observable<UserResponse> {
-    return this.http.post<UserResponse>(buildApiUrl('/users'), payload);
+  createUser(payload: UserCreateRequest): Observable<UserProfile> {
+    return this.http.post<UserProfile>(buildApiUrl('/api/admin/users'), payload);
   }
 
-  updateUser(userId: string, payload: UserManagementUpdateRequest): Observable<UserResponse> {
-    return this.http.put<UserResponse>(buildApiUrl(`/users/${encodeURIComponent(userId)}`), payload);
+  updateUser(userId: number, payload: UserUpdateRequest): Observable<UserProfile> {
+    return this.http.patch<UserProfile>(buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}`), payload);
   }
 
-  getAccount(): Observable<AccountResponse> {
-    return this.http.get<AccountResponse>(buildApiUrl('/settings/account'));
+  assignRole(userId: number, role: string): Observable<UserProfile> {
+    return this.http.post<UserProfile>(
+      buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}/roles/${encodeURIComponent(role)}`),
+      {},
+    );
   }
 
-  updateAccount(payload: AccountUpdateRequest): Observable<AccountResponse> {
-    return this.http.put<AccountResponse>(buildApiUrl('/settings/account'), payload);
+  removeRole(userId: number, role: string): Observable<UserProfile> {
+    return this.http.delete<UserProfile>(
+      buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}/roles/${encodeURIComponent(role)}`),
+    );
   }
 
-  updatePassword(payload: PasswordUpdateRequest): Observable<AccountResponse> {
-    return this.http.put<AccountResponse>(buildApiUrl('/settings/password'), payload);
+  listRoles(): Observable<RoleSummary[]> {
+    return this.http.get<RoleSummary[]>(buildApiUrl('/api/admin/roles'));
+  }
+
+  listPermissions(): Observable<PermissionSummary[]> {
+    return this.http.get<PermissionSummary[]>(buildApiUrl('/api/admin/permissions'));
+  }
+
+  getAccount(): Observable<UserProfile> {
+    return this.http.get<UserProfile>(buildApiUrl('/api/users/me'));
+  }
+
+  updateAccount(userId: number, payload: AccountUpdateRequest): Observable<UserProfile> {
+    return this.updateUser(userId, payload);
+  }
+
+  updatePassword(userId: number, payload: PasswordUpdateRequest): Observable<UserProfile> {
+    return this.updateUser(userId, { password: payload.newPassword });
   }
 }
