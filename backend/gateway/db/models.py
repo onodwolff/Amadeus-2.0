@@ -660,10 +660,17 @@ class AuthSession(Base):
     """Refresh token session issued to a user."""
 
     __tablename__ = "auth_sessions"
+    __table_args__ = (
+        Index("ix_auth_sessions_family_id", "family_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     refresh_token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    family_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    parent_session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("auth_sessions.id", ondelete="CASCADE"), nullable=True
+    )
     user_agent: Mapped[Optional[str]] = mapped_column(String(255))
     ip_address: Mapped[Optional[str]] = mapped_column(String(45))
     created_at: Mapped[datetime] = mapped_column(

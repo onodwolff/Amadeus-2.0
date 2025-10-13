@@ -1,11 +1,13 @@
 """Authentication API endpoints."""
 from __future__ import annotations
 
+import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -48,6 +50,8 @@ from ..security import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 
 class UserResource(BaseModel):
@@ -134,6 +138,7 @@ async def _issue_tokens(
     user: User,
     response: Response,
     request: Request | None,
+    parent_session: AuthSession | None = None,
 ) -> TokenResponse:
     _ensure_test_schema()
     access_token, access_expires = create_test_access_token(
@@ -143,9 +148,18 @@ async def _issue_tokens(
     )
     refresh_token, refresh_expires = create_test_refresh_token()
 
+    if parent_session is not None:
+        family_id = parent_session.family_id
+        parent_session_id = parent_session.id
+    else:
+        family_id = str(uuid.uuid4())
+        parent_session_id = None
+
     session_record = AuthSession(
         user_id=user.id,
         refresh_token_hash=hash_refresh_token(refresh_token),
+        family_id=family_id,
+        parent_session_id=parent_session_id,
         user_agent=(request.headers.get("user-agent") if request else None),
         ip_address=(request.client.host if request and request.client else None),
         expires_at=refresh_expires,
@@ -173,6 +187,16 @@ async def _issue_tokens(
         refresh_expires_at=refresh_expires,
         user=serialize_user(refreshed_user),
     )
+
+
+async def _revoke_session_family(db: AsyncSession, family_id: str) -> int:
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        update(AuthSession)
+        .where(AuthSession.family_id == family_id, AuthSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    return result.rowcount or 0
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -217,7 +241,16 @@ async def refresh_tokens(
     )
     result = await db.execute(stmt)
     session_record = result.scalars().first()
-    if session_record is None or session_record.revoked_at is not None:
+    if session_record is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    if session_record.revoked_at is not None:
+        revoked_count = await _revoke_session_family(db, session_record.family_id)
+        await db.commit()
+        logger.warning(
+            "Refresh token reuse detected; revoked %s sessions in family %s",
+            revoked_count,
+            session_record.family_id,
+        )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     expires_at = session_record.expires_at
     if expires_at is not None and expires_at.tzinfo is None:
@@ -230,9 +263,14 @@ async def refresh_tokens(
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
     session_record.revoked_at = datetime.now(timezone.utc)
-    await db.flush()
 
-    return await _issue_tokens(db, user=user, response=response, request=request)
+    return await _issue_tokens(
+        db,
+        user=user,
+        response=response,
+        request=request,
+        parent_session=session_record,
+    )
 
 
 @router.post("/logout", response_model=OperationStatus)
@@ -251,8 +289,13 @@ async def logout(
         result = await db.execute(stmt)
         session_record = result.scalars().first()
         if session_record is not None:
-            session_record.revoked_at = datetime.now(timezone.utc)
+            revoked_count = await _revoke_session_family(db, session_record.family_id)
             await db.commit()
+            logger.info(
+                "Logout revoked %s sessions in family %s",
+                revoked_count,
+                session_record.family_id,
+            )
 
     response.delete_cookie(
         key="refreshToken",

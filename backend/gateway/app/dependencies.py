@@ -11,10 +11,10 @@ from sqlalchemy.orm import selectinload
 
 try:
     from gateway.db.base import create_session  # type: ignore
-    from gateway.db.models import Role, User, UserRole  # type: ignore
+    from gateway.db.models import Role, User, UserRole, user_roles_table  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - fallback when running from backend/
     from backend.gateway.db.base import create_session  # type: ignore
-    from backend.gateway.db.models import Role, User, UserRole  # type: ignore
+    from backend.gateway.db.models import Role, User, UserRole, user_roles_table  # type: ignore
 
 from .security import TokenData, validate_bearer_token
 
@@ -79,6 +79,14 @@ async def get_current_user(
     token: TokenData = Depends(_get_token_data),
     db: AsyncSession = Depends(get_session),
 ) -> User:
+    bind = db.bind
+    if bind is not None and bind.dialect.name == "sqlite":
+        metadata = User.metadata
+        if metadata.schema or any(table.schema for table in metadata.tables.values()):
+            metadata.schema = None
+            for table in metadata.tables.values():
+                table.schema = None
+
     user_id, email, username = _resolve_identity(token)
 
     stmt = select(User).options(selectinload(User.roles).selectinload(Role.permissions))
