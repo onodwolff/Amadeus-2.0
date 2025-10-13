@@ -1,16 +1,16 @@
 """User profile endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, Security, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 try:
-    from gateway.db.models import Role, User  # type: ignore
+    from gateway.db.models import Role, User, UserRole  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover
-    from backend.gateway.db.models import Role, User  # type: ignore
+    from backend.gateway.db.models import Role, User, UserRole  # type: ignore
 
 from ..dependencies import RequirePermissions, get_current_user, get_session
 from ..security import hash_password, verify_password
@@ -25,7 +25,7 @@ class PasswordChangeRequest(BaseModel):
 
 
 @router.get("/me", response_model=UserResource)
-async def read_me(current_user: User = Depends(get_current_user)) -> UserResource:
+async def read_me(current_user: User = Security(get_current_user)) -> UserResource:
     return serialize_user(current_user)
 
 
@@ -37,7 +37,7 @@ async def read_me(current_user: User = Depends(get_current_user)) -> UserResourc
 )
 async def change_my_password(
     payload: PasswordChangeRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Security(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> None:
     if not verify_password(current_user.password_hash, payload.current_password):
@@ -56,7 +56,14 @@ async def change_my_password(
 @router.get(
     "",
     response_model=list[UserResource],
-    dependencies=[Depends(RequirePermissions("gateway.users.view"))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                "gateway.users.view",
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def list_users(db: AsyncSession = Depends(get_session)) -> list[UserResource]:
     stmt = (
@@ -72,7 +79,14 @@ async def list_users(db: AsyncSession = Depends(get_session)) -> list[UserResour
 @router.get(
     "/{user_id}",
     response_model=UserResource,
-    dependencies=[Depends(RequirePermissions("gateway.users.view"))],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                "gateway.users.view",
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
 )
 async def get_user(user_id: int, db: AsyncSession = Depends(get_session)) -> UserResource:
     stmt = (

@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, Security, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +15,9 @@ from ..crypto import decrypt, encrypt, mask_key
 from ..dependencies import get_current_user, get_session
 
 try:  # pragma: no cover - prefer local backend imports during tests
-    from backend.gateway.db.models import ApiKey, User  # type: ignore
+    from backend.gateway.db.models import ApiKey, User, UserRole  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - production installs
-    from gateway.db.models import ApiKey, User  # type: ignore
+    from gateway.db.models import ApiKey, User, UserRole  # type: ignore
 
 
 router = APIRouter(prefix="/keys", tags=["api-keys"])
@@ -161,7 +161,10 @@ def _verify_passphrase(secret_payload: dict[str, Any], provided_hash: str) -> No
 
 @router.get("", response_model=ApiKeysResponse)
 async def list_keys(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Security(
+        get_current_user,
+        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+    ),
     db: AsyncSession = Depends(get_session),
 ) -> ApiKeysResponse:
     stmt = (
@@ -177,7 +180,10 @@ async def list_keys(
 @router.post("", response_model=ApiKeyResource, status_code=status.HTTP_201_CREATED)
 async def create_key(
     payload: KeyCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Security(
+        get_current_user,
+        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+    ),
     db: AsyncSession = Depends(get_session),
 ) -> ApiKeyResource:
     key_id = payload.key_id.strip()
@@ -225,7 +231,10 @@ async def create_key(
 async def update_key(
     key_id: str,
     payload: KeyUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Security(
+        get_current_user,
+        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+    ),
     db: AsyncSession = Depends(get_session),
 ) -> ApiKeyResource:
     record = await _get_owned_key(db, key_id, current_user.id)
@@ -266,7 +275,10 @@ async def update_key(
 async def delete_key(
     key_id: str,
     payload: KeyDeleteRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Security(
+        get_current_user,
+        scopes=[UserRole.ADMIN.value, UserRole.MEMBER.value],
+    ),
     db: AsyncSession = Depends(get_session),
 ) -> Response:
     record = await _get_owned_key(db, key_id, current_user.id)

@@ -1,71 +1,22 @@
 """Security helpers and token utilities for the gateway API."""
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
 import secrets
-import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
-from typing import Any, Final, Tuple
+from typing import Any, Final, Iterable, Sequence
 
-try:
-    import jwt  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - fallback lightweight JWT implementation
-    class _ExpiredSignatureError(Exception):
-        """Raised when the embedded expiration timestamp is in the past."""
-
-    class _InvalidTokenError(Exception):
-        """Raised when a token cannot be decoded or validated."""
-
-    def _b64encode(data: bytes) -> str:
-        return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
-
-    def _b64decode(data: str) -> bytes:
-        padding = "=" * (-len(data) % 4)
-        return base64.urlsafe_b64decode(data + padding)
-
-    def _encode(payload: dict[str, Any], secret: str, algorithm: str = "HS256") -> str:
-        header = {"alg": algorithm, "typ": "JWT"}
-        segments: list[str] = []
-        for component in (header, payload):
-            raw = json.dumps(component, separators=(",", ":"), sort_keys=True).encode("utf-8")
-            segments.append(_b64encode(raw))
-        signing_input = ".".join(segments).encode("utf-8")
-        signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-        segments.append(_b64encode(signature))
-        return ".".join(segments)
-
-    def _decode(token: str, secret: str, algorithms: list[str] | None = None) -> dict[str, Any]:
-        try:
-            header_b64, payload_b64, signature_b64 = token.split(".")
-        except ValueError as exc:  # pragma: no cover - invalid format
-            raise _InvalidTokenError("Token format invalid") from exc
-        signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
-        signature = _b64decode(signature_b64)
-        expected = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-        if not hmac.compare_digest(signature, expected):
-            raise _InvalidTokenError("Signature mismatch")
-        payload = json.loads(_b64decode(payload_b64))
-        exp = payload.get("exp")
-        if exp is not None and int(exp) < int(time.time()):
-            raise _ExpiredSignatureError("Token expired")
-        return payload
-
-    jwt = SimpleNamespace(  # type: ignore[assignment]
-        encode=_encode,
-        decode=_decode,
-        ExpiredSignatureError=_ExpiredSignatureError,
-        InvalidTokenError=_InvalidTokenError,
-    )
-
+import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerifyMismatchError
 from fastapi import HTTPException, status
+from jwt import InvalidTokenError
 
 from .config import settings
+from .jwks import JWKSClient, JWKSFetchError, JWKSKeyNotFoundError
 
 _PASSWORD_HASHER: Final[PasswordHasher] = PasswordHasher()
 
@@ -94,41 +45,259 @@ def _jwt_error(detail: str) -> HTTPException:
     return HTTPException(status.HTTP_401_UNAUTHORIZED, detail=detail)
 
 
-def create_access_token(*, subject: int, expires_in: int | None = None) -> Tuple[str, datetime]:
-    """Create a signed JWT access token for the supplied subject."""
+@dataclass(frozen=True)
+class TokenData:
+    """Validated token payload enriched with useful metadata."""
+
+    subject: str
+    issuer: str
+    audience: tuple[str, ...]
+    expires_at: datetime
+    roles: tuple[str, ...]
+    scopes: tuple[str, ...]
+    claims: dict[str, Any]
+
+
+class TokenValidator:
+    """Validate bearer tokens issued by an external identity provider."""
+
+    def __init__(self) -> None:
+        self._config = settings.auth
+        self._jwks_client: JWKSClient | None = None
+        if self._config.uses_identity_provider and self._config.idp_jwks_url:
+            self._jwks_client = JWKSClient(
+                self._config.idp_jwks_url,
+                cache_ttl_seconds=self._config.idp_cache_ttl_seconds,
+            )
+        self._allowed_algorithms: tuple[str, ...] = tuple(self._config.idp_algorithms or ["RS256"])
+
+    def _decode_with_idp(self, token: str) -> dict[str, Any]:
+        if self._jwks_client is None:
+            raise _jwt_error("Identity provider is not configured")
+
+        try:
+            header = jwt.get_unverified_header(token)
+        except InvalidTokenError as exc:
+            raise _jwt_error("Invalid token header") from exc
+
+        kid = header.get("kid")
+        if not isinstance(kid, str) or not kid:
+            raise _jwt_error("Token missing key identifier")
+
+        algorithm = header.get("alg")
+        if not isinstance(algorithm, str):
+            raise _jwt_error("Token missing signing algorithm")
+        algorithm = algorithm.upper()
+        if algorithm not in self._allowed_algorithms:
+            raise _jwt_error("Unsupported signing algorithm")
+
+        try:
+            jwk_entry = self._jwks_client.get_signing_key(kid)
+        except JWKSKeyNotFoundError as exc:
+            raise _jwt_error("Unknown signing key") from exc
+        except JWKSFetchError as exc:
+            raise _jwt_error("Unable to fetch signing keys") from exc
+
+        try:
+            key = jwt.algorithms.get_default_algorithms()[algorithm].from_jwk(json.dumps(jwk_entry))
+        except Exception as exc:  # pragma: no cover - defensive
+            raise _jwt_error("Failed to construct verification key") from exc
+
+        options = {
+            "require": ["sub", "exp"],
+            "verify_aud": bool(self._config.idp_audiences),
+            "verify_iss": bool(self._config.idp_issuer),
+        }
+
+        try:
+            payload = jwt.decode(
+                token,
+                key,
+                algorithms=[algorithm],
+                audience=list(self._config.idp_audiences) or None,
+                issuer=self._config.idp_issuer,
+                options=options,
+            )
+        except jwt.ExpiredSignatureError as exc:
+            raise _jwt_error("Token expired") from exc
+        except jwt.InvalidAudienceError as exc:
+            raise _jwt_error("Invalid audience") from exc
+        except jwt.InvalidIssuerError as exc:
+            raise _jwt_error("Invalid issuer") from exc
+        except InvalidTokenError as exc:
+            raise _jwt_error("Invalid token") from exc
+
+        return payload
+
+    def _decode_with_local_secret(self, token: str) -> dict[str, Any]:
+        try:
+            payload = jwt.decode(
+                token,
+                self._config.jwt_secret,
+                algorithms=["HS256"],
+                options={"require": ["sub", "exp"], "verify_aud": False, "verify_iss": False},
+            )
+        except jwt.ExpiredSignatureError as exc:
+            raise _jwt_error("Token expired") from exc
+        except InvalidTokenError as exc:
+            raise _jwt_error("Invalid token") from exc
+        return payload
+
+    @staticmethod
+    def _extract_roles(claims: dict[str, Any]) -> tuple[str, ...]:
+        roles: list[str] = []
+        realm_access = claims.get("realm_access")
+        if isinstance(realm_access, dict):
+            raw_roles = realm_access.get("roles")
+            if isinstance(raw_roles, Iterable) and not isinstance(raw_roles, (str, bytes)):
+                for item in raw_roles:
+                    if isinstance(item, str):
+                        cleaned = item.strip()
+                        if cleaned and cleaned not in roles:
+                            roles.append(cleaned)
+        return tuple(roles)
+
+    @staticmethod
+    def _extract_scopes(claims: dict[str, Any]) -> tuple[str, ...]:
+        scope_claim = claims.get("scope")
+        if isinstance(scope_claim, str):
+            scopes = []
+            seen: set[str] = set()
+            for scope in scope_claim.split():
+                cleaned = scope.strip()
+                if not cleaned or cleaned in seen:
+                    continue
+                seen.add(cleaned)
+                scopes.append(cleaned)
+            return tuple(scopes)
+        return ()
+
+    def _normalise_payload(self, payload: dict[str, Any]) -> TokenData:
+        subject = payload.get("sub")
+        if not isinstance(subject, str) or not subject.strip():
+            raise _jwt_error("Token subject is missing")
+
+        issuer = payload.get("iss")
+        if not isinstance(issuer, str):
+            issuer = ""
+
+        exp_claim = payload.get("exp")
+        if isinstance(exp_claim, str) and exp_claim.isdigit():
+            exp_claim = int(exp_claim)
+        if not isinstance(exp_claim, (int, float)):
+            raise _jwt_error("Token expiration is invalid")
+        expires_at = datetime.fromtimestamp(int(exp_claim), tz=timezone.utc)
+
+        audience_claim = payload.get("aud")
+        audience: tuple[str, ...]
+        if isinstance(audience_claim, str):
+            audience = (audience_claim,)
+        elif isinstance(audience_claim, Iterable):
+            cleaned: list[str] = []
+            for item in audience_claim:
+                if isinstance(item, str):
+                    candidate = item.strip()
+                    if candidate and candidate not in cleaned:
+                        cleaned.append(candidate)
+            audience = tuple(cleaned)
+        else:
+            audience = ()
+
+        roles = self._extract_roles(payload)
+        scopes = self._extract_scopes(payload)
+
+        return TokenData(
+            subject=subject,
+            issuer=issuer,
+            audience=audience,
+            expires_at=expires_at,
+            roles=roles,
+            scopes=scopes,
+            claims=dict(payload),
+        )
+
+    def validate(self, token: str) -> TokenData:
+        """Validate ``token`` and return the enriched payload."""
+
+        if self._config.uses_identity_provider:
+            payload = self._decode_with_idp(token)
+        elif self._config.allow_test_tokens:
+            payload = self._decode_with_local_secret(token)
+        else:
+            raise _jwt_error("Identity provider validation is not configured")
+        return self._normalise_payload(payload)
+
+
+_VALIDATOR: TokenValidator | None = None
+
+
+def _get_validator() -> TokenValidator:
+    global _VALIDATOR
+    if _VALIDATOR is None:
+        _VALIDATOR = TokenValidator()
+    return _VALIDATOR
+
+
+def validate_bearer_token(token: str) -> TokenData:
+    """Validate and decode an incoming bearer token."""
+
+    validator = _get_validator()
+    return validator.validate(token)
+
+
+def create_test_access_token(
+    *,
+    subject: int | str,
+    expires_in: int | None = None,
+    roles: Sequence[str] | None = None,
+    scopes: Sequence[str] | None = None,
+) -> tuple[str, datetime]:
+    """Issue a short lived access token for testing purposes.
+
+    The gateway now expects access tokens to be minted by an external identity
+    provider. This helper remains to unblock automated tests and local
+    development flows. The resulting JWT is signed with the legacy shared
+    secret and should never be used in production.
+    """
 
     now = datetime.now(timezone.utc)
     ttl = expires_in or settings.auth.access_token_ttl_seconds
     exp = now + timedelta(seconds=ttl)
-    payload = {
+    payload: dict[str, Any] = {
         "sub": str(subject),
         "type": "access",
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
     }
+    if roles:
+        unique_roles = []
+        seen: set[str] = set()
+        for role in roles:
+            cleaned = role.strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            unique_roles.append(cleaned)
+        if unique_roles:
+            payload["realm_access"] = {"roles": unique_roles}
+    if scopes:
+        unique_scopes = []
+        seen_scopes: set[str] = set()
+        for scope in scopes:
+            cleaned_scope = scope.strip()
+            if not cleaned_scope or cleaned_scope in seen_scopes:
+                continue
+            seen_scopes.add(cleaned_scope)
+            unique_scopes.append(cleaned_scope)
+        if unique_scopes:
+            payload["scope"] = " ".join(unique_scopes)
+
     token = jwt.encode(payload, settings.auth.jwt_secret, algorithm="HS256")
     return token, exp
 
 
-def decode_access_token(token: str) -> dict[str, Any]:
-    """Decode and validate an incoming JWT access token."""
-
-    try:
-        payload = jwt.decode(token, settings.auth.jwt_secret, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError as exc:  # pragma: no cover - runtime guard
-        raise _jwt_error("Token expired") from exc
-    except jwt.InvalidTokenError as exc:  # pragma: no cover - runtime guard
-        raise _jwt_error("Invalid token") from exc
-
-    token_type = payload.get("type")
-    if token_type != "access":
-        raise _jwt_error("Invalid token")
-
-    return payload
-
-
-def create_refresh_token(*, expires_in: int | None = None) -> Tuple[str, datetime]:
-    """Generate a refresh token and return it with its expiration timestamp."""
+def create_test_refresh_token(*, expires_in: int | None = None) -> tuple[str, datetime]:
+    """Generate a refresh token for testing flows."""
 
     ttl = expires_in or settings.auth.refresh_token_ttl_seconds
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
@@ -139,3 +308,15 @@ def hash_refresh_token(token: str) -> str:
     """Hash refresh tokens before persistence to the database."""
 
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+__all__ = [
+    "TokenData",
+    "TokenValidator",
+    "create_test_access_token",
+    "create_test_refresh_token",
+    "hash_password",
+    "hash_refresh_token",
+    "validate_bearer_token",
+    "verify_password",
+]

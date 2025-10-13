@@ -75,6 +75,36 @@ class AuthSettings(BaseModel):
     jwt_secret: str = Field(default="change-me", min_length=8)
     access_token_ttl_seconds: int = Field(default=900, ge=60)
     refresh_token_ttl_seconds: int = Field(default=86400, ge=300)
+    idp_issuer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_IDP_ISSUER", "AUTH__IDP_ISSUER"),
+    )
+    idp_audience: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_IDP_AUDIENCE", "AUTH__IDP_AUDIENCE"),
+        description="Audience expected in IdP issued tokens.",
+    )
+    idp_jwks_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_IDP_JWKS_URL", "AUTH__IDP_JWKS_URL"),
+        description="JWKS endpoint exposed by the identity provider.",
+    )
+    idp_algorithms: list[str] = Field(
+        default_factory=lambda: ["RS256"],
+        validation_alias=AliasChoices("AUTH_IDP_ALGORITHMS", "AUTH__IDP_ALGORITHMS"),
+        description="Signing algorithms accepted from the identity provider.",
+    )
+    idp_cache_ttl_seconds: int = Field(
+        default=600,
+        ge=60,
+        validation_alias=AliasChoices("AUTH_IDP_CACHE_TTL_SECONDS", "AUTH__IDP_CACHE_TTL_SECONDS"),
+        description="Seconds to cache the JWKS response before refreshing.",
+    )
+    allow_test_tokens: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AUTH_ALLOW_TEST_TOKENS", "AUTH__ALLOW_TEST_TOKENS"),
+        description="Enable legacy locally signed tokens for test environments.",
+    )
     admin_email: EmailStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ADMIN_EMAIL", "AUTH__ADMIN_EMAIL"),
@@ -100,6 +130,27 @@ class AuthSettings(BaseModel):
         normalised = str(value).strip().lower()
         return _EMAIL_STR_ADAPTER.validate_python(normalised)
 
+    @field_validator("idp_algorithms", mode="before")
+    @classmethod
+    def _normalise_algorithms(cls, value: list[str] | str | None) -> list[str]:
+        if value is None:
+            return ["RS256"]
+        if isinstance(value, str):
+            candidates = value.replace(",", " ").split()
+        else:
+            candidates = [str(item) for item in value]
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalised = candidate.strip().upper()
+            if not normalised or normalised in seen:
+                continue
+            seen.add(normalised)
+            cleaned.append(normalised)
+        if not cleaned:
+            raise ValueError("At least one IdP signing algorithm must be provided")
+        return cleaned
+
     @model_validator(mode="after")
     def _auto_enable(self) -> "AuthSettings":
         """Automatically enable auth when administrator credentials are provided."""
@@ -107,6 +158,29 @@ class AuthSettings(BaseModel):
         if not self.enabled and self.admin_email:
             self.enabled = True
         return self
+
+    @property
+    def uses_identity_provider(self) -> bool:
+        """Return ``True`` when IdP based validation is fully configured."""
+
+        return bool(self.idp_jwks_url and self.idp_issuer)
+
+    @property
+    def idp_audiences(self) -> tuple[str, ...]:
+        """Normalised list of IdP audiences configured for token validation."""
+
+        if not self.idp_audience:
+            return ()
+        parts = self.idp_audience.replace(",", " ").split()
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            candidate = part.strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            cleaned.append(candidate)
+        return tuple(cleaned)
 
 
 class StorageSettings(BaseModel):
