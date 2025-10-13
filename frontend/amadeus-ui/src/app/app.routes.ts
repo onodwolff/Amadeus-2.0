@@ -14,44 +14,53 @@ export const routes: Routes = [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
       {
         path: 'dashboard',
+        canMatch: [RoleGuard],
         data: { requiredRoles: ['trader'] },
         loadComponent: () => import('./nodes/nodes.page').then(m => m.NodesPage),
       },
       { path: 'nodes', redirectTo: 'dashboard', pathMatch: 'full' },
       {
         path: 'market',
+        canMatch: [RoleGuard],
         data: { requiredRoles: ['trader'] },
         loadComponent: () => import('./market/market.page').then(m => m.MarketPage),
       },
       {
         path: 'portfolio',
+        canMatch: [RoleGuard],
         data: { requiredRoles: ['trader'] },
         loadComponent: () => import('./portfolio/portfolio.page').then(m => m.PortfolioPage),
       },
       {
         path: 'orders',
+        canMatch: [RoleGuard],
         data: { requiredRoles: ['trader'] },
         loadComponent: () => import('./orders/orders.page').then(m => m.OrdersPage),
       },
       {
         path: 'backtest',
+        canMatch: [RoleGuard],
         data: { requiredRoles: ['trader'] },
         children: [
           { path: '', loadComponent: () => import('./backtest/backtest.page').then(m => m.BacktestPage) },
           { path: 'runs/:runId', redirectTo: '/backtest/:runId', pathMatch: 'full' },
           {
             path: ':id',
+            canMatch: [RoleGuard],
+            data: { requiredRoles: ['trader'] },
             loadComponent: () => import('./backtest/run-detail.page').then(m => m.RunDetailPage),
           },
         ],
       },
       {
         path: 'strategy-tests',
+        canMatch: [RoleGuard],
         data: { requiredRoles: ['trader'] },
         loadComponent: () => import('./strategies/strategy-testing.page').then(m => m.StrategyTestingPage),
       },
       {
         path: 'risk',
+        canMatch: [RoleGuard],
         data: { requiredRoles: ['trader'] },
         loadComponent: () => import('./risk/risk.page').then(m => m.RiskPage),
       },
