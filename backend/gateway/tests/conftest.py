@@ -15,6 +15,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from backend.gateway.app.main import create_app
+from backend.gateway.app.dependencies import get_session
+from backend.gateway.config import settings
+
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
@@ -26,6 +30,15 @@ class SQLiteJSONB(sa.JSON):
 
 
 postgresql.JSONB = SQLiteJSONB  # type: ignore[attr-defined]
+
+
+
+def _patch_jsonb(metadata: sa.MetaData) -> None:
+    for table in metadata.tables.values():
+        for column in table.columns:
+            if column.type.__class__.__name__ == 'JSONB':
+                column.type = SQLiteJSONB()
+
 
 from backend.gateway.app.state_sync import Base as EngineBase
 from backend.gateway.db import models as db_models
@@ -54,7 +67,22 @@ def _normalise_defaults(metadata: sa.MetaData) -> None:
 
 _normalise_defaults(db_models.Base.metadata)
 _normalise_defaults(EngineBase.metadata)
+_patch_jsonb(db_models.Base.metadata)
+_patch_jsonb(EngineBase.metadata)
+_patch_jsonb(GatewayBase.metadata)
 
+
+GatewayBase.metadata.schema = None
+for table in GatewayBase.metadata.tables.values():
+    table.schema = None
+
+EngineBase.metadata.schema = None
+for table in EngineBase.metadata.tables.values():
+    table.schema = None
+
+db_models.Base.metadata.schema = None
+for table in db_models.Base.metadata.tables.values():
+    table.schema = None
 
 _DEFAULT_PERMISSIONS = [
     {
@@ -202,6 +230,13 @@ async def clean_database(db_engine: AsyncEngine) -> AsyncIterator[None]:
         for table in reversed(GatewayBase.metadata.sorted_tables):
             await connection.execute(table.delete())
 
+    session = create_session()
+    try:
+        async with session.begin():
+            await _seed_access_control(session)
+    finally:
+        await session.close()
+
 
 @pytest_asyncio.fixture
 async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
@@ -222,3 +257,19 @@ def session_factory(db_engine: AsyncEngine) -> Callable[[], AsyncSession]:
         return create_session()
 
     return factory
+
+
+
+
+@pytest.fixture
+def app(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    """Create a FastAPI test application with database overrides."""
+
+    monkeypatch.setattr(settings.auth, "enabled", True)
+    application = create_app()
+
+    async def _override_session():
+        yield db_session
+
+    application.dependency_overrides[get_session] = _override_session
+    return application
