@@ -26,9 +26,9 @@ docker compose up --build
 
 The primary administrator account is seeded automatically during startup using the credentials below:
 
-| Email                     | Password   |
-|---------------------------|------------|
-| `volkov.zheka@gmail.com`  | `volkov650`|
+| Email                  | Password |
+|------------------------|----------|
+| `admin@example.com`    | `admin`  |
 
 After signing in you can rotate the password from the **Settings → Password** panel.
 Two-factor authentication (TOTP) is disabled by default for every account and can be enabled later from the security settings.
@@ -36,10 +36,8 @@ Two-factor authentication (TOTP) is disabled by default for every account and ca
 The authentication service automatically rate-limits login attempts by allowing five failures per minute before temporary lockout,
 so the stack ships with basic brute-force protection out of the box.
 
-To change the bootstrap credentials, edit the `.env` file (or export the variables in your deployment environment) with
-`AUTH__ADMIN_EMAIL` and `AUTH__ADMIN_PASSWORD`. The gateway reads those values on boot and either creates the administrator
-if no matching user exists yet or updates the stored password for the existing admin. See [docs/bootstrap-admin.md](docs/bootstrap-admin.md)
-for a detailed walkthrough of the process.
+If you need to ship different bootstrap credentials, edit [`backend/0001_initial,`](backend/0001_initial,) before applying the
+migrations or override the user manually through the database once the stack is running.
 
 When the Nautilus engine is unavailable while `AMAD_USE_MOCK=false`, engine-dependent API calls respond with HTTP 501 and a hint to install `nautilus-trader` or toggle the mock profile.
 
