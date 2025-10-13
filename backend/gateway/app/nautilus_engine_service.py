@@ -49,9 +49,12 @@ except Exception:  # pragma: no cover - optional dependency during unit tests
     select = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency for ORM models
-    from gateway.db.models import ApiKey
+    from backend.gateway.db.models import ApiKey  # type: ignore
 except Exception:  # pragma: no cover - optional dependency during unit tests
-    ApiKey = None  # type: ignore[assignment]
+    try:  # pragma: no cover - production installs
+        from gateway.db.models import ApiKey  # type: ignore
+    except Exception:  # pragma: no cover - fallback when models unavailable
+        ApiKey = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency for YAML parsing
     import yaml
