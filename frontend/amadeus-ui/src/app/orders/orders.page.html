@@ -18,7 +18,14 @@
     </div>
   </header>
 
-  <app-order-ticket class="orders-page__ticket" (orderCreated)="onOrderCreated($event)"></app-order-ticket>
+  <ng-container *ngIf="authState.hasRole('trader'); else orderTicketLocked">
+    <app-order-ticket class="orders-page__ticket" (orderCreated)="onOrderCreated($event)"></app-order-ticket>
+  </ng-container>
+  <ng-template #orderTicketLocked>
+    <p class="orders-page__notice" data-testid="orders-ticket-locked">
+      Trader role required to submit new orders.
+    </p>
+  </ng-template>
 
   <section class="orders-page__filters">
     <label class="filter-field">
@@ -172,33 +179,38 @@
                 <ng-template #noExecutions>—</ng-template>
               </td>
               <td data-label="Actions" class="orders-table__actions">
-                <button
-                  type="button"
-                  class="btn btn--ghost"
-                  (click)="onModify(order, $event)"
-                  [disabled]="!isOrderModifiable(order) || isModifying(order.order_id)"
-                >
-                  <span *ngIf="isModifying(order.order_id); else modifyText">Modifying…</span>
-                  <ng-template #modifyText>Modify</ng-template>
-                </button>
-                <button
-                  type="button"
-                  class="btn btn--ghost"
-                  (click)="onCancel(order, $event)"
-                  [disabled]="!isOrderCancellable(order) || isCancelling(order.order_id)"
-                >
-                  <span *ngIf="isCancelling(order.order_id); else cancelText">Cancelling…</span>
-                  <ng-template #cancelText>Cancel</ng-template>
-                </button>
-                <button
-                  type="button"
-                  class="btn btn--ghost"
-                  (click)="onDuplicate(order, $event)"
-                  [disabled]="isDuplicating(order.order_id)"
-                >
-                  <span *ngIf="isDuplicating(order.order_id); else duplicateText">Duplicating…</span>
-                  <ng-template #duplicateText>Duplicate</ng-template>
-                </button>
+                <ng-container *ngIf="authState.hasRole('trader'); else orderActionsLocked">
+                  <button
+                    type="button"
+                    class="btn btn--ghost"
+                    (click)="onModify(order, $event)"
+                    [disabled]="!isOrderModifiable(order) || isModifying(order.order_id)"
+                  >
+                    <span *ngIf="isModifying(order.order_id); else modifyText">Modifying…</span>
+                    <ng-template #modifyText>Modify</ng-template>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn--ghost"
+                    (click)="onCancel(order, $event)"
+                    [disabled]="!isOrderCancellable(order) || isCancelling(order.order_id)"
+                  >
+                    <span *ngIf="isCancelling(order.order_id); else cancelText">Cancelling…</span>
+                    <ng-template #cancelText>Cancel</ng-template>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn--ghost"
+                    (click)="onDuplicate(order, $event)"
+                    [disabled]="isDuplicating(order.order_id)"
+                  >
+                    <span *ngIf="isDuplicating(order.order_id); else duplicateText">Duplicating…</span>
+                    <ng-template #duplicateText>Duplicate</ng-template>
+                  </button>
+                </ng-container>
+                <ng-template #orderActionsLocked>
+                  <span class="orders-table__actions-lock" data-testid="orders-actions-locked">Trader role required</span>
+                </ng-template>
               </td>
             </tr>
           </tbody>

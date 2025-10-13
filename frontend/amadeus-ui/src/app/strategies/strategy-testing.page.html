@@ -7,6 +7,7 @@
       </p>
     </div>
     <button
+      *ngIf="authState.hasRole('trader')"
       type="submit"
       class="btn btn--primary"
       form="strategyTestingForm"
@@ -16,7 +17,8 @@
     </button>
   </header>
 
-  <form class="strategy-testing__form" [formGroup]="form" (ngSubmit)="submit()" id="strategyTestingForm">
+  <ng-container *ngIf="authState.hasRole('trader'); else strategyTestingRestricted">
+    <form class="strategy-testing__form" [formGroup]="form" (ngSubmit)="submit()" id="strategyTestingForm">
     <section class="form-section" aria-labelledby="run-name-block">
       <div class="section-header">
         <h2 id="run-name-block">Run metadata</h2>
@@ -314,4 +316,10 @@
       </tbody>
     </table>
   </section>
+  </ng-container>
+  <ng-template #strategyTestingRestricted>
+    <p class="strategy-testing__notice" data-testid="strategy-testing-locked">
+      Trader role required to configure strategy optimisation runs.
+    </p>
+  </ng-template>
 </section>
