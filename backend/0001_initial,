@@ -4,6 +4,8 @@
 INSERT INTO public.roles (slug, name, description)
 VALUES
     ('admin', 'Administrator', 'Full administrative control over the Amadeus gateway.'),
+    ('manager', 'Manager', 'Operational management capabilities for trading teams.'),
+    ('trader', 'Trader', 'Trading-focused access for launching and monitoring nodes.'),
     ('member', 'Member', 'Standard user with management privileges.'),
     ('viewer', 'Viewer', 'Read-only access to gateway resources.')
 ON CONFLICT (slug) DO UPDATE
@@ -32,14 +34,14 @@ INSERT INTO public.role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM public.roles AS r
 JOIN public.permissions AS p ON p.code = 'gateway.users.manage'
-WHERE r.slug IN ('admin', 'member')
+WHERE r.slug IN ('admin', 'manager', 'member')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM public.roles AS r
 JOIN public.permissions AS p ON p.code = 'gateway.users.view'
-WHERE r.slug IN ('admin', 'member', 'viewer')
+WHERE r.slug IN ('admin', 'manager', 'member', 'trader', 'viewer')
 ON CONFLICT DO NOTHING;
 
 -- Bootstrap administrator account (default password: "admin")

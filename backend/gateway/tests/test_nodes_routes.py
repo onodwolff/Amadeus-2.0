@@ -103,9 +103,12 @@ async def trader_headers(db_session):
         email=f"trader-{uuid4()}@example.com",
         username=f"trader-{uuid4().hex[:8]}",
         password="password",
-        roles=[db_models.UserRole.MEMBER.value],
+        roles=[db_models.UserRole.TRADER.value],
     )
-    token, _ = create_test_access_token(subject=user.id, roles=[db_models.UserRole.MEMBER.value], scopes=["trader"])
+    token, _ = create_test_access_token(
+        subject=user.id,
+        roles=[db_models.UserRole.TRADER.value],
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -119,6 +122,22 @@ async def viewer_headers(db_session):
         roles=[db_models.UserRole.VIEWER.value],
     )
     token, _ = create_test_access_token(subject=user.id, roles=[db_models.UserRole.VIEWER.value], scopes=["viewer"])
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def manager_headers(db_session):
+    user = await create_user(
+        db_session,
+        email=f"manager-{uuid4()}@example.com",
+        username=f"manager-{uuid4().hex[:8]}",
+        password="password",
+        roles=[db_models.UserRole.MANAGER.value],
+    )
+    token, _ = create_test_access_token(
+        subject=user.id,
+        roles=[db_models.UserRole.MANAGER.value],
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -138,6 +157,15 @@ async def test_list_nodes_returns_handles(app, override_nautilus_service, trader
     assert response.status_code == 200
     payload = response.json()
     assert payload["nodes"]
+    override_nautilus_service.list_nodes.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_manager_role_can_access_nodes(app, override_nautilus_service, manager_headers):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/nodes", headers=manager_headers)
+
+    assert response.status_code == 200
     override_nautilus_service.list_nodes.assert_called_once_with()
 
 

@@ -53,6 +53,14 @@ async def _seed_admin(
                 "Administrator",
                 "Full access to all administrative capabilities.",
             ),
+            UserRole.MANAGER.value: (
+                "Manager",
+                "Operational management capabilities for trading teams.",
+            ),
+            UserRole.TRADER.value: (
+                "Trader",
+                "Trading-focused access for launching and monitoring nodes.",
+            ),
             UserRole.MEMBER.value: (
                 "Member",
                 "Standard member access with management abilities.",
@@ -104,6 +112,13 @@ async def _seed_admin(
             UserRole.ADMIN.value: (
                 "gateway.admin",
                 "gateway.users.manage",
+                "gateway.users.view",
+            ),
+            UserRole.MANAGER.value: (
+                "gateway.users.manage",
+                "gateway.users.view",
+            ),
+            UserRole.TRADER.value: (
                 "gateway.users.view",
             ),
             UserRole.MEMBER.value: (

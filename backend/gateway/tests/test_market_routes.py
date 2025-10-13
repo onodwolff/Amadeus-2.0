@@ -59,9 +59,28 @@ async def market_trader_headers(db_session):
         email=f"market-trader-{uuid4()}@example.com",
         username=f"markettrader-{uuid4().hex[:8]}",
         password="password",
-        roles=[db_models.UserRole.MEMBER.value],
+        roles=[db_models.UserRole.TRADER.value],
     )
-    token, _ = create_test_access_token(subject=user.id, roles=[db_models.UserRole.MEMBER.value], scopes=["trader"])
+    token, _ = create_test_access_token(
+        subject=user.id,
+        roles=[db_models.UserRole.TRADER.value],
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def market_manager_headers(db_session):
+    user = await create_user(
+        db_session,
+        email=f"market-manager-{uuid4()}@example.com",
+        username=f"marketmanager-{uuid4().hex[:8]}",
+        password="password",
+        roles=[db_models.UserRole.MANAGER.value],
+    )
+    token, _ = create_test_access_token(
+        subject=user.id,
+        roles=[db_models.UserRole.MANAGER.value],
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -120,6 +139,20 @@ async def test_watchlist_roundtrip(app, market_trader_headers):
             "BINANCE:SPOT:BTCUSDT",
             "COINBASE:SPOT:ETHUSD",
         ]
+
+
+@pytest.mark.asyncio
+async def test_manager_role_updates_watchlist(app, market_manager_headers):
+    svc.update_watchlist([])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        update = await client.put(
+            "/market/watchlist",
+            json={"favorites": ["BINANCE:SPOT:BTCUSDT"]},
+            headers=market_manager_headers,
+        )
+
+    assert update.status_code == 200
+    assert update.json()["favorites"] == ["BINANCE:SPOT:BTCUSDT"]
 
 
 @pytest.mark.asyncio
