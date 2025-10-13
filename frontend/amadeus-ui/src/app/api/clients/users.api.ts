@@ -57,6 +57,10 @@ export class UsersApi {
     return this.updateUser(userId, payload);
   }
 
+  changePassword(payload: PasswordUpdateRequest): Observable<void> {
+    return this.http.patch<void>(buildApiUrl('/api/users/me/password'), payload);
+  }
+
   updatePassword(userId: number, payload: PasswordUpdateRequest): Observable<UserProfile> {
     return this.updateUser(userId, { password: payload.newPassword });
   }
