@@ -1,24 +1,34 @@
 <div class="login-page">
-  <form class="login-form" (ngSubmit)="submit()">
-    <h1 class="login-form__title">Sign in</h1>
+  <div class="login-background" aria-hidden="true">
+    <div class="login-background__layer login-background__layer--gradient"></div>
+    <div class="login-background__layer login-background__layer--particles"></div>
+  </div>
 
-    <p class="login-form__description">
-      Continue to sign in with your identity provider. You will be redirected to complete the
-      process.
-    </p>
+  <div class="login-overlay">
+    <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+      <header class="login-modal__header">
+        <h1 class="login-modal__title" id="login-title">Sign in</h1>
+        <p class="login-modal__description">
+          Continue to sign in with your identity provider. You will be redirected to complete the
+          process.
+        </p>
+      </header>
 
-    <div class="login-form__alert" *ngIf="error()">{{ error() }}</div>
+      <form class="login-form" (ngSubmit)="submit()">
+        <div class="login-form__alert" *ngIf="error()">{{ error() }}</div>
 
-    <button type="submit" class="login-form__submit" [disabled]="isSubmitting()">
-      <span *ngIf="!isSubmitting(); else loading">Sign in</span>
-    </button>
-    <ng-template #loading>
-      <span>Redirecting…</span>
-    </ng-template>
+        <button type="submit" class="login-form__submit" [disabled]="isSubmitting()">
+          <span *ngIf="!isSubmitting(); else loading">Sign in</span>
+        </button>
+        <ng-template #loading>
+          <span>Redirecting…</span>
+        </ng-template>
 
-    <div class="login-form__links">
-      <a routerLink="/forgot-password">Forgot your password?</a>
-      <a routerLink="/verify-email">Verify your email</a>
-    </div>
-  </form>
+        <div class="login-form__links">
+          <a routerLink="/forgot-password">Forgot your password?</a>
+          <a routerLink="/verify-email">Verify your email</a>
+        </div>
+      </form>
+    </section>
+  </div>
 </div>
