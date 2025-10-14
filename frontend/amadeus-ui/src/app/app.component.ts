@@ -4,12 +4,12 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { NotificationCenterComponent } from './shared/notifications/notification-center.component';
 import { AuthStateService } from './shared/auth/auth-state.service';
 import {
+  Event as RouterEventBase,
   NavigationCancel,
   NavigationEnd,
   NavigationError,
   NavigationStart,
   Router,
-  RouterEvent,
 } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs/operators';
@@ -119,11 +119,13 @@ export class AppComponent {
 
     const relevantEvents = [NavigationStart, NavigationEnd, NavigationCancel, NavigationError];
 
+    const isRelevantNavigationEvent = (
+      event: RouterEventBase,
+    ): event is NavigationStart | NavigationEnd | NavigationCancel | NavigationError =>
+      relevantEvents.some((type) => event instanceof type);
+
     this.router.events
-      .pipe(
-        filter((event): event is RouterEvent => relevantEvents.some((type) => event instanceof type)),
-        takeUntilDestroyed(),
-      )
+      .pipe(filter(isRelevantNavigationEvent), takeUntilDestroyed())
       .subscribe((event) => {
         const pendingUrl = 'urlAfterRedirects' in event && event.urlAfterRedirects ? event.urlAfterRedirects : event.url;
         this.currentUrl.set(pendingUrl);
