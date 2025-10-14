@@ -56,8 +56,16 @@ def _ensure_test_schema() -> None:
         table.schema = None
 
 from ..audit import record_audit_event
+from ..bruteforce import BruteForceProtector
+from ..captcha import CaptchaVerifier
 from ..config import settings
-from ..dependencies import get_current_user, get_email_dispatcher, get_session
+from ..dependencies import (
+    get_bruteforce_service,
+    get_captcha_verifier,
+    get_current_user,
+    get_email_dispatcher,
+    get_session,
+)
 from ..email import EmailDispatcher
 from ..security import (
     create_test_access_token,
@@ -71,6 +79,18 @@ from ..token_service import TokenService
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        candidate = forwarded.split(",", 1)[0].strip()
+        if candidate:
+            return candidate
+    client = request.client
+    if client and client.host:
+        return client.host
+    return "unknown"
 
 
 class UserResource(BaseModel):
@@ -104,6 +124,7 @@ class TokenResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1)
+    captcha_token: str | None = Field(default=None, alias="captchaToken")
 
 
 class OperationStatus(BaseModel):
@@ -179,6 +200,7 @@ class MfaChallengeRequest(BaseModel):
     challenge_token: str = Field(min_length=16, alias="challengeToken")
     code: str = Field(min_length=6, max_length=32)
     remember_device: bool = Field(default=False, alias="rememberDevice")
+    captcha_token: str | None = Field(default=None, alias="captchaToken")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -545,14 +567,21 @@ async def verify_email(
 @router.post(
     "/login",
     response_model=TokenResponse,
-    responses={status.HTTP_202_ACCEPTED: {"model": MfaChallengeResponse}},
+    responses={
+        status.HTTP_202_ACCEPTED: {"model": MfaChallengeResponse},
+        status.HTTP_403_FORBIDDEN: {"model": OperationStatus},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": OperationStatus},
+    },
 )
 async def login(
     payload: LoginRequest,
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_session),
+    bruteforce: BruteForceProtector = Depends(get_bruteforce_service),
+    captcha_verifier: CaptchaVerifier = Depends(get_captcha_verifier),
 ) -> TokenResponse:
+    client_ip = _extract_client_ip(request)
     if not settings.auth.allow_test_tokens:
         await _record_auth_event(
             db,
@@ -564,6 +593,42 @@ async def login(
         await db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     email = str(payload.email).strip().lower()
+    status_check = await bruteforce.evaluate(email=email, ip_address=client_ip)
+    if status_check.blocked:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login.blocked",
+            result="failure",
+            metadata={"reason": "rate_limited", "email": email},
+        )
+        await db.commit()
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again later.",
+        )
+    if status_check.requires_captcha:
+        token = payload.captcha_token
+        if not token:
+            await _record_auth_event(
+                db,
+                request,
+                action="auth.login",
+                result="failure",
+                metadata={"reason": "captcha_required", "email": email},
+            )
+            await db.commit()
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="CAPTCHA verification required")
+        if not await captcha_verifier.verify(token, client_ip):
+            await _record_auth_event(
+                db,
+                request,
+                action="auth.login",
+                result="failure",
+                metadata={"reason": "captcha_failed", "email": email},
+            )
+            await db.commit()
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="CAPTCHA verification failed")
     user = await _fetch_user_by_email(db, email)
     if user is None or not verify_password(user.password_hash, payload.password):
         await _record_auth_event(
@@ -573,6 +638,7 @@ async def login(
             result="failure",
             metadata={"reason": "invalid_credentials", "email": email},
         )
+        await bruteforce.register_failure(email=email, ip_address=client_ip)
         await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.active:
@@ -585,9 +651,11 @@ async def login(
             target_user_id=user.id,
             metadata={"reason": "account_suspended"},
         )
+        await bruteforce.register_failure(email=email, ip_address=client_ip)
         await db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
+    await bruteforce.reset(email=email, ip_address=client_ip)
     if user.mfa_enabled:
         token_service = TokenService(db)
         record, challenge_token = await token_service.issue(
@@ -636,13 +704,23 @@ async def login(
     )
 
 
-@router.post("/login/mfa", response_model=TokenResponse)
+@router.post(
+    "/login/mfa",
+    response_model=TokenResponse,
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": OperationStatus},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": OperationStatus},
+    },
+)
 async def complete_login_mfa(
     payload: MfaChallengeRequest,
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_session),
+    bruteforce: BruteForceProtector = Depends(get_bruteforce_service),
+    captcha_verifier: CaptchaVerifier = Depends(get_captcha_verifier),
 ) -> TokenResponse:
+    client_ip = _extract_client_ip(request)
     if not settings.auth.allow_test_tokens:
         await _record_auth_event(
             db,
@@ -674,6 +752,49 @@ async def complete_login_mfa(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
 
     user = record.user or await _load_user(db, record.user_id)
+    email = user.email
+    status_check = await bruteforce.evaluate(email=email, ip_address=client_ip)
+    if status_check.blocked:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_mfa.blocked",
+            result="failure",
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            metadata={"reason": "rate_limited", "email": email},
+        )
+        await db.commit()
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again later.",
+        )
+    if status_check.requires_captcha:
+        token = payload.captcha_token
+        if not token:
+            await _record_auth_event(
+                db,
+                request,
+                action="auth.login_mfa",
+                result="failure",
+                actor_user_id=user.id,
+                target_user_id=user.id,
+                metadata={"reason": "captcha_required", "email": email},
+            )
+            await db.commit()
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="CAPTCHA verification required")
+        if not await captcha_verifier.verify(token, client_ip):
+            await _record_auth_event(
+                db,
+                request,
+                action="auth.login_mfa",
+                result="failure",
+                actor_user_id=user.id,
+                target_user_id=user.id,
+                metadata={"reason": "captcha_failed", "email": email},
+            )
+            await db.commit()
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="CAPTCHA verification failed")
     if not user.active:
         await _record_auth_event(
             db,
@@ -684,6 +805,7 @@ async def complete_login_mfa(
             target_user_id=user.id,
             metadata={"reason": "account_suspended"},
         )
+        await bruteforce.register_failure(email=email, ip_address=client_ip)
         await db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
@@ -698,10 +820,12 @@ async def complete_login_mfa(
             target_user_id=user.id,
             metadata={"reason": "invalid_verification_code"},
         )
+        await bruteforce.register_failure(email=email, ip_address=client_ip)
         await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid verification code")
 
     now = datetime.now(timezone.utc)
+    await bruteforce.reset(email=email, ip_address=client_ip)
     user.last_login_at = now
     await db.flush()
     await _record_auth_event(

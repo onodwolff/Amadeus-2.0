@@ -136,6 +136,81 @@ class AuthSettings(BaseModel):
             "AUTH__EMAIL_VERIFICATION_TOKEN_TTL_SECONDS",
         ),
     )
+    login_rate_limit_attempts: int = Field(
+        default=5,
+        ge=1,
+        validation_alias=AliasChoices(
+            "AUTH_LOGIN_RATE_LIMIT_ATTEMPTS",
+            "AUTH__LOGIN_RATE_LIMIT_ATTEMPTS",
+        ),
+    )
+    login_rate_limit_window_seconds: int = Field(
+        default=60,
+        ge=1,
+        validation_alias=AliasChoices(
+            "AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS",
+            "AUTH__LOGIN_RATE_LIMIT_WINDOW_SECONDS",
+        ),
+    )
+    login_captcha_failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        validation_alias=AliasChoices(
+            "AUTH_LOGIN_CAPTCHA_FAILURE_THRESHOLD",
+            "AUTH__LOGIN_CAPTCHA_FAILURE_THRESHOLD",
+        ),
+    )
+    login_captcha_failure_ttl_seconds: int = Field(
+        default=900,
+        ge=60,
+        validation_alias=AliasChoices(
+            "AUTH_LOGIN_CAPTCHA_FAILURE_TTL_SECONDS",
+            "AUTH__LOGIN_CAPTCHA_FAILURE_TTL_SECONDS",
+        ),
+    )
+    login_rate_limit_namespace: str = Field(
+        default="auth:bf",
+        validation_alias=AliasChoices(
+            "AUTH_LOGIN_RATE_LIMIT_NAMESPACE",
+            "AUTH__LOGIN_RATE_LIMIT_NAMESPACE",
+        ),
+    )
+    captcha_verification_url: str = Field(
+        default="https://www.google.com/recaptcha/api/siteverify",
+        validation_alias=AliasChoices(
+            "AUTH_CAPTCHA_VERIFICATION_URL",
+            "AUTH__CAPTCHA_VERIFICATION_URL",
+        ),
+    )
+    captcha_secret_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_CAPTCHA_SECRET_KEY",
+            "AUTH__CAPTCHA_SECRET_KEY",
+        ),
+    )
+    captcha_site_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_CAPTCHA_SITE_KEY",
+            "AUTH__CAPTCHA_SITE_KEY",
+        ),
+    )
+    captcha_timeout_seconds: int = Field(
+        default=5,
+        ge=1,
+        validation_alias=AliasChoices(
+            "AUTH_CAPTCHA_TIMEOUT_SECONDS",
+            "AUTH__CAPTCHA_TIMEOUT_SECONDS",
+        ),
+    )
+    captcha_test_bypass_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_CAPTCHA_TEST_BYPASS_TOKEN",
+            "AUTH__CAPTCHA_TEST_BYPASS_TOKEN",
+        ),
+    )
     admin_email: EmailStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ADMIN_EMAIL", "AUTH__ADMIN_EMAIL"),
@@ -192,6 +267,34 @@ class AuthSettings(BaseModel):
             cleaned = f"/{cleaned}"
         return cleaned
 
+    @field_validator("login_rate_limit_namespace", mode="before")
+    @classmethod
+    def _normalise_namespace(cls, value: str | None) -> str:
+        if value is None:
+            return "auth:bf"
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Login rate limit namespace must be a non-empty string")
+        return cleaned
+
+    @field_validator("captcha_secret_key", "captcha_site_key", "captcha_test_bypass_token", mode="before")
+    @classmethod
+    def _clean_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("captcha_verification_url", mode="before")
+    @classmethod
+    def _normalise_captcha_url(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("AUTH_CAPTCHA_VERIFICATION_URL must be provided")
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("AUTH_CAPTCHA_VERIFICATION_URL must be a non-empty string")
+        return cleaned
+
     @field_validator("idp_algorithms", mode="before")
     @classmethod
     def _normalise_algorithms(cls, value: list[str] | str | None) -> list[str]:
@@ -226,6 +329,12 @@ class AuthSettings(BaseModel):
         """Return ``True`` when IdP based validation is fully configured."""
 
         return bool(self.idp_jwks_url and self.idp_issuer)
+
+    @property
+    def captcha_configured(self) -> bool:
+        """Return ``True`` when CAPTCHA verification can be performed."""
+
+        return bool(self.captcha_secret_key)
 
     @property
     def idp_audiences(self) -> tuple[str, ...]:
