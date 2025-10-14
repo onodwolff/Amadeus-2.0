@@ -71,10 +71,7 @@ class TokenValidator:
             )
         self._allowed_algorithms: tuple[str, ...] = tuple(self._config.idp_algorithms or ["RS256"])
 
-    def _decode_with_idp(self, token: str) -> dict[str, Any]:
-        if self._jwks_client is None:
-            raise _jwt_error("Identity provider is not configured")
-
+    def _extract_header_requirements(self, token: str) -> tuple[str, str]:
         try:
             header = jwt.get_unverified_header(token)
         except InvalidTokenError as exc:
@@ -90,14 +87,9 @@ class TokenValidator:
         algorithm = algorithm.upper()
         if algorithm not in self._allowed_algorithms:
             raise _jwt_error("Unsupported signing algorithm")
+        return kid, algorithm
 
-        try:
-            jwk_entry = self._jwks_client.get_signing_key(kid)
-        except JWKSKeyNotFoundError as exc:
-            raise _jwt_error("Unknown signing key") from exc
-        except JWKSFetchError as exc:
-            raise _jwt_error("Unable to fetch signing keys") from exc
-
+    def _decode_with_jwk(self, token: str, jwk_entry: dict[str, Any], algorithm: str) -> dict[str, Any]:
         try:
             key = jwt.algorithms.get_default_algorithms()[algorithm].from_jwk(json.dumps(jwk_entry))
         except Exception as exc:  # pragma: no cover - defensive
@@ -128,6 +120,36 @@ class TokenValidator:
             raise _jwt_error("Invalid token") from exc
 
         return payload
+
+    def _decode_with_idp(self, token: str) -> dict[str, Any]:
+        if self._jwks_client is None:
+            raise _jwt_error("Identity provider is not configured")
+
+        kid, algorithm = self._extract_header_requirements(token)
+
+        try:
+            jwk_entry = self._jwks_client.get_signing_key(kid)
+        except JWKSKeyNotFoundError as exc:
+            raise _jwt_error("Unknown signing key") from exc
+        except JWKSFetchError as exc:
+            raise _jwt_error("Unable to fetch signing keys") from exc
+
+        return self._decode_with_jwk(token, jwk_entry, algorithm)
+
+    async def _decode_with_idp_async(self, token: str) -> dict[str, Any]:
+        if self._jwks_client is None:
+            raise _jwt_error("Identity provider is not configured")
+
+        kid, algorithm = self._extract_header_requirements(token)
+
+        try:
+            jwk_entry = await self._jwks_client.get_signing_key_async(kid)
+        except JWKSKeyNotFoundError as exc:
+            raise _jwt_error("Unknown signing key") from exc
+        except JWKSFetchError as exc:
+            raise _jwt_error("Unable to fetch signing keys") from exc
+
+        return self._decode_with_jwk(token, jwk_entry, algorithm)
 
     def _decode_with_local_secret(self, token: str) -> dict[str, Any]:
         try:
@@ -227,6 +249,17 @@ class TokenValidator:
             raise _jwt_error("Identity provider validation is not configured")
         return self._normalise_payload(payload)
 
+    async def validate_async(self, token: str) -> TokenData:
+        """Async variant of :meth:`validate` that avoids blocking the event loop."""
+
+        if self._config.uses_identity_provider:
+            payload = await self._decode_with_idp_async(token)
+        elif self._config.allow_test_tokens:
+            payload = self._decode_with_local_secret(token)
+        else:
+            raise _jwt_error("Identity provider validation is not configured")
+        return self._normalise_payload(payload)
+
 
 _VALIDATOR: TokenValidator | None = None
 
@@ -243,6 +276,13 @@ def validate_bearer_token(token: str) -> TokenData:
 
     validator = _get_validator()
     return validator.validate(token)
+
+
+async def validate_bearer_token_async(token: str) -> TokenData:
+    """Async helper mirroring :func:`validate_bearer_token` for non-blocking usage."""
+
+    validator = _get_validator()
+    return await validator.validate_async(token)
 
 
 def create_test_access_token(
@@ -317,6 +357,7 @@ __all__ = [
     "create_test_refresh_token",
     "hash_password",
     "hash_refresh_token",
+    "validate_bearer_token_async",
     "validate_bearer_token",
     "verify_password",
 ]
