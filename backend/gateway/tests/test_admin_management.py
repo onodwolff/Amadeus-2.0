@@ -1,14 +1,30 @@
 """Administrative user and permission management tests."""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from backend.gateway.app.routes import admin as admin_routes
 from backend.gateway.app.security import create_test_access_token
-from backend.gateway.db.models import AuthSession, UserRole
+from backend.gateway.db.models import AuthSession, User, UserRole
 
 from .utils import create_user
+
+
+@pytest.fixture
+def capture_admin_audit(monkeypatch) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+
+    class _Recorder:
+        def info(self, event: str, **kwargs: Any) -> None:
+            events.append({"event": event, **kwargs})
+
+    monkeypatch.setattr(admin_routes, "audit_logger", _Recorder())
+    return events
 
 
 @pytest.mark.asyncio
@@ -280,3 +296,110 @@ async def test_manager_and_trader_permissions(app, db_session):
         assert trader_login.status_code == 200
         trader_permissions = set(trader_login.json()["user"]["permissions"])
         assert trader_permissions == {"gateway.users.view"}
+
+
+@pytest.mark.asyncio
+async def test_admin_mutations_emit_audit_events(app, db_session, capture_admin_audit):
+    admin = await create_user(
+        db_session,
+        email="auditor@example.com",
+        username="auditor",
+        password="password",
+        roles=[UserRole.ADMIN.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": admin.email, "password": "password"},
+        )
+        assert login_response.status_code == 200
+        admin_token = login_response.json()["accessToken"]
+
+        create_response = await client.post(
+            "/admin/users",
+            json={
+                "email": "audit-target@example.com",
+                "password": "temporary-pass",
+                "username": "audit-target",
+                "roles": [UserRole.VIEWER.value],
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert create_response.status_code == 200
+        created_payload = create_response.json()
+        managed_user_id = created_payload["id"]
+        assert [event["action"] for event in capture_admin_audit] == ["create_user"]
+        create_event = capture_admin_audit[-1]
+        assert create_event["actor_id"] == admin.id
+        assert create_event["target_id"] == managed_user_id
+        datetime.fromisoformat(create_event["timestamp"])
+
+        update_response = await client.patch(
+            f"/admin/users/{managed_user_id}",
+            json={"name": "Audit Target"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert update_response.status_code == 200
+        assert [event["action"] for event in capture_admin_audit] == [
+            "create_user",
+            "update_user",
+        ]
+        update_event = capture_admin_audit[-1]
+        assert update_event["actor_id"] == admin.id
+        assert update_event["target_id"] == managed_user_id
+        datetime.fromisoformat(update_event["timestamp"])
+
+        assign_response = await client.post(
+            f"/admin/users/{managed_user_id}/roles/{UserRole.MEMBER.value}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert assign_response.status_code == 200
+        assert set(assign_response.json()["roles"]) == {UserRole.MEMBER.value, UserRole.VIEWER.value}
+        assert [event["action"] for event in capture_admin_audit] == [
+            "create_user",
+            "update_user",
+            "assign_role",
+        ]
+        assign_event = capture_admin_audit[-1]
+        assert assign_event["role"] == UserRole.MEMBER.value
+        datetime.fromisoformat(assign_event["timestamp"])
+
+        remove_response = await client.delete(
+            f"/admin/users/{managed_user_id}/roles/{UserRole.VIEWER.value}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert remove_response.status_code == 200
+        assert remove_response.json()["roles"] == [UserRole.MEMBER.value]
+        assert [event["action"] for event in capture_admin_audit] == [
+            "create_user",
+            "update_user",
+            "assign_role",
+            "remove_role",
+        ]
+        remove_event = capture_admin_audit[-1]
+        assert remove_event["role"] == UserRole.VIEWER.value
+        datetime.fromisoformat(remove_event["timestamp"])
+
+        managed_user = await db_session.get(User, managed_user_id)
+        assert managed_user is not None
+        managed_user.mfa_enabled = True
+        managed_user.mfa_secret = "SECRET"
+        await db_session.commit()
+
+        disable_response = await client.post(
+            f"/admin/users/{managed_user_id}/mfa/disable",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert disable_response.status_code == 200
+        assert [event["action"] for event in capture_admin_audit] == [
+            "create_user",
+            "update_user",
+            "assign_role",
+            "remove_role",
+            "disable_user_mfa",
+        ]
+        disable_event = capture_admin_audit[-1]
+        assert disable_event["revoked_sessions"] == 0
+        assert disable_event["target_id"] == managed_user_id
+        datetime.fromisoformat(disable_event["timestamp"])

@@ -1,7 +1,8 @@
 """Administrative endpoints for managing users, roles and permissions."""
 from __future__ import annotations
 
-from typing import Iterable
+from datetime import datetime, timezone
+from typing import Any, Annotated, Iterable
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -22,6 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from ..config import settings
 from ..dependencies import RequirePermissions, get_email_dispatcher, get_session
+from ..logging import get_logger
 from ..email import EmailDispatcher
 from ..security import hash_password
 from ..token_service import TokenService
@@ -31,6 +33,30 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 _MANAGE_USERS_PERMISSION = "gateway.users.manage"
 _ADMIN_PERMISSION = "gateway.admin"
+
+audit_logger = get_logger("gateway.admin.audit")
+
+_require_manage_users = RequirePermissions(
+    _MANAGE_USERS_PERMISSION,
+    roles=[UserRole.ADMIN.value],
+)
+
+AdminActor = Annotated[User, Depends(_require_manage_users)]
+
+
+def _audit_event(action: str, *, actor: User, target: User, **extra: Any) -> None:
+    audit_logger.info(
+        "admin_action",
+        action=action,
+        actor_id=actor.id,
+        actor_email=actor.email,
+        actor_username=actor.username,
+        target_id=target.id,
+        target_email=target.email,
+        target_username=target.username,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        **extra,
+    )
 
 
 class AdminUserCreate(BaseModel):
@@ -169,17 +195,10 @@ def _serialize_role(role: Role) -> RoleResource:
 @router.post(
     "/users/{user_id}/mfa/disable",
     response_model=OperationStatus,
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                _MANAGE_USERS_PERMISSION,
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
 )
 async def admin_disable_user_mfa(
     user_id: int,
+    current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     user = await _load_user(db, user_id)
@@ -192,6 +211,12 @@ async def admin_disable_user_mfa(
     revoked = await revoke_user_sessions(db, user)
     await db.flush()
     await db.commit()
+    _audit_event(
+        "disable_user_mfa",
+        actor=current_admin,
+        target=user,
+        revoked_sessions=revoked,
+    )
     return OperationStatus(detail=f"Two-factor authentication disabled. Revoked {revoked} sessions.")
 
 
@@ -221,17 +246,10 @@ async def admin_revoke_user_sessions(
 @router.post(
     "/users",
     response_model=UserResource,
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                _MANAGE_USERS_PERMISSION,
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
 )
 async def create_user(
     payload: AdminUserCreate,
+    current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
     email_dispatcher: EmailDispatcher = Depends(get_email_dispatcher),
 ) -> UserResource:
@@ -266,6 +284,12 @@ async def create_user(
     await db.commit()
 
     created = await _load_user(db, user.id)
+    _audit_event(
+        "create_user",
+        actor=current_admin,
+        target=created,
+        assigned_roles=created.role_slugs,
+    )
     if verification_record is not None and verification_token is not None:
         await db.refresh(verification_record)
         await email_dispatcher.send_email_verification(
@@ -279,18 +303,11 @@ async def create_user(
 @router.patch(
     "/users/{user_id}",
     response_model=UserResource,
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                _MANAGE_USERS_PERMISSION,
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
 )
 async def update_user(
     user_id: int,
     payload: AdminUserUpdate,
+    current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> UserResource:
     user = await _load_user(db, user_id)
@@ -321,6 +338,11 @@ async def update_user(
 
     await db.commit()
     updated = await _load_user(db, user.id)
+    _audit_event(
+        "update_user",
+        actor=current_admin,
+        target=updated,
+    )
     return serialize_user(updated)
 
 
@@ -367,18 +389,11 @@ async def get_user(user_id: int, db: AsyncSession = Depends(get_session)) -> Use
 @router.post(
     "/users/{user_id}/roles/{role_slug}",
     response_model=UserResource,
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                _MANAGE_USERS_PERMISSION,
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
 )
 async def assign_role(
     user_id: int,
     role_slug: str,
+    current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> UserResource:
     user = await _load_user(db, user_id)
@@ -387,24 +402,23 @@ async def assign_role(
         user.roles.append(role)
     await db.commit()
     updated = await _load_user(db, user.id)
+    _audit_event(
+        "assign_role",
+        actor=current_admin,
+        target=updated,
+        role=role.slug,
+    )
     return serialize_user(updated)
 
 
 @router.delete(
     "/users/{user_id}/roles/{role_slug}",
     response_model=UserResource,
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                _MANAGE_USERS_PERMISSION,
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
 )
 async def remove_role(
     user_id: int,
     role_slug: str,
+    current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> UserResource:
     user = await _load_user(db, user_id)
@@ -412,6 +426,12 @@ async def remove_role(
     user.roles = [existing for existing in user.roles if existing.id != role.id]
     await db.commit()
     updated = await _load_user(db, user.id)
+    _audit_event(
+        "remove_role",
+        actor=current_admin,
+        target=updated,
+        role=role.slug,
+    )
     return serialize_user(updated)
 
 
