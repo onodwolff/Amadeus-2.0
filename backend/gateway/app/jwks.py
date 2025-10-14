@@ -8,6 +8,8 @@ from typing import Any
 
 from urllib import error, request
 
+import anyio
+
 __all__ = ["JWKSClient", "JWKSFetchError", "JWKSKeyNotFoundError"]
 
 
@@ -77,6 +79,11 @@ class JWKSClient:
         self._cache_expiry = now + self._cache_ttl_seconds
         return mapping
 
+    async def _refresh_cache_async(self) -> dict[str, dict[str, Any]]:
+        """Async wrapper for :meth:`_refresh_cache` executed in a worker thread."""
+
+        return await anyio.to_thread.run_sync(self._refresh_cache)
+
     def _get_cached_keys(self, *, force_refresh: bool = False) -> dict[str, dict[str, Any]]:
         with self._lock:
             now = time.time()
@@ -87,6 +94,15 @@ class JWKSClient:
             ):
                 return self._refresh_cache()
             return self._cached_keys
+
+    async def _get_cached_keys_async(
+        self, *, force_refresh: bool = False
+    ) -> dict[str, dict[str, Any]]:
+        """Async wrapper for :meth:`_get_cached_keys` to avoid blocking the event loop."""
+
+        return await anyio.to_thread.run_sync(
+            lambda: self._get_cached_keys(force_refresh=force_refresh)
+        )
 
     def get_signing_key(self, kid: str) -> dict[str, Any]:
         """Return the JWK entry matching ``kid``.
@@ -104,6 +120,23 @@ class JWKSClient:
             return key
 
         keys = self._get_cached_keys(force_refresh=True)
+        key = keys.get(kid)
+        if key is None:
+            raise JWKSKeyNotFoundError(f"Signing key with kid '{kid}' was not found")
+        return key
+
+    async def get_signing_key_async(self, kid: str) -> dict[str, Any]:
+        """Async wrapper around :meth:`get_signing_key` to prevent event loop blocking."""
+
+        if not kid:
+            raise JWKSKeyNotFoundError("Key identifier (kid) must be provided")
+
+        keys = await self._get_cached_keys_async()
+        key = keys.get(kid)
+        if key is not None:
+            return key
+
+        keys = await self._get_cached_keys_async(force_refresh=True)
         key = keys.get(kid)
         if key is None:
             raise JWKSKeyNotFoundError(f"Signing key with kid '{kid}' was not found")

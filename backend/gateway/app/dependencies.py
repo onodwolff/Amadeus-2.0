@@ -20,7 +20,7 @@ from .bruteforce import BruteForceProtector
 from .captcha import CaptchaVerifier
 from .config import settings
 from .email import EmailDispatcher
-from .security import TokenData, validate_bearer_token
+from .security import TokenData, validate_bearer_token_async
 from .storage import build_cache
 
 
@@ -120,7 +120,7 @@ async def _get_token_data(
 ) -> TokenData:
     if credentials is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    return validate_bearer_token(credentials.credentials)
+    return await validate_bearer_token_async(credentials.credentials)
 
 
 def _normalise_role(role: UserRole | str) -> str:
