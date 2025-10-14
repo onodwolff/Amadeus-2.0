@@ -22,6 +22,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/amadeus
+      STORAGE__DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/amadeus
       PYTHONUNBUFFERED: "1"
 
     steps:
