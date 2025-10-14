@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+
 from backend.gateway.app.security import create_test_access_token
-from backend.gateway.db.models import UserRole
+from backend.gateway.db.models import AuthSession, UserRole
 
 from .utils import create_user
 
@@ -64,6 +66,40 @@ async def test_forged_admin_token_does_not_escalate_privileges(app, db_session):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Insufficient role"
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_revoke_user_sessions(app, db_session):
+    viewer = await create_user(
+        db_session,
+        email="viewer-sessions@example.com",
+        username="sessionviewer",
+        password="password",
+        roles=[UserRole.VIEWER.value],
+    )
+    target = await create_user(
+        db_session,
+        email="target@example.com",
+        username="targetuser",
+        password="password",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": viewer.email, "password": "password"},
+        )
+        assert login_response.status_code == 200
+        viewer_token = login_response.json()["accessToken"]
+
+        revoke_response = await client.post(
+            f"/admin/users/{target.id}/sessions/revoke",
+            headers={"Authorization": f"Bearer {viewer_token}"},
+        )
+
+    assert revoke_response.status_code == 403
+    assert revoke_response.json()["detail"] == "Insufficient role"
 
 
 @pytest.mark.asyncio
@@ -156,6 +192,59 @@ async def test_admin_manages_users_roles_and_permissions(app, db_session):
         managed_payload = login_managed.json()["user"]
         assert set(managed_payload["permissions"]) == {"gateway.users.view", "gateway.reports.view"}
         assert managed_payload["emailVerified"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_can_revoke_user_sessions(app, db_session):
+    admin = await create_user(
+        db_session,
+        email="sessions-admin@example.com",
+        username="sessionsadmin",
+        password="secret",
+        roles=[UserRole.ADMIN.value],
+    )
+    member = await create_user(
+        db_session,
+        email="member-sessions@example.com",
+        username="membersessions",
+        password="password",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        member_login = await client.post(
+            "/auth/login",
+            json={"email": member.email, "password": "password"},
+        )
+        assert member_login.status_code == 200
+        refresh_cookie = member_login.cookies.get("refreshToken")
+        assert refresh_cookie
+
+        admin_login = await client.post(
+            "/auth/login",
+            json={"email": admin.email, "password": "secret"},
+        )
+        assert admin_login.status_code == 200
+        admin_token = admin_login.json()["accessToken"]
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+        revoke_response = await client.post(
+            f"/admin/users/{member.id}/sessions/revoke",
+            headers=admin_headers,
+        )
+        assert revoke_response.status_code == 200
+        assert revoke_response.json()["detail"] == "Revoked 1 session."
+
+        refresh_attempt = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": refresh_cookie},
+        )
+        assert refresh_attempt.status_code == 401
+
+    result = await db_session.execute(select(AuthSession).where(AuthSession.user_id == member.id))
+    sessions = result.scalars().all()
+    assert len(sessions) == 1
+    assert sessions[0].revoked_at is not None
 
 
 @pytest.mark.asyncio
