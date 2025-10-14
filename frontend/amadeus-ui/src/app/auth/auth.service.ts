@@ -1,13 +1,31 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse, HttpResponse } from '@angular/common/http';
 import { OAuthService } from 'angular-oauth2-oidc';
 import { firstValueFrom } from 'rxjs';
 
 import { Router } from '@angular/router';
 
 import { AuthApi } from '../api/clients/auth.api';
-import { AuthUser, OidcCallbackRequest, TokenResponse } from '../api/models';
+import { AuthUser, MfaChallengeResponse, OidcCallbackRequest, TokenResponse } from '../api/models';
 import { authConfig } from './auth.config';
+
+export interface PasswordLoginCredentials {
+  identifier: string;
+  password: string;
+  captchaToken?: string | null;
+  rememberMe?: boolean;
+}
+
+export type PasswordLoginResult =
+  | { kind: 'authenticated'; user: AuthUser }
+  | { kind: 'mfa-required'; challenge: MfaChallengeResponse };
+
+export class PasswordLoginError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+    this.name = 'PasswordLoginError';
+  }
+}
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -36,6 +54,28 @@ export class AuthService {
 
   login(): void {
     this.oauthService.initCodeFlow();
+  }
+
+  async loginWithPassword(credentials: PasswordLoginCredentials): Promise<PasswordLoginResult> {
+    const identifier = credentials.identifier.trim().toLowerCase();
+    const password = credentials.password;
+    if (!identifier || !password) {
+      throw new PasswordLoginError('Email address or password is missing.');
+    }
+
+    try {
+      const response = await firstValueFrom(
+        this.authApi.loginWithPassword({
+          email: identifier,
+          password,
+          captchaToken: credentials.captchaToken ?? null,
+        }),
+      );
+
+      return this.handlePasswordLoginResponse(response);
+    } catch (error) {
+      throw this.normalizePasswordLoginError(error);
+    }
   }
 
   async bootstrapMe(): Promise<void> {
@@ -113,6 +153,61 @@ export class AuthService {
     } finally {
       this.isBootstrappedSignal.set(true);
     }
+  }
+
+  private handlePasswordLoginResponse(
+    response: HttpResponse<TokenResponse | MfaChallengeResponse>,
+  ): PasswordLoginResult {
+    if (response.status === 202) {
+      const challenge = response.body as MfaChallengeResponse | null;
+      if (!challenge) {
+        throw new PasswordLoginError('Multi-factor verification is required, but no challenge was provided.');
+      }
+      return { kind: 'mfa-required', challenge };
+    }
+
+    const tokenResponse = response.body as TokenResponse | null;
+    if (!tokenResponse) {
+      throw new PasswordLoginError('The authentication server returned an unexpected response.');
+    }
+
+    this.setSession(tokenResponse);
+    return { kind: 'authenticated', user: tokenResponse.user };
+  }
+
+  private normalizePasswordLoginError(error: unknown): PasswordLoginError {
+    if (error instanceof PasswordLoginError) {
+      return error;
+    }
+
+    if (error instanceof HttpErrorResponse) {
+      const detail = typeof error.error?.detail === 'string' ? error.error.detail.trim() : null;
+      if (error.status === 0) {
+        return new PasswordLoginError('Unable to reach the server. Check your network connection and try again.', 0);
+      }
+
+      if (detail && detail.length > 0) {
+        return new PasswordLoginError(detail, error.status);
+      }
+
+      switch (error.status) {
+        case 401:
+          return new PasswordLoginError('Invalid email or password. Try again.', error.status);
+        case 403:
+          return new PasswordLoginError(
+            'Sign in requires additional verification or your account is suspended. Contact support if this persists.',
+            error.status,
+          );
+        case 429:
+          return new PasswordLoginError('Too many attempts. Wait a moment and try again.', error.status);
+        case 503:
+          return new PasswordLoginError('Sign in is temporarily unavailable. Try again shortly.', error.status);
+        default:
+          return new PasswordLoginError('Unable to sign in. Try again in a moment.', error.status);
+      }
+    }
+
+    return new PasswordLoginError('Unable to sign in. Try again in a moment.');
   }
 
   private async tryProcessAuthorizationCode(): Promise<boolean> {
