@@ -1,6 +1,7 @@
 """Authentication flow integration tests."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -9,6 +10,8 @@ from sqlalchemy import select
 
 import pyotp
 
+from backend.gateway.app.security import TokenData, hash_refresh_token
+from backend.gateway.config import settings
 from backend.gateway.db.models import AuthSession, UserRole
 
 from .utils import create_user
@@ -87,6 +90,157 @@ async def test_login_and_refresh_flow(app, db_session):
     for session in sessions:
         assert session.absolute_expires_at is not None
         assert session.idle_expires_at is not None
+
+
+@pytest.fixture
+def configure_idp(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.auth, "idp_jwks_url", "https://idp.example.com/jwks")
+    monkeypatch.setattr(settings.auth, "idp_issuer", "https://idp.example.com")
+    monkeypatch.setattr(settings.auth, "idp_audience", "gateway-api")
+    monkeypatch.setattr(settings.auth, "idp_token_url", "https://idp.example.com/token")
+    monkeypatch.setattr(settings.auth, "idp_client_id", "gateway-client")
+    monkeypatch.setattr(settings.auth, "idp_client_secret", "super-secret")
+    monkeypatch.setattr(settings.auth, "idp_redirect_uri", "https://app.example.com/callback")
+    monkeypatch.setattr(settings.auth, "allow_test_tokens", False)
+
+
+@pytest.fixture
+def idp_token_validation(monkeypatch: pytest.MonkeyPatch) -> TokenData:
+    token_data = TokenData(
+        subject="42",
+        issuer="https://idp.example.com",
+        audience=("gateway-api",),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        roles=(),
+        scopes=("openid",),
+        claims={"email": "oidc@example.com", "email_verified": True},
+    )
+
+    async def _fake_validate(token: str) -> TokenData:
+        assert token == "idp-id-token"
+        return token_data
+
+    monkeypatch.setattr(
+        "backend.gateway.app.routes.auth.validate_bearer_token_async",
+        _fake_validate,
+    )
+    return token_data
+
+
+@pytest.fixture
+def idp_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyResponse:
+        def __init__(self, payload: dict[str, object], status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+            self.text = json.dumps(payload)
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    class DummyAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self) -> "DummyAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url: str, data=None, headers=None):  # type: ignore[override]
+            grant_type = (data or {}).get("grant_type")
+            if grant_type == "authorization_code":
+                assert data["client_id"] == "gateway-client"
+                assert data["client_secret"] == "super-secret"
+                assert data["code"] == "auth-code"
+                return DummyResponse(
+                    {
+                        "id_token": "idp-id-token",
+                        "access_token": "idp-access-token-1",
+                        "refresh_token": "idp-refresh-token-1",
+                        "expires_in": 120,
+                        "token_type": "bearer",
+                    }
+                )
+            if grant_type == "refresh_token":
+                assert data["refresh_token"] == "idp-refresh-token-1"
+                assert data["client_id"] == "gateway-client"
+                assert data["client_secret"] == "super-secret"
+                return DummyResponse(
+                    {
+                        "access_token": "idp-access-token-2",
+                        "refresh_token": "idp-refresh-token-2",
+                        "expires_in": 180,
+                        "token_type": "bearer",
+                    }
+                )
+            raise AssertionError(f"Unexpected grant_type: {grant_type}")
+
+    monkeypatch.setattr(
+        "backend.gateway.app.routes.auth.httpx.AsyncClient",
+        DummyAsyncClient,
+    )
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_and_refresh_flow(
+    configure_idp,
+    idp_token_validation,
+    idp_http_client,
+    app,
+    db_session,
+):
+    await create_user(
+        db_session,
+        email="oidc@example.com",
+        username="oidc",
+        password="irrelevant",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/auth/oidc/callback",
+            json={
+                "code": "auth-code",
+                "codeVerifier": "v" * 64,
+                "redirectUri": "https://app.example.com/callback",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["accessToken"] == "idp-access-token-1"
+        assert payload["expiresIn"] == 120
+        assert payload["user"]["email"] == "oidc@example.com"
+        assert payload["user"]["emailVerified"] is True
+        assert payload["user"]["mfaEnabled"] is False
+        login_cookie = response.cookies.get("refreshToken")
+        assert login_cookie == "idp-refresh-token-1"
+
+        refresh_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": login_cookie},
+        )
+
+    assert refresh_response.status_code == 200
+    refreshed_payload = refresh_response.json()
+    assert refreshed_payload["accessToken"] == "idp-access-token-2"
+    assert refreshed_payload["expiresIn"] == 180
+    assert refreshed_payload["user"]["email"] == "oidc@example.com"
+    assert refreshed_payload["user"]["emailVerified"] is True
+    assert refreshed_payload["user"]["mfaEnabled"] is False
+    rotated_cookie = refresh_response.cookies.get("refreshToken")
+    assert rotated_cookie == "idp-refresh-token-2"
+
+    result = await db_session.execute(select(AuthSession).order_by(AuthSession.id))
+    sessions = result.scalars().all()
+    assert len(sessions) == 2
+    first_session, second_session = sessions
+    assert first_session.revoked_at is not None
+    assert second_session.parent_session_id == first_session.id
+    assert first_session.refresh_token_hash == hash_refresh_token("idp-refresh-token-1")
+    assert second_session.refresh_token_hash == hash_refresh_token("idp-refresh-token-2")
 
 
 @pytest.mark.asyncio

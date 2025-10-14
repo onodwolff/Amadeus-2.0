@@ -387,16 +387,39 @@ async def _issue_tokens(
     remember_device: bool = False,
     absolute_expires_at: datetime | None = None,
     idle_expires_at: datetime | None = None,
+    issued_access_token: str | None = None,
+    access_token_expires_in: int | None = None,
+    issued_refresh_token: str | None = None,
+    refresh_token_expires_at: datetime | None = None,
 ) -> TokenResponse:
     _ensure_test_schema()
-    access_token, access_expires = create_test_access_token(
-        subject=user.id,
-        roles=user.role_slugs,
-        scopes=user.permissions,
-    )
-    refresh_token, refresh_expires = create_test_refresh_token()
-
     now = datetime.now(timezone.utc)
+
+    if issued_access_token is None:
+        access_token, access_expires = create_test_access_token(
+            subject=user.id,
+            roles=user.role_slugs,
+            scopes=user.permissions,
+        )
+        expires_in = int((access_expires - now).total_seconds())
+    else:
+        access_token = issued_access_token
+        ttl_seconds = access_token_expires_in or settings.auth.access_token_ttl_seconds
+        access_expires = now + timedelta(seconds=int(ttl_seconds))
+        expires_in = int(ttl_seconds)
+
+    if issued_refresh_token is None:
+        refresh_token, refresh_expires = create_test_refresh_token()
+    else:
+        refresh_token = issued_refresh_token
+        if refresh_token_expires_at is not None:
+            refresh_expires = refresh_token_expires_at
+        else:
+            refresh_expires = now + timedelta(
+                seconds=int(settings.auth.refresh_token_ttl_seconds)
+            )
+    if refresh_expires.tzinfo is None:
+        refresh_expires = refresh_expires.replace(tzinfo=timezone.utc)
 
     if parent_session is not None:
         family_id = parent_session.family_id
@@ -458,7 +481,7 @@ async def _issue_tokens(
 
     return TokenResponse(
         access_token=access_token,
-        expires_in=int(settings.auth.access_token_ttl_seconds),
+        expires_in=expires_in,
         refresh_expires_at=refresh_expires,
         user=serialize_user(refreshed_user),
     )
@@ -681,6 +704,40 @@ async def complete_oidc_login(
             detail="Identity provider response missing id_token",
         )
 
+    access_token = token_payload.get("access_token")
+    if not isinstance(access_token, str) or not access_token.strip():
+        logger.error("OIDC token response missing access_token claim")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail="Identity provider response missing access_token",
+        )
+
+    refresh_token = token_payload.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        logger.error("OIDC token response missing refresh_token claim")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail="Identity provider response missing refresh_token",
+        )
+
+    expires_in = token_payload.get("expires_in")
+    expires_in_seconds: int | None = None
+    if expires_in is not None:
+        try:
+            expires_in_seconds = int(expires_in)
+        except (TypeError, ValueError):
+            logger.error("OIDC token response provided invalid expires_in value: %s", expires_in)
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Identity provider response contained an invalid expires_in value",
+            )
+        if expires_in_seconds <= 0:
+            logger.error("OIDC token response provided non-positive expires_in value: %s", expires_in)
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Identity provider response contained an invalid expires_in value",
+            )
+
     try:
         validated = await validate_bearer_token_async(id_token)
     except HTTPException:
@@ -759,6 +816,9 @@ async def complete_oidc_login(
         response=response,
         request=request,
         mfa_method="oidc",
+        issued_access_token=access_token,
+        access_token_expires_in=expires_in_seconds,
+        issued_refresh_token=refresh_token,
     )
 
 
@@ -1055,7 +1115,8 @@ async def refresh_tokens(
     response: Response,
     db: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
-    if not settings.auth.allow_test_tokens:
+    config = settings.auth
+    if not config.allow_test_tokens and not config.uses_identity_provider:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     refresh_token = request.cookies.get("refreshToken")
     if not refresh_token:
@@ -1123,6 +1184,103 @@ async def refresh_tokens(
     session_record.idle_expires_at = next_idle_deadline
     session_record.revoked_at = now
 
+    issued_access_token: str | None = None
+    access_token_expires_in: int | None = None
+    issued_refresh_token: str | None = None
+
+    if config.uses_identity_provider:
+        if not (config.idp_token_url and config.idp_client_id):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Identity provider integration is not configured",
+            )
+
+        token_request_data: dict[str, str] = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": config.idp_client_id,
+        }
+        if config.idp_client_secret:
+            token_request_data["client_secret"] = config.idp_client_secret
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                token_response = await client.post(
+                    config.idp_token_url,
+                    data=token_request_data,
+                    headers={"Accept": "application/json"},
+                )
+        except httpx.HTTPError as exc:  # pragma: no cover - network failure
+            logger.exception("OIDC refresh token exchange failed")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to refresh session with identity provider",
+            ) from exc
+
+        if token_response.status_code >= 400:
+            logger.warning(
+                "OIDC refresh token exchange returned status %s: %s",
+                token_response.status_code,
+                token_response.text,
+            )
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Identity provider rejected the refresh request",
+            )
+
+        try:
+            refresh_payload = token_response.json()
+        except ValueError as exc:  # pragma: no cover - defensive
+            logger.exception("OIDC refresh token response was not valid JSON")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Identity provider returned an invalid response",
+            ) from exc
+
+        new_access_token = refresh_payload.get("access_token")
+        if not isinstance(new_access_token, str) or not new_access_token.strip():
+            logger.error("OIDC refresh token response missing access_token")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Identity provider response missing access_token",
+            )
+
+        new_refresh_token = refresh_payload.get("refresh_token")
+        if not isinstance(new_refresh_token, str) or not new_refresh_token.strip():
+            logger.error("OIDC refresh token response missing refresh_token")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Identity provider response missing refresh_token",
+            )
+
+        new_expires_in = refresh_payload.get("expires_in")
+        expires_in_seconds: int | None = None
+        if new_expires_in is not None:
+            try:
+                expires_in_seconds = int(new_expires_in)
+            except (TypeError, ValueError):
+                logger.error(
+                    "OIDC refresh token response provided invalid expires_in value: %s",
+                    new_expires_in,
+                )
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY,
+                    detail="Identity provider response contained an invalid expires_in value",
+                )
+            if expires_in_seconds <= 0:
+                logger.error(
+                    "OIDC refresh token response provided non-positive expires_in value: %s",
+                    new_expires_in,
+                )
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY,
+                    detail="Identity provider response contained an invalid expires_in value",
+                )
+
+        issued_access_token = new_access_token
+        issued_refresh_token = new_refresh_token
+        access_token_expires_in = expires_in_seconds
+
     return await _issue_tokens(
         db,
         user=user,
@@ -1131,6 +1289,9 @@ async def refresh_tokens(
         parent_session=session_record,
         absolute_expires_at=absolute_expires_at,
         idle_expires_at=next_idle_deadline,
+        issued_access_token=issued_access_token,
+        access_token_expires_in=access_token_expires_in,
+        issued_refresh_token=issued_refresh_token,
     )
 
 
