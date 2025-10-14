@@ -106,14 +106,36 @@ export class AuthService {
     this.refreshPromise = this.oauthService
       .refreshToken()
       .then(async () => {
-        const loaded = await this.loadCurrentUser();
+        const load = async () =>
+          this.loadCurrentUser({
+            preserveCurrentUser: true,
+            onFailure: error => {
+              if (this.isAuthenticationError(error)) {
+                throw new AuthenticationFailureError(error);
+              }
+            },
+          });
+
+        let loaded = await load();
         if (!loaded) {
-          throw new Error('Unable to load user profile after token refresh.');
+          loaded = await load();
+        }
+
+        if (!loaded) {
+          console.warn('Token refresh succeeded, but the current user could not be reloaded.');
         }
       })
       .catch(error => {
-        this.handleRefreshFailure(error);
-        throw error;
+        const handledError =
+          error instanceof AuthenticationFailureError ? error.originalError ?? error : error;
+
+        if (error instanceof AuthenticationFailureError || this.isAuthenticationError(handledError)) {
+          this.handleRefreshFailure(handledError);
+        } else {
+          console.error('Token refresh failed.', handledError);
+        }
+
+        throw handledError;
       })
       .finally(() => {
         this.refreshPromise = null;
@@ -139,7 +161,7 @@ export class AuthService {
     }
   }
 
-  private loadCurrentUser(): Promise<boolean> {
+  private loadCurrentUser(options?: LoadCurrentUserOptions): Promise<boolean> {
     if (this.loadUserPromise) {
       return this.loadUserPromise;
     }
@@ -151,26 +173,48 @@ export class AuthService {
       return Promise.resolve(false);
     }
 
-    this.loadUserPromise = firstValueFrom(this.authApi.getCurrentUser())
-      .then(user => {
+    this.loadUserPromise = (async () => {
+      try {
+        const user = await firstValueFrom(this.authApi.getCurrentUser());
         if (!this.oauthService.hasValidAccessToken() || revision !== this.sessionRevision) {
           return false;
         }
 
         this.currentUserSignal.set(user);
         return true;
-      })
-      .catch(error => {
+      } catch (error) {
         if (revision === this.sessionRevision) {
-          this.handleLoadUserFailure(error);
+          let propagatedError: unknown | null = null;
+
+          try {
+            options?.onFailure?.(error);
+          } catch (hookError) {
+            propagatedError = hookError;
+          }
+
+          if (!options?.preserveCurrentUser || this.isAuthenticationError(error)) {
+            this.handleLoadUserFailure(error);
+          } else if ((error as HttpErrorResponse)?.status !== 0) {
+            console.error('Unable to load current user.', error);
+          }
+
+          if (propagatedError) {
+            throw propagatedError;
+          }
         }
+
         return false;
-      })
-      .finally(() => {
+      } finally {
         this.loadUserPromise = null;
-      });
+      }
+    })();
 
     return this.loadUserPromise;
+  }
+
+  private isAuthenticationError(error: unknown): boolean {
+    const status = (error as HttpErrorResponse)?.status ?? null;
+    return status === 401 || status === 403;
   }
 
   private handleLoadUserFailure(error: unknown): void {
@@ -200,4 +244,18 @@ export class AuthService {
     this.bootstrapPromise = null;
     this.refreshPromise = null;
   }
+}
+
+class AuthenticationFailureError extends Error {
+  readonly originalError: unknown;
+
+  constructor(error: unknown) {
+    super('Authentication failure');
+    this.originalError = error;
+  }
+}
+
+interface LoadCurrentUserOptions {
+  preserveCurrentUser?: boolean;
+  onFailure?: (error: unknown) => void;
 }

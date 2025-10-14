@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
-import { Subject } from 'rxjs';
+import { Subject, throwError } from 'rxjs';
 import { OAuthEvent, OAuthService } from 'angular-oauth2-oidc';
+import { HttpErrorResponse } from '@angular/common/http';
 
 import { AuthService } from './auth.service';
 import { AuthApi } from '../api/clients/auth.api';
@@ -29,6 +30,21 @@ describe('AuthService', () => {
   let service: AuthService;
   let oauthService: OAuthServiceStub;
   let authApi: AuthApiStub;
+  const user: AuthUser = {
+    id: 1,
+    email: 'example@example.com',
+    username: 'example',
+    name: null,
+    roles: [],
+    permissions: [],
+    active: true,
+    isAdmin: false,
+    emailVerified: true,
+    mfaEnabled: false,
+    createdAt: '2024-01-01T00:00:00Z',
+    updatedAt: '2024-01-01T00:00:00Z',
+    lastLoginAt: null,
+  };
 
   beforeEach(async () => {
     TestBed.configureTestingModule({
@@ -48,21 +64,6 @@ describe('AuthService', () => {
 
   it('keeps current user cleared when logout occurs during pending load', async () => {
     const userSubject = new Subject<AuthUser>();
-    const user: AuthUser = {
-      id: 1,
-      email: 'example@example.com',
-      username: 'example',
-      name: null,
-      roles: [],
-      permissions: [],
-      active: true,
-      isAdmin: false,
-      emailVerified: true,
-      mfaEnabled: false,
-      createdAt: '2024-01-01T00:00:00Z',
-      updatedAt: '2024-01-01T00:00:00Z',
-      lastLoginAt: null,
-    };
 
     authApi.getCurrentUser.and.returnValue(userSubject.asObservable());
 
@@ -81,5 +82,33 @@ describe('AuthService', () => {
 
     expect(result).toBeFalse();
     expect(service.currentUser()).toBeNull();
+  });
+
+  describe('refreshToken', () => {
+    beforeEach(() => {
+      oauthService.getRefreshToken.and.returnValue('refresh-token');
+      oauthService.hasValidAccessToken.and.returnValue(true);
+      service.setCurrentUser(user);
+    });
+
+    it('logs out when the refreshed profile request returns an authentication error', async () => {
+      const httpError = new HttpErrorResponse({ status: 401 });
+      authApi.getCurrentUser.and.callFake(() => throwError(() => httpError));
+
+      await expectAsync(service.refreshToken()).toBeRejectedWith(httpError);
+
+      expect(oauthService.logOut).toHaveBeenCalled();
+      expect(service.currentUser()).toBeNull();
+    });
+
+    it('keeps the current user when the refreshed profile request fails transiently', async () => {
+      const httpError = new HttpErrorResponse({ status: 503 });
+      authApi.getCurrentUser.and.callFake(() => throwError(() => httpError));
+
+      await expectAsync(service.refreshToken()).toBeResolved();
+
+      expect(oauthService.logOut).not.toHaveBeenCalled();
+      expect(service.currentUser()).toEqual(user);
+    });
   });
 });
