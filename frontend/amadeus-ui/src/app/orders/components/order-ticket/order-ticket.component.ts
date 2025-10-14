@@ -4,11 +4,13 @@ import { Component, EventEmitter, OnInit, Output, computed, inject, signal } fro
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, finalize, forkJoin, of } from 'rxjs';
+import { RouterModule } from '@angular/router';
 import { OrdersApi } from '../../../api/clients/orders.api';
 import { PortfolioApi } from '../../../api/clients/portfolio.api';
 import { RiskApi } from '../../../api/clients/risk.api';
 import {
   Balance,
+  ApiKey,
   CreateOrderPayload,
   OrderResponse,
   OrderSummary,
@@ -18,6 +20,7 @@ import {
   RiskLimit,
 } from '../../../api/models';
 import { NotificationService } from '../../../shared/notifications/notification.service';
+import { KeysApi } from '../../../api/clients/keys.api';
 
 interface OrderTypeOption {
   label: string;
@@ -27,7 +30,7 @@ interface OrderTypeOption {
 @Component({
   standalone: true,
   selector: 'app-order-ticket',
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule],
   templateUrl: './order-ticket.component.html',
   styleUrls: ['./order-ticket.component.scss'],
 })
@@ -37,6 +40,7 @@ export class OrderTicketComponent implements OnInit {
   private readonly portfolioApi = inject(PortfolioApi);
   private readonly riskApi = inject(RiskApi);
   private readonly notifications = inject(NotificationService);
+  private readonly keysApi = inject(KeysApi);
 
   @Output() readonly orderCreated = new EventEmitter<OrderSummary>();
 
@@ -88,12 +92,17 @@ export class OrderTicketComponent implements OnInit {
   readonly isLoading = signal(true);
   readonly isSubmitting = signal(false);
   readonly formErrors = signal<string[]>([]);
+  readonly apiKeys = signal<ApiKey[]>([]);
+  readonly isKeysLoading = signal(true);
+  readonly apiKeysError = signal<string | null>(null);
 
   readonly selectedType = computed(() => this.form.controls.type.value as OrderType);
   readonly selectedTimeInForce = computed(() => this.form.controls.time_in_force.value);
   readonly selectedContingency = computed(() => this.form.controls.contingency_type.value);
   readonly showLimitOffset = computed(() => this.selectedType() === 'stop_limit');
   readonly showExpireField = computed(() => this.selectedTimeInForce() === 'GTD');
+  readonly hasAnyApiKeys = computed(() => this.apiKeys().length > 0);
+  readonly isTradingLocked = computed(() => !this.isKeysLoading() && !this.hasAnyApiKeys());
   readonly limitPricePreview = computed(() => {
     if (this.selectedType() !== 'stop_limit') {
       return null;
@@ -143,6 +152,7 @@ export class OrderTicketComponent implements OnInit {
   }
 
   private bootstrapData(): void {
+    this.loadApiKeys();
     forkJoin({
       portfolio: this.portfolioApi.getPortfolio(),
       risk: this.riskApi.getRisk().pipe(catchError(() => of(null))),
@@ -180,11 +190,51 @@ export class OrderTicketComponent implements OnInit {
       });
   }
 
+  private loadApiKeys(): void {
+    this.isKeysLoading.set(true);
+    this.apiKeysError.set(null);
+    this.keysApi
+      .listKeys()
+      .pipe(
+        takeUntilDestroyed(),
+        finalize(() => this.isKeysLoading.set(false)),
+      )
+      .subscribe({
+        next: (response) => {
+          const keys = Array.isArray(response?.keys) ? response.keys : [];
+          this.apiKeys.set(keys);
+        },
+        error: (err) => {
+          console.error('Failed to load API keys', err);
+          this.apiKeys.set([]);
+          this.apiKeysError.set('Unable to load exchange API keys.');
+        },
+      });
+  }
+
   onSubmit(): void {
+    if (this.isKeysLoading()) {
+      this.notifications.warning('Exchange credentials are still loading. Try again in a moment.', 'Please wait');
+      return;
+    }
+
     this.form.markAllAsTouched();
-    const errors = this.validateOrder();
+
+    const credentialErrors: string[] = [];
+    if (!this.hasAnyApiKeys()) {
+      credentialErrors.push('Add at least one exchange API key in Settings before submitting orders.');
+    }
+
+    const validationErrors = this.validateOrder();
+    const errors = [...credentialErrors, ...validationErrors];
     this.formErrors.set(errors);
     if (errors.length > 0) {
+      if (credentialErrors.length > 0) {
+        this.notifications.warning(
+          'Add an exchange API key in Settings before submitting live orders.',
+          'Trading locked',
+        );
+      }
       return;
     }
 

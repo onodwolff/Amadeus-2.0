@@ -7,6 +7,18 @@
     <span class="order-ticket__status" *ngIf="isLoading()">Loading portfolio…</span>
   </header>
   <form class="order-ticket__form" [formGroup]="form" (ngSubmit)="onSubmit()">
+    <div class="order-ticket__alert order-ticket__alert--error" *ngIf="apiKeysError() as error">
+      <span class="order-ticket__alert-title">Unable to load exchange API keys</span>
+      <p>{{ error }}</p>
+    </div>
+    <div class="order-ticket__alert" *ngIf="isTradingLocked()">
+      <span class="order-ticket__alert-title">Exchange API key required</span>
+      <p>
+        Add at least one exchange credential in
+        <a routerLink="/settings" class="order-ticket__alert-link">Settings → Credentials</a>
+        before submitting live orders.
+      </p>
+    </div>
     <div class="order-ticket__row">
       <label class="form-field">
         <span>Symbol</span>
@@ -215,7 +227,11 @@
     <ul class="order-ticket__errors" *ngIf="formErrors().length > 0">
       <li *ngFor="let error of formErrors()">{{ error }}</li>
     </ul>
-    <button type="submit" class="order-ticket__submit" [disabled]="isLoading() || isSubmitting()">
+    <button
+      type="submit"
+      class="order-ticket__submit"
+      [disabled]="isLoading() || isSubmitting() || isKeysLoading() || !hasAnyApiKeys()"
+    >
       <span *ngIf="isSubmitting(); else submitText">Submitting…</span>
       <ng-template #submitText>Submit order</ng-template>
     </button>

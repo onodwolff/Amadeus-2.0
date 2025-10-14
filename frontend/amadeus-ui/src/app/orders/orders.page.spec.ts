@@ -2,7 +2,9 @@ import { Signal, WritableSignal, signal } from '@angular/core';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
+import { provideRouter } from '@angular/router';
 import { OrdersApi } from '../api/clients/orders.api';
+import { KeysApi } from '../api/clients/keys.api';
 import { ExecutionReport, OrderSummary } from '../api/models';
 import { AuthStateService } from '../shared/auth/auth-state.service';
 import { WsConnectionState, WsService } from '../ws.service';
@@ -52,6 +54,7 @@ describe('OrdersPage (role-based UI)', () => {
       imports: [OrdersPage],
       providers: [
         provideZonelessChangeDetection(),
+        provideRouter([]),
         {
           provide: OrdersApi,
           useValue: {
@@ -60,6 +63,12 @@ describe('OrdersPage (role-based UI)', () => {
             duplicateOrder: jasmine.createSpy('duplicateOrder').and.returnValue(of({})),
             modifyOrder: jasmine.createSpy('modifyOrder').and.returnValue(of({})),
           } satisfies Partial<OrdersApi>,
+        },
+        {
+          provide: KeysApi,
+          useValue: {
+            listKeys: () => of({ keys: [] }),
+          } satisfies Partial<KeysApi>,
         },
         { provide: WsService, useClass: MockWsService },
         {

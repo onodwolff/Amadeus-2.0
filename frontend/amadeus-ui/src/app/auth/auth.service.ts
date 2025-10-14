@@ -173,11 +173,17 @@ export class AuthService {
   }
 
   private setSession(tokenResponse: TokenResponse): void {
+    const wasAuthenticated = this.currentUserSignal() !== null;
+    const currentUrl = this.router.url ?? '';
     this.accessToken = tokenResponse.accessToken;
     const expiresInSeconds = Math.max(0, tokenResponse.expiresIn - 5);
     this.accessTokenExpiresAt = Date.now() + expiresInSeconds * 1000;
     this.currentUserSignal.set(tokenResponse.user);
     this.isBootstrappedSignal.set(true);
+
+    if (!wasAuthenticated && this.shouldRedirectAfterLogin(currentUrl)) {
+      void this.router.navigateByUrl('/dashboard');
+    }
   }
 
   private clearSession(): void {
@@ -334,6 +340,19 @@ export class AuthService {
     } catch {
       window.location.replace(newUrl);
     }
+  }
+
+  private shouldRedirectAfterLogin(url: string): boolean {
+    if (!url) {
+      return true;
+    }
+
+    const normalized = url.split('?')[0] ?? '';
+    if (normalized === '/' || normalized === '') {
+      return true;
+    }
+
+    return normalized.startsWith('/login');
   }
 }
 
