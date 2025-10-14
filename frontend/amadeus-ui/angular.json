@@ -79,6 +79,7 @@
           "builder": "@angular/build:karma",
           "options": {
             "tsConfig": "tsconfig.spec.json",
+            "karmaConfig": "karma.conf.cjs",
             "inlineStyleLanguage": "scss",
             "assets": [
               {

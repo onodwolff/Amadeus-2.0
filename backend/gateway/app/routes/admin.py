@@ -25,7 +25,7 @@ from ..dependencies import RequirePermissions, get_email_dispatcher, get_session
 from ..email import EmailDispatcher
 from ..security import hash_password
 from ..token_service import TokenService
-from .auth import UserResource, serialize_user
+from .auth import OperationStatus, UserResource, clear_backup_codes, revoke_user_sessions, serialize_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -164,6 +164,35 @@ def _serialize_role(role: Role) -> RoleResource:
         description=role.description,
         permissions=sorted({permission.code for permission in role.permissions}),
     )
+
+
+@router.post(
+    "/users/{user_id}/mfa/disable",
+    response_model=OperationStatus,
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _MANAGE_USERS_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
+)
+async def admin_disable_user_mfa(
+    user_id: int,
+    db: AsyncSession = Depends(get_session),
+) -> OperationStatus:
+    user = await _load_user(db, user_id)
+    if not user.mfa_enabled:
+        return OperationStatus(detail="Two-factor authentication already disabled")
+
+    user.mfa_enabled = False
+    user.mfa_secret = None
+    await clear_backup_codes(db, user)
+    revoked = await revoke_user_sessions(db, user)
+    await db.flush()
+    await db.commit()
+    return OperationStatus(detail=f"Two-factor authentication disabled. Revoked {revoked} sessions.")
 
 
 @router.post(

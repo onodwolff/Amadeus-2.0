@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
-from datetime import datetime, timezone
-
+from datetime import datetime, timedelta, timezone
+import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,6 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover - production installs
 AuthSession = db_models.AuthSession
 Role = db_models.Role
 User = db_models.User
+UserMFABackupCode = db_models.UserMFABackupCode
 UserTokenPurpose = db_models.UserTokenPurpose
 
 if db_models.__name__.startswith("backend."):
@@ -36,9 +39,19 @@ if db_models.__name__.startswith("backend."):
 def _ensure_test_schema() -> None:
     if not db_models.__name__.startswith("backend."):
         return
-    if not User.__table__.schema and not Role.__table__.schema and not AuthSession.__table__.schema:
+    if (
+        not User.__table__.schema
+        and not Role.__table__.schema
+        and not AuthSession.__table__.schema
+        and not UserMFABackupCode.__table__.schema
+    ):
         return
-    for table in (User.__table__, Role.__table__, AuthSession.__table__):
+    for table in (
+        User.__table__,
+        Role.__table__,
+        AuthSession.__table__,
+        UserMFABackupCode.__table__,
+    ):
         table.schema = None
 
 from ..config import settings
@@ -68,6 +81,7 @@ class UserResource(BaseModel):
     active: bool
     is_admin: bool = Field(alias="isAdmin")
     email_verified: bool = Field(alias="emailVerified")
+    mfa_enabled: bool = Field(alias="mfaEnabled")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
     last_login_at: datetime | None = Field(default=None, alias="lastLoginAt")
@@ -109,6 +123,64 @@ class ResetPasswordRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class MfaSetupResponse(BaseModel):
+    secret: str
+    otpauth_url: str = Field(alias="otpauthUrl")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaEnableRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=32)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaEnableResponse(BaseModel):
+    detail: str
+    backup_codes: list[str] = Field(alias="backupCodes")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaDisableRequest(BaseModel):
+    password: str | None = None
+    code: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaBackupCodesRequest(BaseModel):
+    password: str | None = None
+    code: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class BackupCodesResponse(BaseModel):
+    backup_codes: list[str] = Field(alias="backupCodes")
+    detail: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaChallengeResponse(BaseModel):
+    challenge_token: str = Field(alias="challengeToken")
+    detail: str = Field(default="MFA verification required")
+    methods: list[str] = Field(default_factory=lambda: ["totp", "backup_code"])
+    ttl_seconds: int = Field(alias="ttlSeconds")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MfaChallengeRequest(BaseModel):
+    challenge_token: str = Field(min_length=16, alias="challengeToken")
+    code: str = Field(min_length=6, max_length=32)
+    remember_device: bool = Field(default=False, alias="rememberDevice")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 def serialize_user(user: User) -> UserResource:
     return UserResource(
         id=user.id,
@@ -120,6 +192,7 @@ def serialize_user(user: User) -> UserResource:
         active=user.active,
         is_admin=user.is_admin,
         email_verified=user.email_verified,
+        mfa_enabled=user.mfa_enabled,
         created_at=user.created_at,
         updated_at=user.updated_at,
         last_login_at=user.last_login_at,
@@ -151,6 +224,94 @@ async def _load_user(db: AsyncSession, user_id: int) -> User:
     return user
 
 
+def _build_totp(secret: str) -> pyotp.TOTP:
+    return pyotp.TOTP(secret)
+
+
+def _generate_totp_secret() -> str:
+    return pyotp.random_base32()
+
+
+def _build_otpauth_url(user: User, secret: str) -> str:
+    label = user.email or user.username
+    issuer = "Amadeus"
+    return _build_totp(secret).provisioning_uri(name=label, issuer_name=issuer)
+
+
+def _clean_mfa_code(code: str) -> str:
+    return "".join(ch for ch in code.strip() if ch.isalnum())
+
+
+def _verify_totp_code(user: User, code: str) -> bool:
+    if not user.mfa_secret:
+        return False
+    cleaned = _clean_mfa_code(code)
+    if len(cleaned) < 6:
+        return False
+    totp = _build_totp(user.mfa_secret)
+    return bool(totp.verify(cleaned, valid_window=1))
+
+
+_BACKUP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _generate_backup_code() -> str:
+    return "".join(secrets.choice(_BACKUP_CODE_ALPHABET) for _ in range(10))
+
+
+async def _rotate_backup_codes(db: AsyncSession, user: User, *, count: int = 10) -> list[str]:
+    _ensure_test_schema()
+    await db.execute(
+        delete(UserMFABackupCode).where(UserMFABackupCode.user_id == user.id)
+    )
+    codes = [_generate_backup_code() for _ in range(count)]
+    for code in codes:
+        db.add(
+            UserMFABackupCode(
+                user_id=user.id,
+                code_hash=hash_password(code),
+            )
+        )
+    await db.flush()
+    return codes
+
+
+async def _consume_backup_code(db: AsyncSession, user: User, code: str) -> bool:
+    _ensure_test_schema()
+    stmt = (
+        select(UserMFABackupCode)
+        .where(UserMFABackupCode.user_id == user.id)
+        .where(UserMFABackupCode.used_at.is_(None))
+    )
+    result = await db.execute(stmt)
+    cleaned = _clean_mfa_code(code)
+    now = datetime.now(timezone.utc)
+    for record in result.scalars():
+        if verify_password(record.code_hash, cleaned):
+            record.used_at = now
+            await db.flush()
+            return True
+    return False
+
+
+async def clear_backup_codes(db: AsyncSession, user: User) -> None:
+    _ensure_test_schema()
+    await db.execute(
+        delete(UserMFABackupCode).where(UserMFABackupCode.user_id == user.id)
+    )
+
+
+async def _validate_mfa_factor(db: AsyncSession, user: User, code: str) -> str | None:
+    cleaned = _clean_mfa_code(code)
+    if not cleaned:
+        return None
+    if _verify_totp_code(user, cleaned):
+        return "totp"
+    if await _consume_backup_code(db, user, cleaned):
+        return "backup_code"
+    return None
+
+
 async def _issue_tokens(
     db: AsyncSession,
     *,
@@ -158,6 +319,9 @@ async def _issue_tokens(
     response: Response,
     request: Request | None,
     parent_session: AuthSession | None = None,
+    mfa_verified_at: datetime | None = None,
+    mfa_method: str | None = None,
+    remember_device: bool = False,
 ) -> TokenResponse:
     _ensure_test_schema()
     access_token, access_expires = create_test_access_token(
@@ -170,9 +334,18 @@ async def _issue_tokens(
     if parent_session is not None:
         family_id = parent_session.family_id
         parent_session_id = parent_session.id
+        if mfa_verified_at is None:
+            mfa_verified_at = parent_session.mfa_verified_at
+        if mfa_method is None:
+            mfa_method = parent_session.mfa_method
+        remember_device = parent_session.mfa_remember_device
     else:
         family_id = str(uuid.uuid4())
         parent_session_id = None
+        if mfa_verified_at is None:
+            mfa_verified_at = datetime.now(timezone.utc)
+        if mfa_method is None:
+            mfa_method = "password"
 
     session_record = AuthSession(
         user_id=user.id,
@@ -182,6 +355,9 @@ async def _issue_tokens(
         user_agent=(request.headers.get("user-agent") if request else None),
         ip_address=(request.client.host if request and request.client else None),
         expires_at=refresh_expires,
+        mfa_verified_at=mfa_verified_at,
+        mfa_method=mfa_method,
+        mfa_remember_device=remember_device,
     )
     db.add(session_record)
     await db.commit()
@@ -213,6 +389,17 @@ async def _revoke_session_family(db: AsyncSession, family_id: str) -> int:
     result = await db.execute(
         update(AuthSession)
         .where(AuthSession.family_id == family_id, AuthSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    return result.rowcount or 0
+
+
+async def revoke_user_sessions(db: AsyncSession, user: User) -> int:
+    _ensure_test_schema()
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        update(AuthSession)
+        .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
         .values(revoked_at=now)
     )
     return result.rowcount or 0
@@ -295,7 +482,11 @@ async def verify_email(
     return OperationStatus(detail="Email verified")
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    responses={status.HTTP_202_ACCEPTED: {"model": MfaChallengeResponse}},
+)
 async def login(
     payload: LoginRequest,
     request: Request,
@@ -311,10 +502,78 @@ async def login(
     if not user.active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
+    if user.mfa_enabled:
+        token_service = TokenService(db)
+        record, challenge_token = await token_service.issue(
+            user=user,
+            purpose=UserTokenPurpose.MFA_CHALLENGE,
+            ttl_seconds=settings.auth.mfa_challenge_token_ttl_seconds,
+        )
+        await db.commit()
+        await db.refresh(record)
+        challenge = MfaChallengeResponse(
+            challenge_token=challenge_token,
+            ttl_seconds=int(settings.auth.mfa_challenge_token_ttl_seconds),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=challenge.model_dump(by_alias=True),
+        )
+
     user.last_login_at = datetime.now(timezone.utc)
     await db.flush()
 
-    return await _issue_tokens(db, user=user, response=response, request=request)
+    return await _issue_tokens(
+        db,
+        user=user,
+        response=response,
+        request=request,
+        mfa_method="password",
+    )
+
+
+@router.post("/login/mfa", response_model=TokenResponse)
+async def complete_login_mfa(
+    payload: MfaChallengeRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
+) -> TokenResponse:
+    if not settings.auth.allow_test_tokens:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Local token issuance is disabled",
+        )
+
+    token_service = TokenService(db)
+    record = await token_service.consume(
+        token=payload.challenge_token,
+        purpose=UserTokenPurpose.MFA_CHALLENGE,
+    )
+    if record is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
+
+    user = record.user or await _load_user(db, record.user_id)
+    if not user.active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
+
+    method = await _validate_mfa_factor(db, user, payload.code)
+    if method is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid verification code")
+
+    now = datetime.now(timezone.utc)
+    user.last_login_at = now
+    await db.flush()
+
+    return await _issue_tokens(
+        db,
+        user=user,
+        response=response,
+        request=request,
+        mfa_verified_at=now,
+        mfa_method=method,
+        remember_device=payload.remember_device,
+    )
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -357,6 +616,10 @@ async def refresh_tokens(
     user = await _load_user(db, session_record.user_id)
     if not user.active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
+    if user.mfa_enabled and session_record.mfa_verified_at is None:
+        await _revoke_session_family(db, session_record.family_id)
+        await db.commit()
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="MFA verification required")
 
     session_record.revoked_at = datetime.now(timezone.utc)
 
@@ -366,6 +629,101 @@ async def refresh_tokens(
         response=response,
         request=request,
         parent_session=session_record,
+    )
+
+
+@router.post("/me/mfa/setup", response_model=MfaSetupResponse)
+async def setup_mfa(
+    current_user: User = Security(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> MfaSetupResponse:
+    if current_user.mfa_enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Two-factor authentication is already enabled")
+
+    secret = _generate_totp_secret()
+    current_user.mfa_secret = secret
+    await db.flush()
+    await db.commit()
+    return MfaSetupResponse(secret=secret, otpauth_url=_build_otpauth_url(current_user, secret))
+
+
+@router.post("/me/mfa/enable", response_model=MfaEnableResponse)
+async def enable_mfa(
+    payload: MfaEnableRequest,
+    current_user: User = Security(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> MfaEnableResponse:
+    secret = current_user.mfa_secret
+    if secret is None:
+        secret = _generate_totp_secret()
+        current_user.mfa_secret = secret
+
+    if not _verify_totp_code(current_user, payload.code):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid verification code")
+
+    current_user.mfa_enabled = True
+    backup_codes = await _rotate_backup_codes(db, current_user)
+    await db.flush()
+    await db.commit()
+    return MfaEnableResponse(
+        detail="Two-factor authentication enabled",
+        backup_codes=backup_codes,
+    )
+
+
+@router.delete("/me/mfa", response_model=OperationStatus)
+async def disable_mfa(
+    payload: MfaDisableRequest,
+    current_user: User = Security(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> OperationStatus:
+    if not current_user.mfa_enabled:
+        return OperationStatus(detail="Two-factor authentication is already disabled")
+
+    verified = False
+    if payload.code:
+        method = await _validate_mfa_factor(db, current_user, payload.code)
+        verified = method is not None
+    if not verified and payload.password:
+        verified = verify_password(current_user.password_hash, payload.password)
+
+    if not verified:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Verification required to disable MFA")
+
+    current_user.mfa_enabled = False
+    current_user.mfa_secret = None
+    await clear_backup_codes(db, current_user)
+    await revoke_user_sessions(db, current_user)
+    await db.flush()
+    await db.commit()
+    return OperationStatus(detail="Two-factor authentication disabled")
+
+
+@router.post("/me/mfa/backup-codes", response_model=BackupCodesResponse)
+async def regenerate_backup_codes(
+    payload: MfaBackupCodesRequest,
+    current_user: User = Security(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> BackupCodesResponse:
+    if not current_user.mfa_enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Two-factor authentication is not enabled")
+
+    verified = False
+    if payload.code:
+        method = await _validate_mfa_factor(db, current_user, payload.code)
+        verified = method is not None
+    if not verified and payload.password:
+        verified = verify_password(current_user.password_hash, payload.password)
+
+    if not verified:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Verification required to regenerate backup codes")
+
+    backup_codes = await _rotate_backup_codes(db, current_user)
+    await db.flush()
+    await db.commit()
+    return BackupCodesResponse(
+        detail="Backup codes regenerated",
+        backup_codes=backup_codes,
     )
 
 

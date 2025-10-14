@@ -183,6 +183,48 @@
           <p class="two-factor__secret" *ngIf="twoFactorSecret() as secret">
             Current secret: <code>{{ secret }}</code>
           </p>
+          <div class="two-factor__codes" *ngIf="twoFactorBackupCodes().length > 0">
+            <p class="two-factor__codes-intro">Each backup code can be used once if you lose access to your authenticator.</p>
+            <ol class="two-factor__code-list">
+              <li *ngFor="let backupCode of twoFactorBackupCodes()">{{ backupCode }}</li>
+            </ol>
+            <div class="two-factor__code-actions">
+              <button type="button" class="btn btn--ghost" (click)="copyBackupCodes()">Copy codes</button>
+              <button type="button" class="btn btn--ghost" (click)="downloadBackupCodes()">Download</button>
+            </div>
+            <p class="settings-message settings-message--success" *ngIf="twoFactorBackupCodesSuccess() as successMessage">{{ successMessage }}</p>
+          </div>
+          <form class="two-factor__backup-form" [formGroup]="backupCodesForm" (ngSubmit)="regenerateTwoFactorBackupCodes()">
+            <div class="two-factor__backup-form-fields">
+              <label class="field">
+                <span class="field__label">Authenticator code (optional)</span>
+                <input
+                  class="field__control"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  formControlName="code"
+                  placeholder="123456"
+                  maxlength="8"
+                />
+              </label>
+              <label class="field">
+                <span class="field__label">Account password (optional)</span>
+                <input
+                  class="field__control"
+                  type="password"
+                  autocomplete="current-password"
+                  formControlName="password"
+                  placeholder="Password"
+                />
+              </label>
+            </div>
+            <button type="submit" class="btn btn--ghost" [disabled]="isBackupCodesLoading()">
+              <span *ngIf="isBackupCodesLoading(); else regenerateLabel">Generating…</span>
+              <ng-template #regenerateLabel>Regenerate backup codes</ng-template>
+            </button>
+          </form>
+          <p class="settings-message settings-message--error" *ngIf="twoFactorBackupCodesError() as backupError">{{ backupError }}</p>
           <button type="button" class="btn btn--ghost" (click)="openDisableTwoFactorDialog()">Disable 2FA</button>
         </div>
       </ng-template>

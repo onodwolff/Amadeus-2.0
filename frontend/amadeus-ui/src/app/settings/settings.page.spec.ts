@@ -52,26 +52,44 @@ function createUserProfile(): UserProfile {
 describe('SettingsPage advanced settings', () => {
   let fixture: ComponentFixture<SettingsPage>;
   let component: SettingsPage;
+  let authApiStub: jasmine.SpyObj<AuthApi>;
   let usersApiStub: jasmine.SpyObj<UsersApi>;
+  let notificationServiceStub: jasmine.SpyObj<NotificationService>;
   let authStateStub: Partial<AuthStateService>;
   let currentUserSignal: WritableSignal<AuthUser | null>;
   let permissionsSignal: WritableSignal<string[]>;
 
   beforeEach(async () => {
-    const authApiStub = jasmine.createSpyObj<AuthApi>('AuthApi', [
+    authApiStub = jasmine.createSpyObj<AuthApi>('AuthApi', [
       'requestEmailChange',
       'enableMfa',
       'disableMfa',
       'revokeAllSessions',
       'getCurrentUser',
       'setupMfa',
+      'regenerateBackupCodes',
+      'completeMfaLogin',
+      'exchangeMfaChallenge',
     ]);
     authApiStub.requestEmailChange.and.returnValue(of({ verificationToken: 'token' }));
-    authApiStub.enableMfa.and.returnValue(of({ detail: 'ok' }));
+    authApiStub.enableMfa.and.returnValue(of({ detail: 'ok', backupCodes: ['CODE-1'] }));
     authApiStub.disableMfa.and.returnValue(of({ detail: 'ok' }));
     authApiStub.revokeAllSessions.and.returnValue(of({ detail: 'ok' }));
     authApiStub.getCurrentUser.and.returnValue(of(createAuthUser()));
     authApiStub.setupMfa.and.returnValue(of({ secret: 'secret', otpauthUrl: 'url' }));
+    authApiStub.regenerateBackupCodes.and.returnValue(of({ detail: 'ok', backupCodes: ['CODE-2'] }));
+    authApiStub.completeMfaLogin.and.returnValue(
+      of({
+        accessToken: 'token',
+        tokenType: 'bearer',
+        expiresIn: 900,
+        refreshExpiresAt: new Date().toISOString(),
+        user: createAuthUser(),
+      }),
+    );
+    authApiStub.exchangeMfaChallenge.and.returnValue(
+      of({ challengeToken: 'challenge', detail: 'MFA verification required', methods: ['totp'], ttlSeconds: 300 }),
+    );
 
     const keysApiStub = jasmine.createSpyObj<KeysApi>('KeysApi', [
       'listKeys',
@@ -128,10 +146,12 @@ describe('SettingsPage advanced settings', () => {
     const integrationsApiStub = jasmine.createSpyObj<IntegrationsApi>('IntegrationsApi', ['listExchanges']);
     integrationsApiStub.listExchanges.and.returnValue(of({ exchanges: [] as ExchangeDescriptor[] }));
 
-    const notificationServiceStub = jasmine.createSpyObj<NotificationService>(
-      'NotificationService',
-      ['success', 'info', 'warning', 'error'],
-    );
+    notificationServiceStub = jasmine.createSpyObj<NotificationService>('NotificationService', [
+      'success',
+      'info',
+      'warning',
+      'error',
+    ]);
 
     currentUserSignal = signal<AuthUser | null>(createAuthUser());
     permissionsSignal = signal<string[]>(createAuthUser().permissions);
@@ -276,5 +296,41 @@ describe('SettingsPage advanced settings', () => {
     expect(createPanel?.querySelector('[data-testid="create-api-secret-error-required"]')).not.toBeNull();
     expect(createPanel?.querySelector('[data-testid="create-passphrase-error-minlength"]')).not.toBeNull();
     expect(createPanel?.querySelector('[data-testid="create-passphrase-error-required"]')).toBeNull();
+  });
+
+  it('enables two-factor authentication and stores backup codes', async () => {
+    component.twoFactorSecret.set('secret');
+    authApiStub.getCurrentUser.and.returnValue(
+      of({
+        ...createAuthUser(),
+        mfaEnabled: true,
+      }),
+    );
+
+    component.twoFactorForm.setValue({ code: '123456' });
+
+    await component.enableTwoFactor();
+
+    expect(authApiStub.enableMfa).toHaveBeenCalledWith({ code: '123456' });
+    expect(component.twoFactorBackupCodes()).toEqual(['CODE-1']);
+    expect(component.twoFactorBackupCodesSuccess()).toBe('ok');
+    expect(component.isTwoFactorEnabled()).toBeTrue();
+    expect(notificationServiceStub.success).toHaveBeenCalledWith(
+      'Two-factor authentication enabled.',
+      'Security',
+    );
+  });
+
+  it('regenerates backup codes after verifying account credentials', async () => {
+    component.isTwoFactorEnabled.set(true);
+    component.backupCodesForm.setValue({ code: '', password: 'hunter2' });
+
+    await component.regenerateTwoFactorBackupCodes();
+
+    expect(authApiStub.regenerateBackupCodes).toHaveBeenCalledWith({ password: 'hunter2' });
+    expect(component.twoFactorBackupCodes()).toEqual(['CODE-2']);
+    expect(component.twoFactorBackupCodesSuccess()).toBe('ok');
+    expect(component.backupCodesForm.value).toEqual({ code: '', password: '' });
+    expect(notificationServiceStub.success).toHaveBeenCalledWith('Backup codes regenerated.', 'Security');
   });
 });
