@@ -2,6 +2,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from backend.gateway.alembic.versions.c7f96b8e4e7c_initial_schema import SCHEMA
+
 
 # revision identifiers, used by Alembic.
 revision = "4ac08f7fba12"
@@ -32,59 +34,108 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("'{}'::jsonb"),
         ),
-        sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["target_user_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["actor_user_id"],
+            [f"{SCHEMA}.users.id"],
+            ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["target_user_id"],
+            [f"{SCHEMA}.users.id"],
+            ondelete="SET NULL",
+        ),
         sa.PrimaryKeyConstraint("id"),
+        schema=SCHEMA,
     )
     op.create_index(
         op.f("ix_audit_events_action"),
         "audit_events",
         ["action"],
+        schema=SCHEMA,
     )
     op.create_index(
         "ix_audit_events_action_occurred_at",
         "audit_events",
         ["action", "occurred_at"],
+        schema=SCHEMA,
     )
     op.create_index(
         op.f("ix_audit_events_actor_user_id"),
         "audit_events",
         ["actor_user_id"],
+        schema=SCHEMA,
     )
     op.create_index(
         "ix_audit_events_actor_occurred_at",
         "audit_events",
         ["actor_user_id", "occurred_at"],
+        schema=SCHEMA,
     )
     op.create_index(
         op.f("ix_audit_events_occurred_at"),
         "audit_events",
         ["occurred_at"],
+        schema=SCHEMA,
     )
     op.create_index(
         op.f("ix_audit_events_result"),
         "audit_events",
         ["result"],
+        schema=SCHEMA,
     )
     op.create_index(
         op.f("ix_audit_events_target_user_id"),
         "audit_events",
         ["target_user_id"],
+        schema=SCHEMA,
     )
     op.create_index(
         "ix_audit_events_target_occurred_at",
         "audit_events",
         ["target_user_id", "occurred_at"],
+        schema=SCHEMA,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_audit_events_target_occurred_at", table_name="audit_events")
-    op.drop_index(op.f("ix_audit_events_target_user_id"), table_name="audit_events")
-    op.drop_index(op.f("ix_audit_events_result"), table_name="audit_events")
-    op.drop_index(op.f("ix_audit_events_occurred_at"), table_name="audit_events")
-    op.drop_index("ix_audit_events_actor_occurred_at", table_name="audit_events")
-    op.drop_index(op.f("ix_audit_events_actor_user_id"), table_name="audit_events")
-    op.drop_index("ix_audit_events_action_occurred_at", table_name="audit_events")
-    op.drop_index(op.f("ix_audit_events_action"), table_name="audit_events")
-    op.drop_table("audit_events")
+    op.drop_index(
+        "ix_audit_events_target_occurred_at",
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_index(
+        op.f("ix_audit_events_target_user_id"),
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_index(
+        op.f("ix_audit_events_result"),
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_index(
+        op.f("ix_audit_events_occurred_at"),
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_index(
+        "ix_audit_events_actor_occurred_at",
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_index(
+        op.f("ix_audit_events_actor_user_id"),
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_index(
+        "ix_audit_events_action_occurred_at",
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_index(
+        op.f("ix_audit_events_action"),
+        table_name="audit_events",
+        schema=SCHEMA,
+    )
+    op.drop_table("audit_events", schema=SCHEMA)
