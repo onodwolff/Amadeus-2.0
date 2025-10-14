@@ -403,3 +403,22 @@ async def test_admin_mutations_emit_audit_events(app, db_session, capture_admin_
         assert disable_event["revoked_sessions"] == 0
         assert disable_event["target_id"] == managed_user_id
         datetime.fromisoformat(disable_event["timestamp"])
+
+        revoke_response = await client.post(
+            f"/admin/users/{managed_user_id}/sessions/revoke",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert revoke_response.status_code == 200
+        assert [event["action"] for event in capture_admin_audit] == [
+            "create_user",
+            "update_user",
+            "assign_role",
+            "remove_role",
+            "disable_user_mfa",
+            "revoke_sessions",
+        ]
+        revoke_event = capture_admin_audit[-1]
+        assert revoke_event["actor_id"] == admin.id
+        assert revoke_event["target_id"] == managed_user_id
+        assert revoke_event["revoked_sessions"] == 0
+        datetime.fromisoformat(revoke_event["timestamp"])

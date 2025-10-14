@@ -223,23 +223,22 @@ async def admin_disable_user_mfa(
 @router.post(
     "/users/{user_id}/sessions/revoke",
     response_model=OperationStatus,
-    dependencies=[
-        Depends(
-            RequirePermissions(
-                _MANAGE_USERS_PERMISSION,
-                roles=[UserRole.ADMIN.value],
-            )
-        )
-    ],
 )
 async def admin_revoke_user_sessions(
     user_id: int,
+    current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     user = await _load_user(db, user_id)
     revoked = await revoke_user_sessions(db, user)
     await db.commit()
     suffix = "session" if revoked == 1 else "sessions"
+    _audit_event(
+        "revoke_sessions",
+        actor=current_admin,
+        target=user,
+        revoked_sessions=revoked,
+    )
     return OperationStatus(detail=f"Revoked {revoked} {suffix}.")
 
 
