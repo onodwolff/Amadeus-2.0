@@ -607,7 +607,8 @@ async def login(
             status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Try again later.",
         )
-    if status_check.requires_captcha:
+    requires_captcha = status_check.requires_captcha and captcha_verifier.enabled
+    if requires_captcha:
         token = payload.captcha_token
         if not token:
             await _record_auth_event(
@@ -769,7 +770,8 @@ async def complete_login_mfa(
             status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Try again later.",
         )
-    if status_check.requires_captcha:
+    requires_captcha = status_check.requires_captcha and captcha_verifier.enabled
+    if requires_captcha:
         token = payload.captcha_token
         if not token:
             await _record_auth_event(
