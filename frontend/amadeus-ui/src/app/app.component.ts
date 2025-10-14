@@ -1,8 +1,11 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { NotificationCenterComponent } from './shared/notifications/notification-center.component';
 import { AuthStateService } from './shared/auth/auth-state.service';
+import { NavigationEnd, Router } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { filter } from 'rxjs/operators';
 
 type NavLink = {
   label: string;
@@ -21,8 +24,10 @@ type NavLink = {
 })
 export class AppComponent {
   private readonly authState = inject(AuthStateService);
+  private readonly router = inject(Router);
 
   protected sidebarOpen = false;
+  private readonly currentUrl = signal(this.router.url);
 
   private readonly baseNavLinks: NavLink[] = [
     {
@@ -88,6 +93,8 @@ export class AppComponent {
     return links;
   });
 
+  protected readonly showStandalonePage = computed(() => this.currentUrl().startsWith('/login'));
+
   protected toggleSidebar(): void {
     this.sidebarOpen = !this.sidebarOpen;
   }
@@ -98,5 +105,12 @@ export class AppComponent {
 
   constructor() {
     this.authState.initialize();
+
+    this.router.events
+      .pipe(
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        takeUntilDestroyed(),
+      )
+      .subscribe((event) => this.currentUrl.set(event.urlAfterRedirects));
   }
 }
