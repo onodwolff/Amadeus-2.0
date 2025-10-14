@@ -4,12 +4,10 @@ WORKDIR /app
 
 ENV NG_CLI_ANALYTICS=false
 
-COPY package.json package-lock.json ./frontend/amadeus-ui/
-RUN npm ci --prefix frontend/amadeus-ui
+COPY package.json package-lock.json ./
+RUN npm ci
 
-COPY . ./frontend/amadeus-ui
-
-WORKDIR /app/frontend/amadeus-ui
+COPY . .
 
 EXPOSE 4200
 
