@@ -24,6 +24,7 @@ export class AuthService {
   private bootstrapPromise: Promise<void> | null = null;
   private refreshPromise: Promise<void> | null = null;
   private loadUserPromise: Promise<boolean> | null = null;
+  private sessionRevision = 0;
 
   readonly currentUser = this.currentUserSignal.asReadonly();
   readonly isBootstrapped = this.isBootstrappedSignal.asReadonly();
@@ -73,6 +74,7 @@ export class AuthService {
   }
 
   logout(): void {
+    this.sessionRevision += 1;
     this.oauthService.logOut();
     this.currentUserSignal.set(null);
     this.isBootstrappedSignal.set(false);
@@ -142,6 +144,8 @@ export class AuthService {
       return this.loadUserPromise;
     }
 
+    const revision = this.sessionRevision;
+
     if (!this.oauthService.hasValidAccessToken()) {
       this.currentUserSignal.set(null);
       return Promise.resolve(false);
@@ -149,11 +153,17 @@ export class AuthService {
 
     this.loadUserPromise = firstValueFrom(this.authApi.getCurrentUser())
       .then(user => {
+        if (!this.oauthService.hasValidAccessToken() || revision !== this.sessionRevision) {
+          return false;
+        }
+
         this.currentUserSignal.set(user);
         return true;
       })
       .catch(error => {
-        this.handleLoadUserFailure(error);
+        if (revision === this.sessionRevision) {
+          this.handleLoadUserFailure(error);
+        }
         return false;
       })
       .finally(() => {
@@ -184,6 +194,7 @@ export class AuthService {
   }
 
   private handleSessionEnded(): void {
+    this.sessionRevision += 1;
     this.currentUserSignal.set(null);
     this.isBootstrappedSignal.set(false);
     this.bootstrapPromise = null;
