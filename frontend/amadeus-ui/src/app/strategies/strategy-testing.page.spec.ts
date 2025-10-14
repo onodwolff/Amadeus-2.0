@@ -31,7 +31,10 @@ describe('StrategyTestingPage (role-based UI)', () => {
           useValue: {
             permissions: permissionsSignal as Signal<string[]>,
             roles: rolesSignal as Signal<string[]>,
-            hasRole: (role: string) => rolesSignal().includes(role),
+            hasRole: (role: string) => {
+              const roles = rolesSignal();
+              return roles.includes('admin') || roles.includes(role);
+            },
           } satisfies Partial<AuthStateService> & {
             permissions: Signal<string[]>;
             roles: Signal<string[]>;

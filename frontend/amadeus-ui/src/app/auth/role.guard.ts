@@ -29,7 +29,8 @@ export class RoleGuard implements CanMatch {
     const grantedRoles = new Set(user.roles ?? []);
     const grantedScopes = new Set(user.permissions ?? []);
 
-    const hasRoles = this.containsAll(grantedRoles, requiredRoles);
+    const hasRoles =
+      user.isAdmin === true || grantedRoles.has('admin') || this.containsAll(grantedRoles, requiredRoles);
     const hasScopes = this.containsAll(grantedScopes, requiredScopes);
 
     if (hasRoles && hasScopes) {
