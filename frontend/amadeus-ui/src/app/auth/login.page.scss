@@ -42,6 +42,25 @@
   animation: loginParticleDrift 60s linear infinite;
 }
 
+.login-background__layer--rays {
+  background:
+    conic-gradient(from 90deg at 50% 50%, rgba(59, 130, 246, 0.2), transparent 45%),
+    conic-gradient(from -90deg at 50% 50%, rgba(129, 140, 248, 0.2), transparent 45%);
+  opacity: 0.45;
+  mix-blend-mode: screen;
+  animation: loginRaysRotate 38s linear infinite;
+}
+
+.login-background__layer--orbs {
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(45, 212, 191, 0.4), transparent 55%),
+    radial-gradient(circle at 80% 70%, rgba(59, 130, 246, 0.35), transparent 55%),
+    radial-gradient(circle at 50% 50%, rgba(244, 114, 182, 0.25), transparent 60%);
+  animation: loginOrbsFloat 28s ease-in-out infinite;
+  opacity: 0.5;
+  filter: blur(20px);
+}
+
 .login-overlay {
   position: relative;
   z-index: 1;
@@ -198,6 +217,30 @@
   }
   100% {
     transform: translate3d(-4%, 8%, 0) scale(1.04) rotate(240deg);
+  }
+}
+
+@keyframes loginRaysRotate {
+  0% {
+    transform: rotate(0deg) scale(1.1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+  }
+  100% {
+    transform: rotate(360deg) scale(1.1);
+  }
+}
+
+@keyframes loginOrbsFloat {
+  0% {
+    transform: translate3d(-4%, 4%, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(4%, -6%, 0) scale(1.1);
+  }
+  100% {
+    transform: translate3d(-3%, 3%, 0) scale(1.06);
   }
 }
 

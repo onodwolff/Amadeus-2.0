@@ -63,10 +63,18 @@ export class AuthStateService {
   }
 
   hasPermission(permission: string): boolean {
+    if (this.isAdmin()) {
+      return true;
+    }
+
     return this.permissions().includes(permission);
   }
 
   hasAnyPermission(permissions: Iterable<string>): boolean {
+    if (this.isAdmin()) {
+      return true;
+    }
+
     const granted = new Set(this.permissions());
     for (const permission of permissions) {
       if (granted.has(permission)) {
@@ -77,6 +85,10 @@ export class AuthStateService {
   }
 
   hasAllPermissions(permissions: Iterable<string>): boolean {
+    if (this.isAdmin()) {
+      return true;
+    }
+
     const granted = new Set(this.permissions());
     for (const permission of permissions) {
       if (!granted.has(permission)) {
