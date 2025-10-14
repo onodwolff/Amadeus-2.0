@@ -81,6 +81,13 @@ export interface OperationStatus {
   detail: string;
 }
 
+export interface OidcCallbackRequest {
+  code: string;
+  codeVerifier: string;
+  redirectUri?: string;
+  state?: string;
+}
+
 export interface SessionsRevokeRequest {
   password: string;
 }

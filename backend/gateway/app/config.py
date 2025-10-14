@@ -89,6 +89,11 @@ class AuthSettings(BaseModel):
         validation_alias=AliasChoices("AUTH_IDP_JWKS_URL", "AUTH__IDP_JWKS_URL"),
         description="JWKS endpoint exposed by the identity provider.",
     )
+    idp_token_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_IDP_TOKEN_URL", "AUTH__IDP_TOKEN_URL"),
+        description="Token endpoint exposed by the identity provider.",
+    )
     idp_algorithms: list[str] = Field(
         default_factory=lambda: ["RS256"],
         validation_alias=AliasChoices("AUTH_IDP_ALGORITHMS", "AUTH__IDP_ALGORITHMS"),
@@ -99,6 +104,21 @@ class AuthSettings(BaseModel):
         ge=60,
         validation_alias=AliasChoices("AUTH_IDP_CACHE_TTL_SECONDS", "AUTH__IDP_CACHE_TTL_SECONDS"),
         description="Seconds to cache the JWKS response before refreshing.",
+    )
+    idp_client_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_IDP_CLIENT_ID", "AUTH__IDP_CLIENT_ID"),
+        description="OAuth client identifier registered with the identity provider.",
+    )
+    idp_client_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_IDP_CLIENT_SECRET", "AUTH__IDP_CLIENT_SECRET"),
+        description="Optional client secret registered with the identity provider.",
+    )
+    idp_redirect_uri: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AUTH_IDP_REDIRECT_URI", "AUTH__IDP_REDIRECT_URI"),
+        description="Redirect URI registered for the SPA OIDC client.",
     )
     allow_test_tokens: bool = Field(
         default=True,
@@ -277,7 +297,15 @@ class AuthSettings(BaseModel):
             raise ValueError("Login rate limit namespace must be a non-empty string")
         return cleaned
 
-    @field_validator("captcha_secret_key", "captcha_site_key", "captcha_test_bypass_token", mode="before")
+    @field_validator(
+        "captcha_secret_key",
+        "captcha_site_key",
+        "captcha_test_bypass_token",
+        "idp_client_id",
+        "idp_client_secret",
+        "idp_redirect_uri",
+        mode="before",
+    )
     @classmethod
     def _clean_optional_strings(cls, value: str | None) -> str | None:
         if value is None:
@@ -294,6 +322,14 @@ class AuthSettings(BaseModel):
         if not cleaned:
             raise ValueError("AUTH_CAPTCHA_VERIFICATION_URL must be a non-empty string")
         return cleaned
+
+    @field_validator("idp_token_url", mode="before")
+    @classmethod
+    def _normalise_optional_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     @field_validator("idp_algorithms", mode="before")
     @classmethod

@@ -6,6 +6,8 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
+
+import httpx
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
 from fastapi.responses import JSONResponse
@@ -72,6 +74,7 @@ from ..security import (
     create_test_refresh_token,
     hash_password,
     hash_refresh_token,
+    validate_bearer_token_async,
     verify_password,
 )
 from ..token_service import TokenService
@@ -128,6 +131,15 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1)
     captcha_token: str | None = Field(default=None, alias="captchaToken")
+
+
+class OidcCallbackRequest(BaseModel):
+    code: str
+    code_verifier: str = Field(alias="codeVerifier", min_length=43, max_length=128)
+    redirect_uri: str | None = Field(default=None, alias="redirectUri")
+    state: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class OperationStatus(BaseModel):
@@ -582,6 +594,172 @@ async def verify_email(
     )
     await db.commit()
     return OperationStatus(detail="Email verified")
+
+
+@router.post("/oidc/callback", response_model=TokenResponse)
+async def complete_oidc_login(
+    payload: OidcCallbackRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
+) -> TokenResponse:
+    config = settings.auth
+    if not (
+        config.uses_identity_provider
+        and config.idp_token_url
+        and config.idp_client_id
+    ):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Identity provider integration is not configured",
+        )
+
+    code = payload.code.strip()
+    if not code:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Authorization code is required")
+
+    code_verifier = payload.code_verifier.strip()
+    if not code_verifier:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="PKCE verifier is required")
+
+    redirect_uri = (payload.redirect_uri or config.idp_redirect_uri or "").strip()
+    if not redirect_uri:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Redirect URI is required")
+
+    if config.idp_redirect_uri and redirect_uri != config.idp_redirect_uri:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Redirect URI mismatch")
+
+    token_request_data: dict[str, str] = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "code_verifier": code_verifier,
+        "redirect_uri": redirect_uri,
+        "client_id": config.idp_client_id,
+    }
+    if config.idp_client_secret:
+        token_request_data["client_secret"] = config.idp_client_secret
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token_response = await client.post(
+                config.idp_token_url,
+                data=token_request_data,
+                headers={"Accept": "application/json"},
+            )
+    except httpx.HTTPError as exc:  # pragma: no cover - network failure
+        logger.exception("OIDC token exchange failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail="Unable to complete authorization code exchange",
+        ) from exc
+
+    if token_response.status_code >= 400:
+        logger.warning(
+            "OIDC token exchange returned status %s: %s",
+            token_response.status_code,
+            token_response.text,
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization code exchange was rejected",
+        )
+
+    try:
+        token_payload = token_response.json()
+    except ValueError as exc:  # pragma: no cover - defensive
+        logger.exception("OIDC token response was not valid JSON")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail="Identity provider returned an invalid response",
+        ) from exc
+
+    id_token = token_payload.get("id_token")
+    if not isinstance(id_token, str) or not id_token.strip():
+        logger.error("OIDC token response missing id_token claim")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail="Identity provider response missing id_token",
+        )
+
+    try:
+        validated = await validate_bearer_token_async(id_token)
+    except HTTPException:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_oidc",
+            result="failure",
+            metadata={"reason": "id_token_validation_failed"},
+        )
+        await db.commit()
+        raise
+
+    claims = validated.claims
+    email = claims.get("email")
+    if not isinstance(email, str) or not email.strip():
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_oidc",
+            result="failure",
+            metadata={"reason": "email_claim_missing", "issuer": validated.issuer},
+        )
+        await db.commit()
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Email claim missing from identity provider response")
+
+    user = await _fetch_user_by_email(db, email)
+    if user is None:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_oidc",
+            result="failure",
+            metadata={"reason": "user_not_found", "email": email},
+        )
+        await db.commit()
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is not provisioned")
+
+    if not user.active:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_oidc",
+            result="failure",
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            metadata={"reason": "account_suspended"},
+        )
+        await db.commit()
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
+
+    now = datetime.now(timezone.utc)
+    user.last_login_at = now
+    email_verified_claim = claims.get("email_verified")
+    if isinstance(email_verified_claim, bool) and email_verified_claim and not user.email_verified:
+        user.email_verified = True
+    await db.flush()
+
+    await _record_auth_event(
+        db,
+        request,
+        action="auth.login_oidc",
+        result="success",
+        actor_user_id=user.id,
+        target_user_id=user.id,
+        metadata={
+            "idp_subject": validated.subject,
+            "idp_issuer": validated.issuer,
+            "idp_audience": list(validated.audience),
+        },
+    )
+
+    return await _issue_tokens(
+        db,
+        user=user,
+        response=response,
+        request=request,
+        mfa_method="oidc",
+    )
 
 
 @router.post(
