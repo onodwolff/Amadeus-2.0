@@ -18,25 +18,46 @@
     </button>
   </header>
 
-  <mat-form-field appearance="outline" class="users-page__filter">
-    <mat-label>Filter users</mat-label>
-    <input
-      matInput
-      placeholder="Search by email, name, or role"
-      [formControl]="filterControl"
-      type="search"
-    />
-    <button
-      mat-button
-      matSuffix
-      type="button"
-      (click)="clearFilter()"
-      *ngIf="filterControl.value"
-      class="users-page__clear"
-    >
-      Clear
-    </button>
-  </mat-form-field>
+  <div class="users-page__filters">
+    <mat-form-field appearance="outline" class="users-page__filter">
+      <mat-label>Filter users</mat-label>
+      <input
+        matInput
+        placeholder="Search by email, name, or role"
+        [formControl]="filterControl"
+        type="search"
+      />
+      <button
+        mat-button
+        matSuffix
+        type="button"
+        (click)="clearFilter()"
+        *ngIf="hasActiveFilters()"
+        class="users-page__clear"
+      >
+        Clear
+      </button>
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="users-page__filter">
+      <mat-label>Role</mat-label>
+      <mat-select [formControl]="roleFilterControl">
+        <mat-option value="all">All roles</mat-option>
+        <mat-option *ngFor="let role of roleFilterOptions()" [value]="role.slug">
+          {{ role.name }}
+        </mat-option>
+      </mat-select>
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="users-page__filter">
+      <mat-label>Status</mat-label>
+      <mat-select [formControl]="statusFilterControl">
+        <mat-option value="all">All statuses</mat-option>
+        <mat-option value="active">Active</mat-option>
+        <mat-option value="suspended">Suspended</mat-option>
+      </mat-select>
+    </mat-form-field>
+  </div>
 
   <p class="users-page__roles-error" *ngIf="rolesError()">{{ rolesError() }}</p>
 
