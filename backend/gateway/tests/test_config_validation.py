@@ -11,14 +11,14 @@ from backend.gateway.app.config import AuthSettings
 def test_auth_settings_defaults_within_bounds() -> None:
     settings = AuthSettings()
 
-    assert settings.access_token_ttl_seconds == 900
+    assert settings.access_token_ttl_seconds == 600
     assert settings.refresh_token_ttl_seconds == 1_209_600
     assert settings.mfa_challenge_token_ttl_seconds == 300
 
 
 @pytest.mark.parametrize(
     "value",
-    [299, 901],
+    [599, 601],
 )
 def test_access_token_ttl_out_of_bounds(value: int) -> None:
     with pytest.raises(ValidationError):
