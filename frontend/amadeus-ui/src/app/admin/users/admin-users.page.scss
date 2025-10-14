@@ -29,8 +29,16 @@
   max-width: 52ch;
 }
 
+.users-page__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
 .users-page__filter {
+  flex: 1 1 200px;
   max-width: 320px;
+  min-width: 180px;
 }
 
 .users-page__clear {
@@ -140,6 +148,10 @@
 @media (max-width: 768px) {
   .users-page {
     padding: 16px;
+  }
+
+  .users-page__filters {
+    gap: 12px;
   }
 
   .users-table {
