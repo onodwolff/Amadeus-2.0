@@ -69,7 +69,6 @@ describe('SettingsPage advanced settings', () => {
       'setupMfa',
       'regenerateBackupCodes',
       'completeMfaLogin',
-      'exchangeMfaChallenge',
     ]);
     authApiStub.requestEmailChange.and.returnValue(of({ verificationToken: 'token' }));
     authApiStub.enableMfa.and.returnValue(of({ detail: 'ok', backupCodes: ['CODE-1'] }));
@@ -86,9 +85,6 @@ describe('SettingsPage advanced settings', () => {
         refreshExpiresAt: new Date().toISOString(),
         user: createAuthUser(),
       }),
-    );
-    authApiStub.exchangeMfaChallenge.and.returnValue(
-      of({ challengeToken: 'challenge', detail: 'MFA verification required', methods: ['totp'], ttlSeconds: 300 }),
     );
 
     const keysApiStub = jasmine.createSpyObj<KeysApi>('KeysApi', [

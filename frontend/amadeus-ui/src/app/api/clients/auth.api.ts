@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
 import {
@@ -18,6 +18,7 @@ import {
   MfaSetupResponse,
   OidcCallbackRequest,
   OperationStatus,
+  PasswordLoginRequest,
   ResetPasswordRequest,
   SessionsRevokeRequest,
   TokenResponse,
@@ -57,12 +58,18 @@ export class AuthApi {
     return this.http.post<BackupCodesResponse>(buildApiUrl('/api/auth/me/mfa/backup-codes'), payload);
   }
 
-  completeMfaLogin(payload: MfaChallengeRequest): Observable<TokenResponse> {
-    return this.http.post<TokenResponse>(buildApiUrl('/api/auth/login/mfa'), payload);
+  loginWithPassword(
+    payload: PasswordLoginRequest,
+  ): Observable<HttpResponse<TokenResponse | MfaChallengeResponse>> {
+    return this.http.post<TokenResponse | MfaChallengeResponse>(
+      buildApiUrl('/api/auth/login'),
+      payload,
+      { observe: 'response' },
+    );
   }
 
-  exchangeMfaChallenge(email: string, password: string): Observable<MfaChallengeResponse> {
-    return this.http.post<MfaChallengeResponse>(buildApiUrl('/api/auth/login'), { email, password });
+  completeMfaLogin(payload: MfaChallengeRequest): Observable<TokenResponse> {
+    return this.http.post<TokenResponse>(buildApiUrl('/api/auth/login/mfa'), payload);
   }
 
   completeOidcLogin(payload: OidcCallbackRequest): Observable<TokenResponse> {

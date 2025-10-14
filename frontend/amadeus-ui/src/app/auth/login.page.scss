@@ -142,6 +142,13 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.login-form input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
 .login-form input:focus {
   outline: none;
   border-color: rgba(56, 189, 248, 0.8);
@@ -156,6 +163,36 @@
   margin: 0;
   font-size: 0.85rem;
   color: #fca5a5;
+}
+
+.login-form__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.login-form__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: rgba(226, 232, 240, 0.85);
+  font-weight: 500;
+}
+
+.login-form__checkbox span {
+  user-select: none;
+}
+
+.login-form__meta a {
+  color: #38bdf8;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.login-form__meta a:hover {
+  text-decoration: underline;
 }
 
 .login-form__alert {

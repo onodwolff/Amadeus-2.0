@@ -69,6 +69,12 @@ export interface MfaChallengeRequest {
   rememberDevice?: boolean;
 }
 
+export interface PasswordLoginRequest {
+  email: string;
+  password: string;
+  captchaToken?: string | null;
+}
+
 export interface TokenResponse {
   accessToken: string;
   tokenType: string;
