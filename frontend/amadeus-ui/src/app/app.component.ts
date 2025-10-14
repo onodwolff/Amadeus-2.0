@@ -3,7 +3,14 @@ import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { NotificationCenterComponent } from './shared/notifications/notification-center.component';
 import { AuthStateService } from './shared/auth/auth-state.service';
-import { NavigationEnd, Router } from '@angular/router';
+import {
+  NavigationCancel,
+  NavigationEnd,
+  NavigationError,
+  NavigationStart,
+  Router,
+  RouterEvent,
+} from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs/operators';
 
@@ -106,11 +113,16 @@ export class AppComponent {
   constructor() {
     this.authState.initialize();
 
+    const relevantEvents = [NavigationStart, NavigationEnd, NavigationCancel, NavigationError];
+
     this.router.events
       .pipe(
-        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        filter((event): event is RouterEvent => relevantEvents.some((type) => event instanceof type)),
         takeUntilDestroyed(),
       )
-      .subscribe((event) => this.currentUrl.set(event.urlAfterRedirects));
+      .subscribe((event) => {
+        const pendingUrl = 'urlAfterRedirects' in event && event.urlAfterRedirects ? event.urlAfterRedirects : event.url;
+        this.currentUrl.set(pendingUrl);
+      });
   }
 }
