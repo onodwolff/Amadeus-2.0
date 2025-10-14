@@ -137,6 +137,33 @@ describe('RoleGuard', () => {
     expect(router.serializeUrl(result as UrlTree)).toEqual(router.serializeUrl(router.parseUrl('/403')));
   });
 
+  it('allows administrators to access trader routes', async () => {
+    accessToken = 'token';
+    currentUserSignal.set({
+      id: 1,
+      email: 'admin@example.com',
+      username: 'admin',
+      name: null,
+      roles: ['viewer'],
+      permissions: ['read:items'],
+      active: true,
+      isAdmin: true,
+      emailVerified: true,
+      mfaEnabled: false,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      lastLoginAt: null,
+    });
+
+    const route: Route = {
+      data: {
+        requiredRoles: ['trader'],
+      },
+    };
+
+    await expectAsync(guard.canMatch(route, [] as UrlSegment[])).toBeResolvedTo(true);
+  });
+
   it('redirects to /403 when navigating to /dashboard without the trader role', fakeAsync(() => {
     accessToken = 'token';
     currentUserSignal.set({

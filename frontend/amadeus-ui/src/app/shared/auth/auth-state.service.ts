@@ -87,7 +87,16 @@ export class AuthStateService {
   }
 
   hasRole(role: string): boolean {
-    return this.roles().includes(role);
+    if (this.isAdmin()) {
+      return true;
+    }
+
+    const roles = this.roles();
+    if (roles.includes('admin')) {
+      return true;
+    }
+
+    return roles.includes(role);
   }
 
   setCurrentUser(user: AuthUser | null): void {
