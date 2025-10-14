@@ -26,6 +26,9 @@
       (ngSubmit)="submit()"
     >
       <section *ngIf="currentStep() === 0" class="launch-dialog__section" aria-label="Bot mode selection">
+        <p class="launch-dialog__notice" *ngIf="needsLiveApiKeyWarning()">
+          Live trading requires at least one exchange API key. Add credentials in Settings before continuing.
+        </p>
         <div class="option-grid">
           <label *ngFor="let option of nodeTypeOptions" class="option-card" [class.option-card--active]="form.value.nodeType === option.value">
             <input type="radio" formControlName="nodeType" [value]="option.value" />

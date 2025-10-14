@@ -1,10 +1,13 @@
 """API routes exposing node management operations."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Response, Security, status
 from fastapi.responses import PlainTextResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_current_user
+from ..dependencies import get_session
 from ..nautilus_service import svc
 from ..schemas.nodes import (
     NodeDetailResponse,
@@ -13,6 +16,11 @@ from ..schemas.nodes import (
     NodeResponse,
     NodesListResponse,
 )
+
+try:  # pragma: no cover - prefer local backend imports during tests
+    from backend.gateway.db.models import ApiKey  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - production installs
+    from gateway.db.models import ApiKey  # type: ignore
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -29,15 +37,24 @@ def list_nodes(
 
 
 @router.post("/launch", response_model=NodeResponse, status_code=status.HTTP_201_CREATED)
-def launch_node(
+async def launch_node(
     payload: NodeLaunchRequest,
     current_user=Security(get_current_user, scopes=TRADER_SCOPES),
+    db: AsyncSession = Depends(get_session),
 ) -> NodeResponse:
     launch_data = payload.model_dump(exclude_none=True, by_alias=True)
     node_type = payload.type.lower()
     if node_type == "backtest":
         handle = svc.start_backtest(launch_data)
     elif node_type == "live":
+        result = await db.execute(
+            select(ApiKey.id).where(ApiKey.user_id == current_user.id)
+        )
+        if result.first() is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Add an exchange API key before launching live trading.",
+            )
         handle = svc.start_live(config=launch_data)
     elif node_type == "sandbox":
         handle = svc.start_sandbox(config=launch_data)
