@@ -1,12 +1,25 @@
 """Add refresh token family tracking columns."""
 from __future__ import annotations
 
+import sys
 import uuid
+from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
 
-from backend.gateway.alembic.versions.c7f96b8e4e7c_initial_schema import SCHEMA
+CURRENT_DIR = Path(__file__).resolve()
+BACKEND_DIR = CURRENT_DIR.parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+
+for path_entry in (REPO_ROOT, BACKEND_DIR):
+    if str(path_entry) not in sys.path:
+        sys.path.append(str(path_entry))
+
+try:
+    from gateway.alembic.versions.c7f96b8e4e7c_initial_schema import SCHEMA
+except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+    from backend.gateway.alembic.versions.c7f96b8e4e7c_initial_schema import SCHEMA  # type: ignore
 
 revision = "7e8e4b973c3c"
 down_revision = "c7f96b8e4e7c"

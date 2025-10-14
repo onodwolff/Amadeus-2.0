@@ -1,13 +1,26 @@
 """Ensure refresh token family tracking schema exists in all deployments."""
 from __future__ import annotations
 
+import sys
 import uuid
+from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-from backend.gateway.alembic.versions.c7f96b8e4e7c_initial_schema import SCHEMA
+CURRENT_DIR = Path(__file__).resolve()
+BACKEND_DIR = CURRENT_DIR.parents[2]
+REPO_ROOT = BACKEND_DIR.parent
+
+for path_entry in (REPO_ROOT, BACKEND_DIR):
+    if str(path_entry) not in sys.path:
+        sys.path.append(str(path_entry))
+
+try:
+    from gateway.alembic.versions.c7f96b8e4e7c_initial_schema import SCHEMA
+except ModuleNotFoundError:  # pragma: no cover - support running from backend/
+    from backend.gateway.alembic.versions.c7f96b8e4e7c_initial_schema import SCHEMA  # type: ignore
 
 
 revision = "5e5c7f4d5b70"
@@ -18,15 +31,15 @@ depends_on = None
 
 _AUTH_SESSIONS_TABLE = "auth_sessions"
 _FAMILY_ID_INDEX = "ix_auth_sessions_family_id"
-_PARENT_SESSION_FK = op.f("fk_auth_sessions_parent_session_id_auth_sessions")
 _AUDIT_EVENTS_TABLE = "audit_events"
 
 
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+    parent_session_fk = op.f("fk_auth_sessions_parent_session_id_auth_sessions")
 
-    _ensure_auth_session_family_columns(bind, inspector)
+    _ensure_auth_session_family_columns(bind, inspector, parent_session_fk)
     _ensure_audit_events_table(inspector)
 
 
@@ -34,7 +47,9 @@ def downgrade() -> None:  # pragma: no cover - irreversible fix
     """No automatic downgrade; the schema is kept intact."""
 
 
-def _ensure_auth_session_family_columns(bind, inspector) -> None:
+def _ensure_auth_session_family_columns(
+    bind, inspector, parent_session_fk: str
+) -> None:
     columns = {
         column["name"]: column
         for column in inspector.get_columns(_AUTH_SESSIONS_TABLE, schema=SCHEMA)
@@ -73,13 +88,13 @@ def _ensure_auth_session_family_columns(bind, inspector) -> None:
             schema=SCHEMA,
         )
 
-    parent_fk = foreign_keys.get(_PARENT_SESSION_FK)
+    parent_fk = foreign_keys.get(parent_session_fk)
     if parent_fk is not None:
         options = parent_fk.get("options") or {}
         ondelete = options.get("ondelete")
         if not ondelete or ondelete.upper() != "SET NULL":
             op.drop_constraint(
-                _PARENT_SESSION_FK,
+                parent_session_fk,
                 _AUTH_SESSIONS_TABLE,
                 type_="foreignkey",
                 schema=SCHEMA,
@@ -88,7 +103,7 @@ def _ensure_auth_session_family_columns(bind, inspector) -> None:
 
     if parent_fk is None:
         op.create_foreign_key(
-            _PARENT_SESSION_FK,
+            parent_session_fk,
             _AUTH_SESSIONS_TABLE,
             _AUTH_SESSIONS_TABLE,
             local_cols=["parent_session_id"],
