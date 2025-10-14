@@ -989,6 +989,46 @@ class BacktestRun(Base):
     )
 
 
+class AuditEvent(Base):
+    """Immutable record describing a noteworthy action in the gateway."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_action_occurred_at", "action", "occurred_at"),
+        Index("ix_audit_events_actor_occurred_at", "actor_user_id", "occurred_at"),
+        Index("ix_audit_events_target_occurred_at", "target_user_id", "occurred_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    action: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    result: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    target_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ip_address: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[Dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=JSON_EMPTY_OBJECT,
+        default=dict,
+    )
+
+
 __all__ = [
     "ApiKey",
     "BacktestRun",
@@ -1013,6 +1053,7 @@ __all__ = [
     "Permission",
     "Position",
     "PositionMode",
+    "AuditEvent",
     "RiskAlert",
     "RiskLimit",
     "Role",

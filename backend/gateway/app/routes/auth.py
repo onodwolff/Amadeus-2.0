@@ -5,6 +5,7 @@ import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
 from fastapi.responses import JSONResponse
@@ -54,6 +55,7 @@ def _ensure_test_schema() -> None:
     ):
         table.schema = None
 
+from ..audit import record_audit_event
 from ..config import settings
 from ..dependencies import get_current_user, get_email_dispatcher, get_session
 from ..email import EmailDispatcher
@@ -196,6 +198,30 @@ def serialize_user(user: User) -> UserResource:
         created_at=user.created_at,
         updated_at=user.updated_at,
         last_login_at=user.last_login_at,
+    )
+
+
+async def _record_auth_event(
+    db: AsyncSession,
+    request: Request,
+    *,
+    action: str,
+    result: str,
+    actor_user_id: int | None = None,
+    target_user_id: int | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> None:
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    await record_audit_event(
+        db,
+        action=action,
+        result=result,
+        actor_user_id=actor_user_id,
+        target_user_id=target_user_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        metadata=dict(metadata or {}),
     )
 
 
@@ -438,6 +464,7 @@ async def forgot_password(
 @router.post("/reset-password", response_model=OperationStatus)
 async def reset_password(
     payload: ResetPasswordRequest,
+    request: Request,
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     token_service = TokenService(db)
@@ -446,6 +473,14 @@ async def reset_password(
         purpose=UserTokenPurpose.PASSWORD_RESET,
     )
     if record is None:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.reset_password",
+            result="failure",
+            metadata={"reason": "invalid_or_expired_token"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
     user = record.user
@@ -454,6 +489,14 @@ async def reset_password(
 
     user.password_hash = hash_password(payload.new_password)
     await db.flush()
+    await _record_auth_event(
+        db,
+        request,
+        action="auth.reset_password",
+        result="success",
+        actor_user_id=user.id,
+        target_user_id=user.id,
+    )
     await db.commit()
     return OperationStatus(detail="Password updated")
 
@@ -461,6 +504,7 @@ async def reset_password(
 @router.get("/verify-email", response_model=OperationStatus)
 async def verify_email(
     token: str,
+    request: Request,
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     token_service = TokenService(db)
@@ -469,6 +513,14 @@ async def verify_email(
         purpose=UserTokenPurpose.EMAIL_VERIFICATION,
     )
     if record is None:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.verify_email",
+            result="failure",
+            metadata={"reason": "invalid_or_expired_token"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
     user = record.user
@@ -478,6 +530,14 @@ async def verify_email(
     if not user.email_verified:
         user.email_verified = True
     await db.flush()
+    await _record_auth_event(
+        db,
+        request,
+        action="auth.verify_email",
+        result="success",
+        actor_user_id=user.id,
+        target_user_id=user.id,
+    )
     await db.commit()
     return OperationStatus(detail="Email verified")
 
@@ -494,12 +554,38 @@ async def login(
     db: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     if not settings.auth.allow_test_tokens:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login",
+            result="failure",
+            metadata={"reason": "token_issuance_disabled"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     email = str(payload.email).strip().lower()
     user = await _fetch_user_by_email(db, email)
     if user is None or not verify_password(user.password_hash, payload.password):
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login",
+            result="failure",
+            metadata={"reason": "invalid_credentials", "email": email},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.active:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login",
+            result="failure",
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            metadata={"reason": "account_suspended"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
     if user.mfa_enabled:
@@ -508,6 +594,15 @@ async def login(
             user=user,
             purpose=UserTokenPurpose.MFA_CHALLENGE,
             ttl_seconds=settings.auth.mfa_challenge_token_ttl_seconds,
+        )
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login",
+            result="success",
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            metadata={"mfa_required": True},
         )
         await db.commit()
         await db.refresh(record)
@@ -522,6 +617,15 @@ async def login(
 
     user.last_login_at = datetime.now(timezone.utc)
     await db.flush()
+    await _record_auth_event(
+        db,
+        request,
+        action="auth.login",
+        result="success",
+        actor_user_id=user.id,
+        target_user_id=user.id,
+        metadata={"mfa_required": False, "mfa_method": "password"},
+    )
 
     return await _issue_tokens(
         db,
@@ -540,6 +644,14 @@ async def complete_login_mfa(
     db: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     if not settings.auth.allow_test_tokens:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_mfa",
+            result="failure",
+            metadata={"reason": "token_issuance_disabled"},
+        )
+        await db.commit()
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Local token issuance is disabled",
@@ -551,19 +663,56 @@ async def complete_login_mfa(
         purpose=UserTokenPurpose.MFA_CHALLENGE,
     )
     if record is None:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_mfa",
+            result="failure",
+            metadata={"reason": "invalid_or_expired_challenge"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
 
     user = record.user or await _load_user(db, record.user_id)
     if not user.active:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_mfa",
+            result="failure",
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            metadata={"reason": "account_suspended"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
     method = await _validate_mfa_factor(db, user, payload.code)
     if method is None:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_mfa",
+            result="failure",
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            metadata={"reason": "invalid_verification_code"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid verification code")
 
     now = datetime.now(timezone.utc)
     user.last_login_at = now
     await db.flush()
+    await _record_auth_event(
+        db,
+        request,
+        action="auth.login_mfa",
+        result="success",
+        actor_user_id=user.id,
+        target_user_id=user.id,
+        metadata={"mfa_method": method, "remember_device": payload.remember_device},
+    )
 
     return await _issue_tokens(
         db,
@@ -650,6 +799,7 @@ async def setup_mfa(
 @router.post("/me/mfa/enable", response_model=MfaEnableResponse)
 async def enable_mfa(
     payload: MfaEnableRequest,
+    request: Request,
     current_user: User = Security(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> MfaEnableResponse:
@@ -659,11 +809,30 @@ async def enable_mfa(
         current_user.mfa_secret = secret
 
     if not _verify_totp_code(current_user, payload.code):
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.mfa_enable",
+            result="failure",
+            actor_user_id=current_user.id,
+            target_user_id=current_user.id,
+            metadata={"reason": "invalid_verification_code"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid verification code")
 
     current_user.mfa_enabled = True
     backup_codes = await _rotate_backup_codes(db, current_user)
     await db.flush()
+    await _record_auth_event(
+        db,
+        request,
+        action="auth.mfa_enable",
+        result="success",
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        metadata={"backup_codes": len(backup_codes)},
+    )
     await db.commit()
     return MfaEnableResponse(
         detail="Two-factor authentication enabled",
@@ -674,10 +843,21 @@ async def enable_mfa(
 @router.delete("/me/mfa", response_model=OperationStatus)
 async def disable_mfa(
     payload: MfaDisableRequest,
+    request: Request,
     current_user: User = Security(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     if not current_user.mfa_enabled:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.mfa_disable",
+            result="failure",
+            actor_user_id=current_user.id,
+            target_user_id=current_user.id,
+            metadata={"reason": "already_disabled"},
+        )
+        await db.commit()
         return OperationStatus(detail="Two-factor authentication is already disabled")
 
     verified = False
@@ -688,13 +868,32 @@ async def disable_mfa(
         verified = verify_password(current_user.password_hash, payload.password)
 
     if not verified:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.mfa_disable",
+            result="failure",
+            actor_user_id=current_user.id,
+            target_user_id=current_user.id,
+            metadata={"reason": "verification_required"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Verification required to disable MFA")
 
     current_user.mfa_enabled = False
     current_user.mfa_secret = None
     await clear_backup_codes(db, current_user)
-    await revoke_user_sessions(db, current_user)
+    revoked = await revoke_user_sessions(db, current_user)
     await db.flush()
+    await _record_auth_event(
+        db,
+        request,
+        action="auth.mfa_disable",
+        result="success",
+        actor_user_id=current_user.id,
+        target_user_id=current_user.id,
+        metadata={"revoked_sessions": revoked},
+    )
     await db.commit()
     return OperationStatus(detail="Two-factor authentication disabled")
 
@@ -734,6 +933,14 @@ async def logout(
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     if not settings.auth.allow_test_tokens:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.logout",
+            result="failure",
+            metadata={"reason": "token_issuance_disabled"},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     refresh_token = request.cookies.get("refreshToken")
     if refresh_token:
@@ -744,12 +951,40 @@ async def logout(
         session_record = result.scalars().first()
         if session_record is not None:
             revoked_count = await _revoke_session_family(db, session_record.family_id)
+            await _record_auth_event(
+                db,
+                request,
+                action="auth.logout",
+                result="success",
+                actor_user_id=session_record.user_id,
+                target_user_id=session_record.user_id,
+                metadata={"revoked_sessions": revoked_count},
+            )
             await db.commit()
             logger.info(
                 "Logout revoked %s sessions in family %s",
                 revoked_count,
                 session_record.family_id,
             )
+        else:
+            await _record_auth_event(
+                db,
+                request,
+                action="auth.logout",
+                result="failure",
+                metadata={"reason": "session_not_found"},
+            )
+            await db.commit()
+    else:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.logout",
+            result="failure",
+            metadata={"reason": "refresh_token_missing"},
+        )
+        await db.commit()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing")
 
     response.delete_cookie(
         key="refreshToken",
