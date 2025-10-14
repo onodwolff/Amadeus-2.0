@@ -347,9 +347,12 @@ def app(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
 
     class DummyCaptchaVerifier:
         def __init__(self) -> None:
+            self.enabled = True
             self.accepted_tokens = {"valid-captcha"}
 
         async def verify(self, token: str | None, remote_ip: str | None = None) -> bool:
+            if not self.enabled:
+                return False
             return bool(token) and token in self.accepted_tokens
 
     captcha_verifier = DummyCaptchaVerifier()

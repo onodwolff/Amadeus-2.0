@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pyotp
 import pytest
 from fastapi import status
 from httpx import ASGITransport, AsyncClient
@@ -123,3 +124,43 @@ async def test_successful_login_resets_counters(app, db_session):
         )
 
     assert second_success.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_captcha_requirement_disabled_when_verifier_off(app, db_session):
+    secret = pyotp.random_base32()
+    await create_user(
+        db_session,
+        email="nocaptcha@example.com",
+        username="nocaptcha",
+        password="correct-horse",
+        roles=[],
+        mfa_enabled=True,
+        mfa_secret=secret,
+    )
+
+    captcha_threshold = settings.auth.login_captcha_failure_threshold
+    app.state.captcha_verifier.enabled = False
+    totp = pyotp.TOTP(secret)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        for _ in range(captcha_threshold):
+            response = await client.post(
+                "/auth/login",
+                json={"email": "nocaptcha@example.com", "password": "bad"},
+            )
+            assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+        challenge = await client.post(
+            "/auth/login",
+            json={"email": "nocaptcha@example.com", "password": "correct-horse"},
+        )
+        assert challenge.status_code == status.HTTP_202_ACCEPTED
+        token = challenge.json()["challengeToken"]
+
+        mfa_response = await client.post(
+            "/auth/login/mfa",
+            json={"challengeToken": token, "code": totp.now()},
+        )
+
+    assert mfa_response.status_code == status.HTTP_200_OK

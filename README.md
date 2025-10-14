@@ -34,7 +34,8 @@ After signing in you can rotate the password from the **Settings → Password** 
 Two-factor authentication (TOTP) is disabled by default for every account and can be enabled later from the security settings.
 
 The authentication service automatically rate-limits login attempts by allowing five failures per minute before temporary lockout,
-so the stack ships with basic brute-force protection out of the box.
+so the stack ships with basic brute-force protection out of the box. CAPTCHA challenges only activate once a verifier secret is configured
+(`AUTH_CAPTCHA_SECRET_KEY`/`auth.captcha_secret_key`), letting integrators keep flows unblocked while onboarding.
 
 If you need to ship different bootstrap credentials, edit [`backend/0001_initial,`](backend/0001_initial,) before applying the
 migrations or override the user manually through the database once the stack is running.
