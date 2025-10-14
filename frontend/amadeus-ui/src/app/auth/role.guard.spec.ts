@@ -1,11 +1,10 @@
-import { Component } from '@angular/core';
+import { Component, WritableSignal, signal } from '@angular/core';
 import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { Route, Router, UrlSegment, UrlTree } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
-import { OAuthService } from 'angular-oauth2-oidc';
-
 import { RoleGuard } from './role.guard';
 import { AuthService } from './auth.service';
+import { AuthUser } from '../api/models';
 
 @Component({ template: '' })
 class DummyComponent {}
@@ -13,21 +12,21 @@ class DummyComponent {}
 describe('RoleGuard', () => {
   let guard: RoleGuard;
   let auth: jasmine.SpyObj<AuthService>;
-  let oauth: jasmine.SpyObj<OAuthService>;
   let router: Router;
+  let currentUserSignal: WritableSignal<AuthUser | null>;
+  let accessToken: string | null;
 
   beforeEach(() => {
-    auth = jasmine.createSpyObj<AuthService>('AuthService', ['bootstrapMe']);
-    auth.bootstrapMe.and.resolveTo();
+    currentUserSignal = signal<AuthUser | null>(null);
+    accessToken = null;
 
-    oauth = jasmine.createSpyObj<OAuthService>('OAuthService', [
-      'hasValidAccessToken',
-      'getIdentityClaims',
-      'getGrantedScopes',
-    ]);
-    oauth.hasValidAccessToken.and.returnValue(true);
-    oauth.getIdentityClaims.and.returnValue({ roles: [] });
-    oauth.getGrantedScopes.and.returnValue({} as unknown as object);
+    auth = jasmine.createSpyObj<AuthService>(
+      'AuthService',
+      ['bootstrapMe', 'getAccessToken'],
+      { currentUser: currentUserSignal.asReadonly() },
+    );
+    auth.bootstrapMe.and.resolveTo();
+    auth.getAccessToken.and.callFake(() => accessToken);
 
     TestBed.configureTestingModule({
       imports: [
@@ -45,7 +44,6 @@ describe('RoleGuard', () => {
       providers: [
         RoleGuard,
         { provide: AuthService, useValue: auth },
-        { provide: OAuthService, useValue: oauth },
       ],
     });
 
@@ -54,14 +52,46 @@ describe('RoleGuard', () => {
   });
 
   it('allows access when no additional requirements are provided', async () => {
+    accessToken = 'token';
     const route: Route = {};
 
     await expectAsync(guard.canMatch(route, [] as UrlSegment[])).toBeResolvedTo(true);
     expect(auth.bootstrapMe).toHaveBeenCalled();
   });
 
+  it('redirects to /login when the user is not authenticated', async () => {
+    accessToken = null;
+
+    const route: Route = {
+      data: {
+        requiredRoles: ['admin'],
+      },
+    };
+
+    const result = await guard.canMatch(route, [] as UrlSegment[]);
+
+    expect(auth.bootstrapMe).toHaveBeenCalled();
+    expect(result instanceof UrlTree).toBeTrue();
+    expect(router.serializeUrl(result as UrlTree)).toEqual(router.serializeUrl(router.parseUrl('/login')));
+  });
+
   it('redirects to /403 when the user lacks a required role', async () => {
-    oauth.getIdentityClaims.and.returnValue({ roles: ['user'] });
+    accessToken = 'token';
+    currentUserSignal.set({
+      id: 1,
+      email: 'user@example.com',
+      username: 'user',
+      name: null,
+      roles: ['user'],
+      permissions: ['read:items'],
+      active: true,
+      isAdmin: false,
+      emailVerified: true,
+      mfaEnabled: false,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      lastLoginAt: null,
+    });
 
     const route: Route = {
       data: {
@@ -77,7 +107,22 @@ describe('RoleGuard', () => {
   });
 
   it('redirects to /403 when the user lacks a required scope', async () => {
-    oauth.getGrantedScopes.and.returnValue('read:items' as unknown as object);
+    accessToken = 'token';
+    currentUserSignal.set({
+      id: 1,
+      email: 'user@example.com',
+      username: 'user',
+      name: null,
+      roles: ['user'],
+      permissions: ['read:items'],
+      active: true,
+      isAdmin: false,
+      emailVerified: true,
+      mfaEnabled: false,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      lastLoginAt: null,
+    });
 
     const route: Route = {
       data: {
@@ -93,7 +138,22 @@ describe('RoleGuard', () => {
   });
 
   it('redirects to /403 when navigating to /dashboard without the trader role', fakeAsync(() => {
-    oauth.getIdentityClaims.and.returnValue({ roles: ['viewer'] });
+    accessToken = 'token';
+    currentUserSignal.set({
+      id: 1,
+      email: 'user@example.com',
+      username: 'user',
+      name: null,
+      roles: ['viewer'],
+      permissions: ['read:items'],
+      active: true,
+      isAdmin: false,
+      emailVerified: true,
+      mfaEnabled: false,
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      lastLoginAt: null,
+    });
 
     router.initialNavigation();
     tick();
