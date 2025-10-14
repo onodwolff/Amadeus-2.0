@@ -738,6 +738,12 @@ class AuthSession(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    absolute_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    idle_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     mfa_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     mfa_method: Mapped[Optional[str]] = mapped_column(String(32))

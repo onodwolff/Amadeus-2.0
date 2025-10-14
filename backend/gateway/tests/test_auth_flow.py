@@ -1,6 +1,8 @@
 """Authentication flow integration tests."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -10,6 +12,10 @@ import pyotp
 from backend.gateway.db.models import AuthSession, UserRole
 
 from .utils import create_user
+
+
+def _ensure_aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio
@@ -77,6 +83,10 @@ async def test_login_and_refresh_flow(app, db_session):
     assert len(revoked) == 1
     family_ids = {session.family_id for session in sessions}
     assert len(family_ids) == 1
+
+    for session in sessions:
+        assert session.absolute_expires_at is not None
+        assert session.idle_expires_at is not None
 
 
 @pytest.mark.asyncio
@@ -181,6 +191,142 @@ async def test_refresh_reuse_revokes_new_generation(app, db_session):
     assert all(session.revoked_at is not None for session in sessions)
     family_ids = {session.family_id for session in sessions}
     assert len(family_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_absolute_timeout(app, db_session):
+    await create_user(
+        db_session,
+        email="absolute@example.com",
+        username="absolute",
+        password="timeout-pass",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": "absolute@example.com", "password": "timeout-pass"},
+        )
+        refresh_cookie = login_response.cookies.get("refreshToken")
+        assert refresh_cookie
+
+        result = await db_session.execute(select(AuthSession))
+        session = result.scalars().first()
+        assert session is not None
+        session.absolute_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+        await db_session.flush()
+        await db_session.commit()
+
+        refresh_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": refresh_cookie},
+        )
+
+    assert refresh_response.status_code == 401
+    assert refresh_response.json()["detail"] == "Session expired"
+
+    await db_session.refresh(session)
+    assert session.revoked_at is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_idle_timeout(app, db_session):
+    await create_user(
+        db_session,
+        email="idle@example.com",
+        username="idle",
+        password="idle-pass",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": "idle@example.com", "password": "idle-pass"},
+        )
+        refresh_cookie = login_response.cookies.get("refreshToken")
+        assert refresh_cookie
+
+        result = await db_session.execute(select(AuthSession))
+        session = result.scalars().first()
+        assert session is not None
+        session.idle_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+        await db_session.flush()
+        await db_session.commit()
+
+        refresh_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": refresh_cookie},
+        )
+
+    assert refresh_response.status_code == 401
+    assert refresh_response.json()["detail"] == "Session expired due to inactivity"
+
+    await db_session.refresh(session)
+    assert session.revoked_at is not None
+
+
+@pytest.mark.asyncio
+async def test_refresh_preserves_absolute_and_resets_idle_deadline(app, db_session):
+    await create_user(
+        db_session,
+        email="idleclock@example.com",
+        username="idleclock",
+        password="idleclock-pass",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": "idleclock@example.com", "password": "idleclock-pass"},
+        )
+        assert login_response.status_code == 200
+        refresh_cookie = login_response.cookies.get("refreshToken")
+        assert refresh_cookie
+
+        result = await db_session.execute(select(AuthSession))
+        original_session = result.scalars().first()
+        assert original_session is not None
+        original_absolute = _ensure_aware(original_session.absolute_expires_at)
+        original_idle = _ensure_aware(original_session.idle_expires_at)
+        assert original_absolute is not None
+        assert original_idle is not None
+
+        await db_session.commit()
+
+        refresh_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": refresh_cookie},
+        )
+        assert refresh_response.status_code == 200
+
+        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        assert refreshed_cookie and refreshed_cookie != refresh_cookie
+
+    all_sessions = await db_session.execute(select(AuthSession).order_by(AuthSession.id))
+    sessions = all_sessions.scalars().all()
+    assert len(sessions) == 2
+
+    refreshed_session = max(sessions, key=lambda record: record.id)
+    assert refreshed_session.parent_session_id == original_session.id
+    assert refreshed_session.absolute_expires_at is not None
+    assert refreshed_session.idle_expires_at is not None
+
+    refreshed_absolute = _ensure_aware(refreshed_session.absolute_expires_at)
+    refreshed_idle = _ensure_aware(refreshed_session.idle_expires_at)
+
+    assert abs((refreshed_absolute - original_absolute).total_seconds()) < 1
+
+    now = datetime.now(timezone.utc)
+    idle_delta = (refreshed_idle - now).total_seconds()
+    assert 25 * 60 <= idle_delta <= 30 * 60 + 30
+
+    assert (refreshed_idle - original_idle).total_seconds() >= 0
+
+    await db_session.refresh(original_session)
+    assert original_session.revoked_at is not None
 
 
 @pytest.mark.asyncio

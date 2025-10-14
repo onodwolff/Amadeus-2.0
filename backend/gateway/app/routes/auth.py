@@ -80,6 +80,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 logger = logging.getLogger(__name__)
 
+ABSOLUTE_SESSION_TTL = timedelta(hours=8)
+IDLE_SESSION_TTL = timedelta(minutes=30)
+
 
 def _extract_client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
@@ -370,6 +373,8 @@ async def _issue_tokens(
     mfa_verified_at: datetime | None = None,
     mfa_method: str | None = None,
     remember_device: bool = False,
+    absolute_expires_at: datetime | None = None,
+    idle_expires_at: datetime | None = None,
 ) -> TokenResponse:
     _ensure_test_schema()
     access_token, access_expires = create_test_access_token(
@@ -379,6 +384,8 @@ async def _issue_tokens(
     )
     refresh_token, refresh_expires = create_test_refresh_token()
 
+    now = datetime.now(timezone.utc)
+
     if parent_session is not None:
         family_id = parent_session.family_id
         parent_session_id = parent_session.id
@@ -387,13 +394,24 @@ async def _issue_tokens(
         if mfa_method is None:
             mfa_method = parent_session.mfa_method
         remember_device = parent_session.mfa_remember_device
+        if absolute_expires_at is None:
+            absolute_expires_at = parent_session.absolute_expires_at
     else:
         family_id = str(uuid.uuid4())
         parent_session_id = None
         if mfa_verified_at is None:
-            mfa_verified_at = datetime.now(timezone.utc)
+            mfa_verified_at = now
         if mfa_method is None:
             mfa_method = "password"
+        if absolute_expires_at is None:
+            absolute_expires_at = now + ABSOLUTE_SESSION_TTL
+
+    if absolute_expires_at is not None and absolute_expires_at.tzinfo is None:
+        absolute_expires_at = absolute_expires_at.replace(tzinfo=timezone.utc)
+    if idle_expires_at is None:
+        idle_expires_at = now + IDLE_SESSION_TTL
+    elif idle_expires_at.tzinfo is None:
+        idle_expires_at = idle_expires_at.replace(tzinfo=timezone.utc)
 
     session_record = AuthSession(
         user_id=user.id,
@@ -403,6 +421,8 @@ async def _issue_tokens(
         user_agent=(request.headers.get("user-agent") if request else None),
         ip_address=(request.client.host if request and request.client else None),
         expires_at=refresh_expires,
+        absolute_expires_at=absolute_expires_at,
+        idle_expires_at=idle_expires_at,
         mfa_verified_at=mfa_verified_at,
         mfa_method=mfa_method,
         mfa_remember_device=remember_device,
@@ -882,11 +902,36 @@ async def refresh_tokens(
             session_record.family_id,
         )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    now = datetime.now(timezone.utc)
     expires_at = session_record.expires_at
     if expires_at is not None and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+    if expires_at is not None and expires_at <= now:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+
+    absolute_expires_at = session_record.absolute_expires_at
+    if absolute_expires_at is None:
+        await _revoke_session_family(db, session_record.family_id)
+        await db.commit()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+    if absolute_expires_at.tzinfo is None:
+        absolute_expires_at = absolute_expires_at.replace(tzinfo=timezone.utc)
+    if absolute_expires_at <= now:
+        await _revoke_session_family(db, session_record.family_id)
+        await db.commit()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
+    idle_expires_at = session_record.idle_expires_at
+    if idle_expires_at is None:
+        await _revoke_session_family(db, session_record.family_id)
+        await db.commit()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+    if idle_expires_at.tzinfo is None:
+        idle_expires_at = idle_expires_at.replace(tzinfo=timezone.utc)
+    if idle_expires_at <= now:
+        await _revoke_session_family(db, session_record.family_id)
+        await db.commit()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired due to inactivity")
 
     user = await _load_user(db, session_record.user_id)
     if not user.active:
@@ -896,7 +941,9 @@ async def refresh_tokens(
         await db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="MFA verification required")
 
-    session_record.revoked_at = datetime.now(timezone.utc)
+    next_idle_deadline = now + IDLE_SESSION_TTL
+    session_record.idle_expires_at = next_idle_deadline
+    session_record.revoked_at = now
 
     return await _issue_tokens(
         db,
@@ -904,6 +951,8 @@ async def refresh_tokens(
         response=response,
         request=request,
         parent_session=session_record,
+        absolute_expires_at=absolute_expires_at,
+        idle_expires_at=next_idle_deadline,
     )
 
 
