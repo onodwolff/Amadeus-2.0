@@ -33,10 +33,18 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend/amadeus-ui
 
       - name: Run database migrations
         run: alembic -c backend/gateway/alembic.ini upgrade head
