@@ -1,55 +1,59 @@
-<div class="app-shell" [class.app-shell--sidebar-open]="sidebarOpen">
-  <div class="app-backdrop" *ngIf="sidebarOpen" (click)="closeSidebar()" aria-hidden="true"></div>
+@if (showStandalonePage()) {
+  <router-outlet></router-outlet>
+} @else {
+  <div class="app-shell" [class.app-shell--sidebar-open]="sidebarOpen">
+    <div class="app-backdrop" *ngIf="sidebarOpen" (click)="closeSidebar()" aria-hidden="true"></div>
 
-  <aside class="app-sidebar">
-    <div class="app-sidebar__header">
-      <a routerLink="/" class="app-brand" (click)="closeSidebar()">
-        <span class="app-brand__mark">A</span>
-        <span class="app-brand__text">Amadeus</span>
-      </a>
-      <button type="button" class="app-sidebar__close" (click)="toggleSidebar()" aria-label="Close navigation">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6l-12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-      </button>
+    <aside class="app-sidebar">
+      <div class="app-sidebar__header">
+        <a routerLink="/" class="app-brand" (click)="closeSidebar()">
+          <span class="app-brand__mark">A</span>
+          <span class="app-brand__text">Amadeus</span>
+        </a>
+        <button type="button" class="app-sidebar__close" (click)="toggleSidebar()" aria-label="Close navigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6l-12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </button>
+      </div>
+
+      <nav class="app-sidebar__nav" aria-label="Main navigation">
+        <a
+          *ngFor="let link of navLinks()"
+          [routerLink]="link.route"
+          routerLinkActive="active"
+          class="app-sidebar__link"
+          (click)="closeSidebar()"
+        >
+          <span class="app-sidebar__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                [attr.d]="link.icon"
+                [attr.fill]="link.stroke ? 'none' : 'currentColor'"
+                [attr.stroke]="link.stroke ? 'currentColor' : null"
+                [attr.stroke-width]="link.stroke ? 1.8 : null"
+                [attr.stroke-linecap]="link.stroke ? 'round' : null"
+                [attr.stroke-linejoin]="link.stroke ? 'round' : null"
+              ></path>
+            </svg>
+          </span>
+          <span class="app-sidebar__label">{{ link.label }}</span>
+        </a>
+      </nav>
+    </aside>
+
+    <div class="app-main">
+      <header class="app-topbar">
+        <button type="button" class="app-topbar__menu" (click)="toggleSidebar()" aria-label="Toggle navigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </button>
+        <div class="app-topbar__title">Command Center</div>
+        <div class="app-topbar__spacer"></div>
+      </header>
+
+      <main class="app-content">
+        <router-outlet></router-outlet>
+      </main>
     </div>
-
-    <nav class="app-sidebar__nav" aria-label="Main navigation">
-      <a
-        *ngFor="let link of navLinks()"
-        [routerLink]="link.route"
-        routerLinkActive="active"
-        class="app-sidebar__link"
-        (click)="closeSidebar()"
-      >
-        <span class="app-sidebar__icon">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              [attr.d]="link.icon"
-              [attr.fill]="link.stroke ? 'none' : 'currentColor'"
-              [attr.stroke]="link.stroke ? 'currentColor' : null"
-              [attr.stroke-width]="link.stroke ? 1.8 : null"
-              [attr.stroke-linecap]="link.stroke ? 'round' : null"
-              [attr.stroke-linejoin]="link.stroke ? 'round' : null"
-            ></path>
-          </svg>
-        </span>
-        <span class="app-sidebar__label">{{ link.label }}</span>
-      </a>
-    </nav>
-  </aside>
-
-  <div class="app-main">
-    <header class="app-topbar">
-      <button type="button" class="app-topbar__menu" (click)="toggleSidebar()" aria-label="Toggle navigation">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-      </button>
-      <div class="app-topbar__title">Command Center</div>
-      <div class="app-topbar__spacer"></div>
-    </header>
-
-    <main class="app-content">
-      <router-outlet></router-outlet>
-    </main>
   </div>
-</div>
 
-<app-notification-center></app-notification-center>
+  <app-notification-center></app-notification-center>
+}
