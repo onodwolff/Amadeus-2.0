@@ -97,6 +97,29 @@
         </td>
       </ng-container>
 
+      <ng-container matColumnDef="security">
+        <th mat-header-cell *matHeaderCellDef>Security</th>
+        <td mat-cell *matCellDef="let user" class="users-table__security">
+          <button
+            mat-stroked-button
+            color="accent"
+            type="button"
+            (click)="disableUserMfa(user)"
+            [disabled]="isDisableMfaDisabled(user)"
+          >
+            Disable 2FA
+          </button>
+          <button
+            mat-stroked-button
+            type="button"
+            (click)="revokeUserSessions(user)"
+            [disabled]="isSecurityActionDisabled(user.id)"
+          >
+            Log out
+          </button>
+        </td>
+      </ng-container>
+
       <ng-container matColumnDef="createdAt">
         <th mat-header-cell *matHeaderCellDef mat-sort-header>Created</th>
         <td mat-cell *matCellDef="let user">{{ user.createdAt | date: 'medium' }}</td>

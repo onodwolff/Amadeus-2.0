@@ -106,6 +106,16 @@
   font-weight: 600;
 }
 
+.users-table__security {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.users-table__security button {
+  white-space: nowrap;
+}
+
 .users-page__empty {
   text-align: center;
   padding: 48px 16px;

@@ -43,6 +43,8 @@ function createUserProfile(): UserProfile {
     permissions: ['gateway.users.manage', 'gateway.users.view'],
     active: true,
     isAdmin: false,
+    emailVerified: true,
+    mfaEnabled: false,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastLoginAt: timestamp,
@@ -138,10 +140,14 @@ describe('SettingsPage advanced settings', () => {
       'getAccount',
       'updatePassword',
       'changePassword',
+      'disableUserMfa',
+      'revokeUserSessions',
     ]);
     usersApiStub.getAccount.and.returnValue(of(createUserProfile()));
     usersApiStub.updatePassword.and.returnValue(of(createUserProfile()));
     usersApiStub.changePassword.and.returnValue(of(void 0));
+    usersApiStub.disableUserMfa.and.returnValue(of({ detail: 'ok' }));
+    usersApiStub.revokeUserSessions.and.returnValue(of({ detail: 'ok' }));
 
     const integrationsApiStub = jasmine.createSpyObj<IntegrationsApi>('IntegrationsApi', ['listExchanges']);
     integrationsApiStub.listExchanges.and.returnValue(of({ exchanges: [] as ExchangeDescriptor[] }));

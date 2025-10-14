@@ -22,6 +22,8 @@ export interface UserProfile {
   permissions: string[];
   active: boolean;
   isAdmin: boolean;
+  emailVerified: boolean;
+  mfaEnabled: boolean;
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string | null;

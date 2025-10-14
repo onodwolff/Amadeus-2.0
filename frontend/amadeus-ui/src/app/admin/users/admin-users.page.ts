@@ -58,6 +58,7 @@ export class AdminUsersPage {
   readonly error = signal<string | null>(null);
   readonly togglingUserIds = signal<Set<number>>(new Set());
   readonly roleTogglesInFlight = signal<Set<string>>(new Set());
+  readonly securityActionsInFlight = signal<Set<number>>(new Set());
   readonly availableRoles = signal<RoleSummary[]>([]);
   readonly rolesError = signal<string | null>(null);
 
@@ -71,12 +72,13 @@ export class AdminUsersPage {
     this.availableRoles().filter((role) => role.slug !== 'admin'),
   );
 
-  readonly displayedColumns: (keyof AdminUser | 'roles')[] = [
+  readonly displayedColumns: (keyof AdminUser | 'roles' | 'security')[] = [
     'id',
     'email',
     'name',
     'roles',
     'active',
+    'security',
     'createdAt',
     'updatedAt',
   ];
@@ -223,6 +225,18 @@ export class AdminUsersPage {
     return !this.canManageUsers() || this.isLoading() || this.togglingUserIds().has(userId);
   }
 
+  isSecurityActionDisabled(userId: number): boolean {
+    return (
+      !this.canManageUsers() ||
+      this.isLoading() ||
+      this.securityActionsInFlight().has(userId)
+    );
+  }
+
+  isDisableMfaDisabled(user: AdminUser): boolean {
+    return this.isSecurityActionDisabled(user.id) || !user.mfaEnabled;
+  }
+
   isRoleToggleDisabled(userId: number, role: string): boolean {
     return (
       !this.canManageUsers() ||
@@ -306,6 +320,70 @@ export class AdminUsersPage {
     });
   }
 
+  disableUserMfa(user: AdminUser): void {
+    if (!this.canManageUsers()) {
+      this.snackBar.open('You do not have permission to manage security settings.', 'Dismiss', {
+        duration: 4000,
+      });
+      return;
+    }
+
+    if (!user.mfaEnabled) {
+      this.snackBar.open('Two-factor authentication is already disabled for this user.', 'Dismiss', {
+        duration: 3500,
+      });
+      return;
+    }
+
+    this.markSecurityAction(user.id, true);
+
+    this.usersApi
+      .disableUserMfa(user.id)
+      .pipe(finalize(() => this.markSecurityAction(user.id, false)))
+      .subscribe({
+        next: (status) => {
+          const message = status?.detail?.trim() || 'Two-factor authentication disabled.';
+          this.updateUserRow(user.id, { mfaEnabled: false });
+          this.snackBar.open(message, 'Dismiss', { duration: 4000 });
+        },
+        error: (err: unknown) => {
+          const message = this.resolveErrorMessage(
+            err,
+            'Unable to disable two-factor authentication.',
+          );
+          this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+        },
+      });
+  }
+
+  revokeUserSessions(user: AdminUser): void {
+    if (!this.canManageUsers()) {
+      this.snackBar.open('You do not have permission to manage security settings.', 'Dismiss', {
+        duration: 4000,
+      });
+      return;
+    }
+
+    this.markSecurityAction(user.id, true);
+
+    this.usersApi
+      .revokeUserSessions(user.id)
+      .pipe(finalize(() => this.markSecurityAction(user.id, false)))
+      .subscribe({
+        next: (status) => {
+          const message = status?.detail?.trim() || 'User logged out from all sessions.';
+          this.snackBar.open(message, 'Dismiss', { duration: 4000 });
+        },
+        error: (err: unknown) => {
+          const message = this.resolveErrorMessage(
+            err,
+            'Unable to revoke active sessions for this user.',
+          );
+          this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+        },
+      });
+  }
+
   formatUserName(user: AdminUser | null | undefined): string {
     if (!user) {
       return '—';
@@ -348,6 +426,18 @@ export class AdminUsersPage {
     this.togglingUserIds.update((current) => {
       const next = new Set(current);
       if (toggling) {
+        next.add(userId);
+      } else {
+        next.delete(userId);
+      }
+      return next;
+    });
+  }
+
+  private markSecurityAction(userId: number, running: boolean): void {
+    this.securityActionsInFlight.update((current) => {
+      const next = new Set(current);
+      if (running) {
         next.add(userId);
       } else {
         next.delete(userId);

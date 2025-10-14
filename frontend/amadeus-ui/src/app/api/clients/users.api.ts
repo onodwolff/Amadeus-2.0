@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import { buildApiUrl } from '../../api-base';
 import {
   AccountUpdateRequest,
+  OperationStatus,
   PasswordUpdateRequest,
   PermissionSummary,
   RoleSummary,
@@ -26,6 +27,20 @@ export class UsersApi {
 
   updateUser(userId: number, payload: UserUpdateRequest): Observable<UserProfile> {
     return this.http.patch<UserProfile>(buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}`), payload);
+  }
+
+  disableUserMfa(userId: number): Observable<OperationStatus> {
+    return this.http.post<OperationStatus>(
+      buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}/mfa/disable`),
+      {},
+    );
+  }
+
+  revokeUserSessions(userId: number): Observable<OperationStatus> {
+    return this.http.post<OperationStatus>(
+      buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}/logout`),
+      {},
+    );
   }
 
   assignRole(userId: number, role: string): Observable<UserProfile> {
