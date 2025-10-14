@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Security, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,8 +20,10 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: str = Field(min_length=1)
-    new_password: str = Field(min_length=8)
+    current_password: str = Field(min_length=1, alias="currentPassword")
+    new_password: str = Field(min_length=8, alias="newPassword")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 @router.get("/me", response_model=UserResource)

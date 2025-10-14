@@ -1,34 +1,35 @@
 import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { OAuthService } from 'angular-oauth2-oidc';
 import { catchError, from, switchMap, throwError } from 'rxjs';
 
 import { AuthService } from './auth.service';
 
 export const tokenInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
-  const oauth = inject(OAuthService);
-  const token = oauth.getAccessToken();
+  const token = auth.getAccessToken();
 
-  if (!token) {
-    return next(req);
-  }
-
-  const authReq = req.clone({
-    setHeaders: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const authReq = token
+    ? req.clone({
+        setHeaders: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+    : req;
 
   return next(authReq).pipe(
     catchError(error => {
-      if (!(error instanceof HttpErrorResponse) || error.status !== 401) {
+      if (
+        !(error instanceof HttpErrorResponse) ||
+        error.status !== 401 ||
+        req.url.includes('/api/auth/refresh') ||
+        req.url.includes('/api/auth/oidc/callback')
+      ) {
         return throwError(() => error);
       }
 
       return from(auth.refreshToken()).pipe(
         switchMap(() => {
-          const refreshedToken = oauth.getAccessToken();
+          const refreshedToken = auth.getAccessToken();
           if (!refreshedToken) {
             auth.logout();
             return throwError(() => error);

@@ -16,6 +16,7 @@ import {
   MfaChallengeRequest,
   MfaChallengeResponse,
   MfaSetupResponse,
+  OidcCallbackRequest,
   OperationStatus,
   ResetPasswordRequest,
   SessionsRevokeRequest,
@@ -62,6 +63,14 @@ export class AuthApi {
 
   exchangeMfaChallenge(email: string, password: string): Observable<MfaChallengeResponse> {
     return this.http.post<MfaChallengeResponse>(buildApiUrl('/api/auth/login'), { email, password });
+  }
+
+  completeOidcLogin(payload: OidcCallbackRequest): Observable<TokenResponse> {
+    return this.http.post<TokenResponse>(buildApiUrl('/api/auth/oidc/callback'), payload);
+  }
+
+  refreshTokens(): Observable<TokenResponse> {
+    return this.http.post<TokenResponse>(buildApiUrl('/api/auth/refresh'), {});
   }
 
   revokeAllSessions(payload: SessionsRevokeRequest): Observable<OperationStatus> {
