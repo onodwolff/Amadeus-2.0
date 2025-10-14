@@ -4,16 +4,24 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Annotated, Iterable
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 try:
-    from gateway.db.models import Permission, Role, User, UserRole, UserTokenPurpose  # type: ignore
+    from gateway.db.models import (  # type: ignore
+        AuditEvent,
+        Permission,
+        Role,
+        User,
+        UserRole,
+        UserTokenPurpose,
+    )
 except ModuleNotFoundError:  # pragma: no cover
     from backend.gateway.db.models import (  # type: ignore
+        AuditEvent,
         Permission,
         Role,
         User,
@@ -24,6 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover
 from ..config import settings
 from ..dependencies import RequirePermissions, get_email_dispatcher, get_session
 from ..logging import get_logger
+from ..audit import record_audit_event
 from ..email import EmailDispatcher
 from ..security import hash_password
 from ..token_service import TokenService
@@ -56,6 +65,30 @@ def _audit_event(action: str, *, actor: User, target: User, **extra: Any) -> Non
         target_username=target.username,
         timestamp=datetime.now(timezone.utc).isoformat(),
         **extra,
+    )
+
+
+async def _record_admin_audit(
+    db: AsyncSession,
+    request: Request,
+    *,
+    action: str,
+    result: str,
+    actor: User,
+    target: User,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    await record_audit_event(
+        db,
+        action=action,
+        result=result,
+        actor_user_id=actor.id,
+        target_user_id=target.id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        metadata=dict(metadata or {}),
     )
 
 
@@ -108,6 +141,20 @@ class PermissionCreate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class AuditEventResource(BaseModel):
+    id: int
+    occurred_at: datetime = Field(alias="occurredAt")
+    action: str
+    result: str
+    actor_user_id: int | None = Field(default=None, alias="actorUserId")
+    target_user_id: int | None = Field(default=None, alias="targetUserId")
+    ip_address: str | None = Field(default=None, alias="ipAddress")
+    user_agent: str | None = Field(default=None, alias="userAgent")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 async def _email_exists(db: AsyncSession, email: str, *, exclude_user: int | None = None) -> bool:
@@ -198,11 +245,22 @@ def _serialize_role(role: Role) -> RoleResource:
 )
 async def admin_disable_user_mfa(
     user_id: int,
+    request: Request,
     current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     user = await _load_user(db, user_id)
     if not user.mfa_enabled:
+        await _record_admin_audit(
+            db,
+            request,
+            action="admin.disable_user_mfa",
+            result="failure",
+            actor=current_admin,
+            target=user,
+            metadata={"reason": "already_disabled"},
+        )
+        await db.commit()
         return OperationStatus(detail="Two-factor authentication already disabled")
 
     user.mfa_enabled = False
@@ -210,6 +268,15 @@ async def admin_disable_user_mfa(
     await clear_backup_codes(db, user)
     revoked = await revoke_user_sessions(db, user)
     await db.flush()
+    await _record_admin_audit(
+        db,
+        request,
+        action="admin.disable_user_mfa",
+        result="success",
+        actor=current_admin,
+        target=user,
+        metadata={"revoked_sessions": revoked},
+    )
     await db.commit()
     _audit_event(
         "disable_user_mfa",
@@ -226,11 +293,21 @@ async def admin_disable_user_mfa(
 )
 async def admin_revoke_user_sessions(
     user_id: int,
+    request: Request,
     current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
     user = await _load_user(db, user_id)
     revoked = await revoke_user_sessions(db, user)
+    await _record_admin_audit(
+        db,
+        request,
+        action="admin.revoke_sessions",
+        result="success",
+        actor=current_admin,
+        target=user,
+        metadata={"revoked_sessions": revoked},
+    )
     await db.commit()
     suffix = "session" if revoked == 1 else "sessions"
     _audit_event(
@@ -248,6 +325,7 @@ async def admin_revoke_user_sessions(
 )
 async def create_user(
     payload: AdminUserCreate,
+    request: Request,
     current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
     email_dispatcher: EmailDispatcher = Depends(get_email_dispatcher),
@@ -280,6 +358,15 @@ async def create_user(
             purpose=UserTokenPurpose.EMAIL_VERIFICATION,
             ttl_seconds=settings.auth.email_verification_token_ttl_seconds,
         )
+    await _record_admin_audit(
+        db,
+        request,
+        action="admin.create_user",
+        result="success",
+        actor=current_admin,
+        target=user,
+        metadata={"assigned_roles": sorted(user.role_slugs), "active": user.active},
+    )
     await db.commit()
 
     created = await _load_user(db, user.id)
@@ -306,35 +393,63 @@ async def create_user(
 async def update_user(
     user_id: int,
     payload: AdminUserUpdate,
+    request: Request,
     current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> UserResource:
     user = await _load_user(db, user_id)
+
+    updated_fields: list[str] = []
 
     if payload.email is not None:
         email = str(payload.email).strip().lower()
         if await _email_exists(db, email, exclude_user=user.id):
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Email already in use")
         user.email = email
+        updated_fields.append("email")
 
     if payload.username is not None:
         username = payload.username.strip()
         if await _username_exists(db, username, exclude_user=user.id):
             raise HTTPException(status.HTTP_409_CONFLICT, detail="Username already in use")
         user.username = username
+        updated_fields.append("username")
 
     if payload.name is not None:
         user.name = _clean_name(payload.name)
+        updated_fields.append("name")
 
     if payload.password is not None:
         user.password_hash = hash_password(payload.password)
+        updated_fields.append("password")
 
     if payload.active is not None:
         user.active = payload.active
+        updated_fields.append("active")
 
     if payload.roles is not None:
         await _apply_roles(db, user, payload.roles)
+        updated_fields.append("roles")
 
+    if updated_fields:
+        await _record_admin_audit(
+            db,
+            request,
+            action="admin.update_user",
+            result="success",
+            actor=current_admin,
+            target=user,
+            metadata={"updated_fields": updated_fields},
+        )
+    else:
+        await _record_admin_audit(
+            db,
+            request,
+            action="admin.update_user",
+            result="success",
+            actor=current_admin,
+            target=user,
+        )
     await db.commit()
     updated = await _load_user(db, user.id)
     _audit_event(
@@ -392,13 +507,25 @@ async def get_user(user_id: int, db: AsyncSession = Depends(get_session)) -> Use
 async def assign_role(
     user_id: int,
     role_slug: str,
+    request: Request,
     current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> UserResource:
     user = await _load_user(db, user_id)
     role = await _load_role(db, role_slug)
+    assigned = False
     if role not in user.roles:
         user.roles.append(role)
+        assigned = True
+    await _record_admin_audit(
+        db,
+        request,
+        action="admin.assign_role",
+        result="success",
+        actor=current_admin,
+        target=user,
+        metadata={"role": role.slug, "assigned": assigned},
+    )
     await db.commit()
     updated = await _load_user(db, user.id)
     _audit_event(
@@ -417,12 +544,23 @@ async def assign_role(
 async def remove_role(
     user_id: int,
     role_slug: str,
+    request: Request,
     current_admin: AdminActor,
     db: AsyncSession = Depends(get_session),
 ) -> UserResource:
     user = await _load_user(db, user_id)
     role = await _load_role(db, role_slug)
+    removed = any(existing.id == role.id for existing in user.roles)
     user.roles = [existing for existing in user.roles if existing.id != role.id]
+    await _record_admin_audit(
+        db,
+        request,
+        action="admin.remove_role",
+        result="success",
+        actor=current_admin,
+        target=user,
+        metadata={"role": role.slug, "removed": removed},
+    )
     await db.commit()
     updated = await _load_user(db, user.id)
     _audit_event(
@@ -432,6 +570,60 @@ async def remove_role(
         role=role.slug,
     )
     return serialize_user(updated)
+
+
+@router.get(
+    "/audit-events",
+    response_model=list[AuditEventResource],
+    dependencies=[
+        Depends(
+            RequirePermissions(
+                _ADMIN_PERMISSION,
+                roles=[UserRole.ADMIN.value],
+            )
+        )
+    ],
+)
+async def list_audit_events(
+    action: str | None = Query(default=None),
+    actor_user_id: int | None = Query(default=None, alias="actorUserId"),
+    target_user_id: int | None = Query(default=None, alias="targetUserId"),
+    occurred_from: datetime | None = Query(default=None, alias="occurredFrom"),
+    occurred_to: datetime | None = Query(default=None, alias="occurredTo"),
+    db: AsyncSession = Depends(get_session),
+) -> list[AuditEventResource]:
+    stmt = select(AuditEvent).order_by(AuditEvent.occurred_at.desc())
+    if action:
+        stmt = stmt.where(AuditEvent.action == action)
+    if actor_user_id is not None:
+        stmt = stmt.where(AuditEvent.actor_user_id == actor_user_id)
+    if target_user_id is not None:
+        stmt = stmt.where(AuditEvent.target_user_id == target_user_id)
+    if occurred_from is not None:
+        stmt = stmt.where(AuditEvent.occurred_at >= occurred_from)
+    if occurred_to is not None:
+        stmt = stmt.where(AuditEvent.occurred_at <= occurred_to)
+
+    result = await db.execute(stmt)
+    events = result.scalars().all()
+    resources: list[AuditEventResource] = []
+    for event in events:
+        resources.append(
+            AuditEventResource.model_validate(
+                {
+                    "id": event.id,
+                    "occurred_at": event.occurred_at,
+                    "action": event.action,
+                    "result": event.result,
+                    "actor_user_id": event.actor_user_id,
+                    "target_user_id": event.target_user_id,
+                    "ip_address": event.ip_address,
+                    "user_agent": event.user_agent,
+                    "metadata": dict(event.metadata_json or {}),
+                }
+            )
+        )
+    return resources
 
 
 @router.get(
