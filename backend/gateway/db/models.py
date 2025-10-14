@@ -97,6 +97,7 @@ class UserTokenPurpose(str, enum.Enum):
 
     PASSWORD_RESET = "password_reset"
     EMAIL_VERIFICATION = "email_verification"
+    MFA_CHALLENGE = "mfa_challenge"
 
 
 JSON_EMPTY_OBJECT = text("'{}'::jsonb")
@@ -271,6 +272,9 @@ class User(Base):
     )
     tokens: Mapped[List["UserToken"]] = relationship(
         "UserToken", back_populates="user", cascade="all, delete-orphan"
+    )
+    mfa_backup_codes: Mapped[List["UserMFABackupCode"]] = relationship(
+        "UserMFABackupCode", back_populates="user", cascade="all, delete-orphan"
     )
     pending_email_change: Mapped[Optional["EmailChangeRequest"]] = relationship(
         "EmailChangeRequest", back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -692,6 +696,27 @@ class UserToken(Base):
     user: Mapped[User] = relationship("User", back_populates="tokens")
 
 
+class UserMFABackupCode(Base):
+    """Single-use backup code for multi-factor authentication."""
+
+    __tablename__ = "user_mfa_backup_codes"
+    __table_args__ = (
+        Index("ix_user_mfa_backup_codes_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    code_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship("User", back_populates="mfa_backup_codes")
+
+
 class AuthSession(Base):
     """Refresh token session issued to a user."""
 
@@ -714,6 +739,11 @@ class AuthSession(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    mfa_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    mfa_method: Mapped[Optional[str]] = mapped_column(String(32))
+    mfa_remember_device: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
     user: Mapped[User] = relationship("User", back_populates="sessions")
 
@@ -988,6 +1018,9 @@ __all__ = [
     "Role",
     "User",
     "UserRole",
+    "UserToken",
+    "UserTokenPurpose",
+    "UserMFABackupCode",
     "Watchlist",
     "WatchlistItem",
 ]

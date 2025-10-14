@@ -9,6 +9,7 @@ export const routes: Routes = [
   { path: 'reset-password', loadComponent: () => import('./auth/reset-password.page').then(m => m.ResetPasswordPage) },
   { path: 'verify-email', loadComponent: () => import('./auth/verify-email.page').then(m => m.VerifyEmailPage) },
   { path: 'login', loadComponent: () => import('./auth/login.page').then(m => m.LoginPage) },
+  { path: 'login/mfa', loadComponent: () => import('./auth/mfa-challenge.page').then(m => m.MfaChallengePage) },
   {
     path: '',
     canMatch: [RoleGuard],

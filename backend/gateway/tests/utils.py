@@ -19,6 +19,8 @@ async def create_user(
     roles: Iterable[str],
     name: str | None = None,
     active: bool = True,
+    mfa_enabled: bool = False,
+    mfa_secret: str | None = None,
 ) -> User:
     """Create a user with the specified roles for integration tests."""
 
@@ -38,6 +40,8 @@ async def create_user(
         name=name,
         password_hash=hash_password(password),
         active=active,
+        mfa_enabled=mfa_enabled,
+        mfa_secret=mfa_secret,
     )
     session.add(user)
     for slug in role_list:

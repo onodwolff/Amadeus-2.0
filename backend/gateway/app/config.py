@@ -144,6 +144,15 @@ class AuthSettings(BaseModel):
         default=None,
         validation_alias=AliasChoices("ADMIN_PASSWORD", "AUTH__ADMIN_PASSWORD"),
     )
+    mfa_challenge_token_ttl_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=900,
+        validation_alias=AliasChoices(
+            "AUTH_MFA_CHALLENGE_TTL_SECONDS",
+            "AUTH__MFA_CHALLENGE_TTL_SECONDS",
+        ),
+    )
 
     @field_validator("admin_password", mode="before")
     @classmethod
