@@ -35,9 +35,18 @@ def downgrade() -> None:  # pragma: no cover - irreversible fix
 
 
 def _ensure_auth_session_family_columns(bind, inspector) -> None:
-    columns = {column["name"]: column for column in inspector.get_columns(_AUTH_SESSIONS_TABLE, schema=SCHEMA)}
-    indexes = {index["name"] for index in inspector.get_indexes(_AUTH_SESSIONS_TABLE, schema=SCHEMA)}
-    foreign_keys = {fk["name"] for fk in inspector.get_foreign_keys(_AUTH_SESSIONS_TABLE, schema=SCHEMA)}
+    columns = {
+        column["name"]: column
+        for column in inspector.get_columns(_AUTH_SESSIONS_TABLE, schema=SCHEMA)
+    }
+    indexes = {
+        index["name"]
+        for index in inspector.get_indexes(_AUTH_SESSIONS_TABLE, schema=SCHEMA)
+    }
+    foreign_keys = {
+        fk["name"]: fk
+        for fk in inspector.get_foreign_keys(_AUTH_SESSIONS_TABLE, schema=SCHEMA)
+    }
 
     family_column = columns.get("family_id")
     parent_column = columns.get("parent_session_id")
@@ -64,14 +73,27 @@ def _ensure_auth_session_family_columns(bind, inspector) -> None:
             schema=SCHEMA,
         )
 
-    if _PARENT_SESSION_FK not in foreign_keys:
+    parent_fk = foreign_keys.get(_PARENT_SESSION_FK)
+    if parent_fk is not None:
+        options = parent_fk.get("options") or {}
+        ondelete = options.get("ondelete")
+        if not ondelete or ondelete.upper() != "SET NULL":
+            op.drop_constraint(
+                _PARENT_SESSION_FK,
+                _AUTH_SESSIONS_TABLE,
+                type_="foreignkey",
+                schema=SCHEMA,
+            )
+            parent_fk = None
+
+    if parent_fk is None:
         op.create_foreign_key(
             _PARENT_SESSION_FK,
             _AUTH_SESSIONS_TABLE,
             _AUTH_SESSIONS_TABLE,
             local_cols=["parent_session_id"],
             remote_cols=["id"],
-            ondelete="CASCADE",
+            ondelete="SET NULL",
             source_schema=SCHEMA,
             referent_schema=SCHEMA,
         )
