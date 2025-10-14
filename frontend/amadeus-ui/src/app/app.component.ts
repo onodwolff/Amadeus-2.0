@@ -100,7 +100,11 @@ export class AppComponent {
     return links;
   });
 
-  protected readonly showStandalonePage = computed(() => this.currentUrl().startsWith('/login'));
+  private readonly standaloneRoutePrefixes = ['/login', '/forgot-password', '/reset-password', '/verify-email'];
+
+  protected readonly showStandalonePage = computed(() =>
+    this.standaloneRoutePrefixes.some((prefix) => this.currentUrl().startsWith(prefix)),
+  );
 
   protected toggleSidebar(): void {
     this.sidebarOpen = !this.sidebarOpen;
