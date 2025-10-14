@@ -70,54 +70,94 @@ class AuthSettings(BaseModel):
 
     enabled: bool = Field(
         default=False,
-        validation_alias=AliasChoices("AUTH_ENABLED", "AUTH__ENABLED"),
+        validation_alias=AliasChoices(
+            "AUTH_ENABLED",
+            "AUTH__ENABLED",
+            "SECURITY_OIDC_ENABLED",
+        ),
     )
     jwt_secret: str = Field(default="change-me", min_length=8)
     access_token_ttl_seconds: int = Field(default=600, ge=600, le=600)
     refresh_token_ttl_seconds: int = Field(default=1_209_600, ge=604_800, le=2_592_000)
     idp_issuer: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AUTH_IDP_ISSUER", "AUTH__IDP_ISSUER"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_ISSUER",
+            "AUTH__IDP_ISSUER",
+            "SECURITY_OIDC_ISSUER",
+        ),
     )
     idp_audience: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AUTH_IDP_AUDIENCE", "AUTH__IDP_AUDIENCE"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_AUDIENCE",
+            "AUTH__IDP_AUDIENCE",
+            "SECURITY_OIDC_AUDIENCE",
+        ),
         description="Audience expected in IdP issued tokens.",
     )
     idp_jwks_url: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AUTH_IDP_JWKS_URL", "AUTH__IDP_JWKS_URL"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_JWKS_URL",
+            "AUTH__IDP_JWKS_URL",
+            "SECURITY_OIDC_JWKS_URL",
+        ),
         description="JWKS endpoint exposed by the identity provider.",
     )
     idp_token_url: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AUTH_IDP_TOKEN_URL", "AUTH__IDP_TOKEN_URL"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_TOKEN_URL",
+            "AUTH__IDP_TOKEN_URL",
+            "SECURITY_OIDC_TOKEN_URL",
+        ),
         description="Token endpoint exposed by the identity provider.",
     )
     idp_algorithms: list[str] = Field(
         default_factory=lambda: ["RS256"],
-        validation_alias=AliasChoices("AUTH_IDP_ALGORITHMS", "AUTH__IDP_ALGORITHMS"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_ALGORITHMS",
+            "AUTH__IDP_ALGORITHMS",
+            "SECURITY_OIDC_ALGORITHMS",
+        ),
         description="Signing algorithms accepted from the identity provider.",
     )
     idp_cache_ttl_seconds: int = Field(
         default=600,
         ge=60,
-        validation_alias=AliasChoices("AUTH_IDP_CACHE_TTL_SECONDS", "AUTH__IDP_CACHE_TTL_SECONDS"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_CACHE_TTL_SECONDS",
+            "AUTH__IDP_CACHE_TTL_SECONDS",
+            "SECURITY_OIDC_CACHE_TTL_SECONDS",
+        ),
         description="Seconds to cache the JWKS response before refreshing.",
     )
     idp_client_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AUTH_IDP_CLIENT_ID", "AUTH__IDP_CLIENT_ID"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_CLIENT_ID",
+            "AUTH__IDP_CLIENT_ID",
+            "SECURITY_OIDC_CLIENT_ID",
+        ),
         description="OAuth client identifier registered with the identity provider.",
     )
     idp_client_secret: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AUTH_IDP_CLIENT_SECRET", "AUTH__IDP_CLIENT_SECRET"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_CLIENT_SECRET",
+            "AUTH__IDP_CLIENT_SECRET",
+            "SECURITY_OIDC_CLIENT_SECRET",
+        ),
         description="Optional client secret registered with the identity provider.",
     )
     idp_redirect_uri: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("AUTH_IDP_REDIRECT_URI", "AUTH__IDP_REDIRECT_URI"),
+        validation_alias=AliasChoices(
+            "AUTH_IDP_REDIRECT_URI",
+            "AUTH__IDP_REDIRECT_URI",
+            "SECURITY_OIDC_REDIRECT_URI",
+        ),
         description="Redirect URI registered for the SPA OIDC client.",
     )
     allow_test_tokens: bool = Field(
