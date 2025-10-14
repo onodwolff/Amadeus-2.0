@@ -106,6 +106,13 @@
   font-weight: 600;
 }
 
+.users-table__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .users-page__empty {
   text-align: center;
   padding: 48px 16px;

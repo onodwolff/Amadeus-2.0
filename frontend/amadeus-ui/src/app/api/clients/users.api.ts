@@ -5,6 +5,7 @@ import { buildApiUrl } from '../../api-base';
 import {
   AccountUpdateRequest,
   PasswordUpdateRequest,
+  OperationStatus,
   PermissionSummary,
   RoleSummary,
   UserCreateRequest,
@@ -38,6 +39,20 @@ export class UsersApi {
   removeRole(userId: number, role: string): Observable<UserProfile> {
     return this.http.delete<UserProfile>(
       buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}/roles/${encodeURIComponent(role)}`),
+    );
+  }
+
+  disableUserMfa(userId: number): Observable<OperationStatus> {
+    return this.http.post<OperationStatus>(
+      buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}/mfa/disable`),
+      {},
+    );
+  }
+
+  revokeUserSessions(userId: number): Observable<OperationStatus> {
+    return this.http.post<OperationStatus>(
+      buildApiUrl(`/api/admin/users/${encodeURIComponent(String(userId))}/sessions/revoke`),
+      {},
     );
   }
 

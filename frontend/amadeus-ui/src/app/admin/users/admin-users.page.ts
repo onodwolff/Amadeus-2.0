@@ -58,6 +58,7 @@ export class AdminUsersPage {
   readonly error = signal<string | null>(null);
   readonly togglingUserIds = signal<Set<number>>(new Set());
   readonly roleTogglesInFlight = signal<Set<string>>(new Set());
+  readonly userActionsInFlight = signal<Set<number>>(new Set());
   readonly availableRoles = signal<RoleSummary[]>([]);
   readonly rolesError = signal<string | null>(null);
 
@@ -71,7 +72,7 @@ export class AdminUsersPage {
     this.availableRoles().filter((role) => role.slug !== 'admin'),
   );
 
-  readonly displayedColumns: (keyof AdminUser | 'roles')[] = [
+  readonly displayedColumns: (keyof AdminUser | 'roles' | 'actions')[] = [
     'id',
     'email',
     'name',
@@ -79,6 +80,7 @@ export class AdminUsersPage {
     'active',
     'createdAt',
     'updatedAt',
+    'actions',
   ];
 
   readonly filterControl = new FormControl('', { nonNullable: true });
@@ -231,6 +233,10 @@ export class AdminUsersPage {
     );
   }
 
+  isActionDisabled(userId: number): boolean {
+    return !this.canManageUsers() || this.isLoading() || this.userActionsInFlight().has(userId);
+  }
+
   toggleUserActive(user: AdminUser, change: MatSlideToggleChange): void {
     if (!this.canManageUsers()) {
       change.source.checked = user.active;
@@ -306,6 +312,73 @@ export class AdminUsersPage {
     });
   }
 
+  resetTwoFactor(user: AdminUser): void {
+    if (!this.canManageUsers()) {
+      this.snackBar.open('You do not have permission to manage users.', 'Dismiss', { duration: 4000 });
+      return;
+    }
+
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            `Reset two-factor authentication for ${user.email}? This will revoke active sessions.`,
+          );
+    if (!confirmed) {
+      return;
+    }
+
+    this.setActionInFlight(user.id, true);
+    this.usersApi
+      .disableUserMfa(user.id)
+      .pipe(finalize(() => this.setActionInFlight(user.id, false)))
+      .subscribe({
+        next: (status) => {
+          this.updateUserRow(user.id, { updatedAt: new Date().toISOString() });
+          const message = status?.detail || 'Two-factor authentication reset.';
+          this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+        },
+        error: (err: unknown) => {
+          const message = this.resolveErrorMessage(
+            err,
+            'Unable to reset two-factor authentication for this user.',
+          );
+          this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+        },
+      });
+  }
+
+  forceLogout(user: AdminUser): void {
+    if (!this.canManageUsers()) {
+      this.snackBar.open('You do not have permission to manage users.', 'Dismiss', { duration: 4000 });
+      return;
+    }
+
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(`Force logout for ${user.email}? This revokes all active sessions.`);
+    if (!confirmed) {
+      return;
+    }
+
+    this.setActionInFlight(user.id, true);
+    this.usersApi
+      .revokeUserSessions(user.id)
+      .pipe(finalize(() => this.setActionInFlight(user.id, false)))
+      .subscribe({
+        next: (status) => {
+          this.updateUserRow(user.id, { updatedAt: new Date().toISOString() });
+          const message = status?.detail || 'User sessions revoked.';
+          this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+        },
+        error: (err: unknown) => {
+          const message = this.resolveErrorMessage(err, 'Unable to revoke sessions for this user.');
+          this.snackBar.open(message, 'Dismiss', { duration: 5000 });
+        },
+      });
+  }
+
   formatUserName(user: AdminUser | null | undefined): string {
     if (!user) {
       return '—';
@@ -360,6 +433,18 @@ export class AdminUsersPage {
     this.dataSource.data = this.dataSource.data.map((entry) =>
       entry.id === userId ? { ...entry, ...changes } : entry,
     );
+  }
+
+  private setActionInFlight(userId: number, inFlight: boolean): void {
+    this.userActionsInFlight.update((current) => {
+      const next = new Set(current);
+      if (inFlight) {
+        next.add(userId);
+      } else {
+        next.delete(userId);
+      }
+      return next;
+    });
   }
 
   private composeRoleToggleKey(userId: number, role: string): string {
