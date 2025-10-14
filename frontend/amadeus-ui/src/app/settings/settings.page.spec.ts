@@ -65,13 +65,29 @@ describe('SettingsPage advanced settings', () => {
       'revokeAllSessions',
       'getCurrentUser',
       'setupMfa',
+      'regenerateBackupCodes',
+      'completeMfaLogin',
+      'exchangeMfaChallenge',
     ]);
     authApiStub.requestEmailChange.and.returnValue(of({ verificationToken: 'token' }));
-    authApiStub.enableMfa.and.returnValue(of({ detail: 'ok' }));
+    authApiStub.enableMfa.and.returnValue(of({ detail: 'ok', backupCodes: ['CODE-1'] }));
     authApiStub.disableMfa.and.returnValue(of({ detail: 'ok' }));
     authApiStub.revokeAllSessions.and.returnValue(of({ detail: 'ok' }));
     authApiStub.getCurrentUser.and.returnValue(of(createAuthUser()));
     authApiStub.setupMfa.and.returnValue(of({ secret: 'secret', otpauthUrl: 'url' }));
+    authApiStub.regenerateBackupCodes.and.returnValue(of({ detail: 'ok', backupCodes: ['CODE-2'] }));
+    authApiStub.completeMfaLogin.and.returnValue(
+      of({
+        accessToken: 'token',
+        tokenType: 'bearer',
+        expiresIn: 900,
+        refreshExpiresAt: new Date().toISOString(),
+        user: createAuthUser(),
+      }),
+    );
+    authApiStub.exchangeMfaChallenge.and.returnValue(
+      of({ challengeToken: 'challenge', detail: 'MFA verification required', methods: ['totp'], ttlSeconds: 300 }),
+    );
 
     const keysApiStub = jasmine.createSpyObj<KeysApi>('KeysApi', [
       'listKeys',

@@ -1,0 +1,127 @@
+.mfa-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 4rem);
+  padding: 2rem 1rem;
+}
+
+.mfa-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 2rem;
+  border-radius: 1rem;
+  background: rgba(12, 17, 23, 0.92);
+  box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, 0.25);
+  display: grid;
+  gap: 1.5rem;
+  color: #f8fafc;
+}
+
+.mfa-card__title {
+  margin: 0;
+  font-size: 1.75rem;
+  text-align: center;
+}
+
+.mfa-card__description,
+.mfa-card__detail {
+  margin: 0;
+  text-align: center;
+  color: rgba(203, 213, 225, 0.85);
+}
+
+.mfa-card__detail {
+  font-size: 0.95rem;
+}
+
+.mfa-card__alert {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.15);
+  color: #fecaca;
+  text-align: center;
+}
+
+.mfa-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.mfa-form__field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mfa-form__field span {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.mfa-form input[type='text'] {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.8);
+  color: inherit;
+  font-size: 1rem;
+}
+
+.mfa-form__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.mfa-form__checkbox input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #38bdf8;
+}
+
+.mfa-form__submit {
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  border: none;
+  background: linear-gradient(135deg, #38bdf8, #6366f1);
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.mfa-form__submit:disabled {
+  cursor: progress;
+  filter: saturate(0.6);
+}
+
+.mfa-form__submit:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.mfa-card__footer {
+  display: grid;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.mfa-card__help {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(203, 213, 225, 0.8);
+}
+
+.mfa-card__link {
+  color: #38bdf8;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.mfa-card__link:hover {
+  text-decoration: underline;
+}

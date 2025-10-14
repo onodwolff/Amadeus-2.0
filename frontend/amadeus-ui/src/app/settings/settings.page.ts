@@ -37,6 +37,7 @@ import {
   UserProfile,
   AuthUser,
   PasswordUpdateRequest,
+  MfaBackupCodesRequest,
 } from '../api/models';
 import { NotificationService } from '../shared/notifications/notification.service';
 import { encryptSecret, hashPassphrase } from './secret-crypto';
@@ -91,6 +92,11 @@ type TwoFactorFormGroup = FormGroup<{
 }>;
 
 type PasswordConfirmFormGroup = FormGroup<{
+  password: FormControl<string>;
+}>;
+
+type BackupCodesFormGroup = FormGroup<{
+  code: FormControl<string>;
   password: FormControl<string>;
 }>;
 
@@ -208,6 +214,10 @@ export class SettingsPage implements OnInit {
   readonly isTwoFactorSubmitting = signal(false);
   readonly twoFactorSecret = signal<string | null>(null);
   readonly twoFactorQr = signal<string | null>(null);
+  readonly twoFactorBackupCodes = signal<string[]>([]);
+  readonly twoFactorBackupCodesError = signal<string | null>(null);
+  readonly twoFactorBackupCodesSuccess = signal<string | null>(null);
+  readonly isBackupCodesLoading = signal(false);
   readonly isDisableTwoFactorDialogOpen = signal(false);
   readonly isDisableTwoFactorSubmitting = signal(false);
   readonly disableTwoFactorError = signal<string | null>(null);
@@ -223,6 +233,7 @@ export class SettingsPage implements OnInit {
   readonly passwordSuccess = signal<string | null>(null);
 
   readonly twoFactorForm: TwoFactorFormGroup = this.createTwoFactorForm();
+  readonly backupCodesForm: BackupCodesFormGroup = this.createBackupCodesForm();
   readonly disableTwoFactorForm: PasswordConfirmFormGroup = this.createPasswordConfirmForm();
   readonly logoutForm: PasswordConfirmFormGroup = this.createPasswordConfirmForm();
 
@@ -639,7 +650,11 @@ export class SettingsPage implements OnInit {
 
     this.isTwoFactorSubmitting.set(true);
     try {
-      await firstValueFrom(this.authApi.enableMfa({ code }));
+      const response = await firstValueFrom(this.authApi.enableMfa({ code }));
+      this.setBackupCodes(
+        response.backupCodes,
+        response.detail || 'Two-factor authentication enabled.',
+      );
       this.twoFactorForm.reset({ code: '' });
       this.twoFactorForm.markAsPristine();
       this.twoFactorForm.markAsUntouched();
@@ -654,6 +669,94 @@ export class SettingsPage implements OnInit {
     } finally {
       this.isTwoFactorSubmitting.set(false);
     }
+  }
+
+  async regenerateTwoFactorBackupCodes(): Promise<void> {
+    this.twoFactorBackupCodesError.set(null);
+    this.twoFactorBackupCodesSuccess.set(null);
+
+    if (!this.isTwoFactorEnabled()) {
+      this.twoFactorBackupCodesError.set('Enable two-factor authentication first.');
+      return;
+    }
+
+    const { code, password } = this.backupCodesForm.value;
+    const trimmedCode = code?.trim() ?? '';
+    const trimmedPassword = password?.trim() ?? '';
+
+    if (!trimmedCode && !trimmedPassword) {
+      this.twoFactorBackupCodesError.set('Enter your password or a valid code to continue.');
+      this.backupCodesForm.markAllAsTouched();
+      return;
+    }
+
+    this.isBackupCodesLoading.set(true);
+    try {
+      const payload: MfaBackupCodesRequest = {};
+      if (trimmedCode) {
+        payload.code = trimmedCode;
+      }
+      if (trimmedPassword) {
+        payload.password = trimmedPassword;
+      }
+      const response = await firstValueFrom(this.authApi.regenerateBackupCodes(payload));
+      this.setBackupCodes(
+        response.backupCodes,
+        response.detail || 'Backup codes regenerated.',
+      );
+      this.notifications.success('Backup codes regenerated.', 'Security');
+      this.backupCodesForm.reset({ code: '', password: '' });
+      this.backupCodesForm.markAsPristine();
+      this.backupCodesForm.markAsUntouched();
+    } catch (error) {
+      this.handleError(error, this.twoFactorBackupCodesError, 'Unable to regenerate backup codes.');
+    } finally {
+      this.isBackupCodesLoading.set(false);
+    }
+  }
+
+  async copyBackupCodes(): Promise<void> {
+    const codes = this.twoFactorBackupCodes();
+    if (!codes.length) {
+      return;
+    }
+
+    if (!('clipboard' in navigator)) {
+      this.twoFactorBackupCodesError.set('Clipboard access is not available in this environment.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(codes.join('\n'));
+      const message = 'Backup codes copied to clipboard.';
+      this.twoFactorBackupCodesSuccess.set(message);
+      this.twoFactorBackupCodesError.set(null);
+      this.notifications.success(message, 'Security');
+    } catch (error) {
+      console.error(error);
+      this.twoFactorBackupCodesError.set('Unable to copy backup codes. Copy them manually.');
+      this.notifications.error('Unable to copy backup codes.', 'Security');
+    }
+  }
+
+  downloadBackupCodes(): void {
+    const codes = this.twoFactorBackupCodes();
+    if (!codes.length) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:T]/g, '-').split('.')[0];
+    const filename = `amadeus-backup-codes-${timestamp}.txt`;
+    const blob = new Blob([codes.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    this.twoFactorBackupCodesSuccess.set('Backup codes downloaded.');
+    this.twoFactorBackupCodesError.set(null);
+    this.notifications.success('Backup codes downloaded.', 'Security');
   }
 
   async disableTwoFactorConfirmed(): Promise<void> {
@@ -685,6 +788,7 @@ export class SettingsPage implements OnInit {
       this.twoFactorSecret.set(null);
       this.twoFactorQr.set(null);
       this.twoFactorSetupError.set(null);
+      this.clearBackupCodesState();
       this.bootstrapTwoFactorState();
     } catch (error) {
       this.handleError(error, this.disableTwoFactorError, 'Unable to disable two-factor authentication.');
@@ -1429,6 +1533,13 @@ export class SettingsPage implements OnInit {
     });
   }
 
+  private createBackupCodesForm(): BackupCodesFormGroup {
+    return this.fb.group({
+      code: this.fb.nonNullable.control(''),
+      password: this.fb.nonNullable.control(''),
+    });
+  }
+
   private createTwoFactorForm(): TwoFactorFormGroup {
     return this.fb.group({
       code: this.fb.nonNullable.control('', {
@@ -1695,6 +1806,28 @@ export class SettingsPage implements OnInit {
     this.notifications.error(message);
   }
 
+  private clearBackupCodesState(): void {
+    this.twoFactorBackupCodes.set([]);
+    this.twoFactorBackupCodesError.set(null);
+    this.twoFactorBackupCodesSuccess.set(null);
+    this.backupCodesForm.reset({ code: '', password: '' });
+    this.backupCodesForm.markAsPristine();
+    this.backupCodesForm.markAsUntouched();
+  }
+
+  private setBackupCodes(codes: readonly string[], detail?: string): void {
+    const sanitized = codes.map((code) => code.trim()).filter((code) => code.length > 0);
+    this.twoFactorBackupCodes.set(sanitized);
+    if (sanitized.length > 0) {
+      this.twoFactorBackupCodesSuccess.set(
+        detail ?? 'Store these backup codes in a secure location.',
+      );
+    } else {
+      this.twoFactorBackupCodesSuccess.set(detail ?? null);
+    }
+    this.twoFactorBackupCodesError.set(null);
+  }
+
   private bootstrapTwoFactorState(): void {
     this.isTwoFactorLoading.set(true);
     this.twoFactorError.set(null);
@@ -1713,6 +1846,7 @@ export class SettingsPage implements OnInit {
           this.twoFactorForm.markAsUntouched();
           this.isTwoFactorLoading.set(false);
         } else {
+          this.clearBackupCodesState();
           this.startTwoFactorEnrollment();
         }
       },
@@ -1732,6 +1866,7 @@ export class SettingsPage implements OnInit {
     this.twoFactorForm.reset({ code: '' });
     this.twoFactorForm.markAsPristine();
     this.twoFactorForm.markAsUntouched();
+    this.clearBackupCodesState();
 
     this.authApi.setupMfa().subscribe({
       next: (response) => {

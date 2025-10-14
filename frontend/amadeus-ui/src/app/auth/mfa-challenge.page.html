@@ -1,0 +1,42 @@
+<section class="mfa-page">
+  <article class="mfa-card" aria-labelledby="mfaTitle">
+    <header class="mfa-card__header">
+      <h1 class="mfa-card__title" id="mfaTitle">Verify your identity</h1>
+      <p class="mfa-card__description">
+        Enter the 6-digit code from your authenticator app or one of your backup codes to continue.
+      </p>
+      <p class="mfa-card__detail" *ngIf="info() as detail">{{ detail }}</p>
+    </header>
+
+    <p class="mfa-card__alert" *ngIf="error() as errorMessage">{{ errorMessage }}</p>
+
+    <form class="mfa-form" [formGroup]="form" (ngSubmit)="submit()">
+      <label class="mfa-form__field">
+        <span>Verification code</span>
+        <input
+          formControlName="code"
+          type="text"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          maxlength="16"
+          required
+        />
+      </label>
+      <label class="mfa-form__checkbox">
+        <input type="checkbox" formControlName="rememberDevice" />
+        <span>Remember this device for future sign-ins</span>
+      </label>
+      <button type="submit" class="mfa-form__submit" [disabled]="isSubmitting()">
+        <span *ngIf="isSubmitting(); else submitLabel">Verifying…</span>
+        <ng-template #submitLabel>Verify and continue</ng-template>
+      </button>
+    </form>
+
+    <footer class="mfa-card__footer">
+      <p class="mfa-card__help">
+        Lost access to your authenticator? Use a backup code or contact an administrator to reset multi-factor authentication.
+      </p>
+      <a routerLink="/login" class="mfa-card__link">Back to login</a>
+    </footer>
+  </article>
+</section>
