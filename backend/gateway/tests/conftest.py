@@ -17,9 +17,16 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from backend.gateway.app.bruteforce import BruteForceProtector
 from backend.gateway.app.main import create_app
-from backend.gateway.app.dependencies import get_email_dispatcher, get_session
+from backend.gateway.app.dependencies import (
+    get_bruteforce_service,
+    get_captcha_verifier,
+    get_email_dispatcher,
+    get_session,
+)
 from backend.gateway.app.email import EmailDispatcher
+from backend.gateway.app.storage import MemoryCache
 from backend.gateway.config import settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -329,6 +336,23 @@ def app(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings.auth, "enabled", True)
     application = create_app()
     email_dispatcher = InMemoryEmailDispatcher()
+    bruteforce_service = BruteForceProtector(
+        cache=MemoryCache(),
+        max_attempts=settings.auth.login_rate_limit_attempts,
+        window_seconds=settings.auth.login_rate_limit_window_seconds,
+        captcha_threshold=settings.auth.login_captcha_failure_threshold,
+        captcha_ttl_seconds=settings.auth.login_captcha_failure_ttl_seconds,
+        namespace="test:auth:bf",
+    )
+
+    class DummyCaptchaVerifier:
+        def __init__(self) -> None:
+            self.accepted_tokens = {"valid-captcha"}
+
+        async def verify(self, token: str | None, remote_ip: str | None = None) -> bool:
+            return bool(token) and token in self.accepted_tokens
+
+    captcha_verifier = DummyCaptchaVerifier()
 
     async def _override_session():
         yield db_session
@@ -338,7 +362,11 @@ def app(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
 
     application.dependency_overrides[get_session] = _override_session
     application.dependency_overrides[get_email_dispatcher] = _override_email_dispatcher
+    application.dependency_overrides[get_bruteforce_service] = lambda: bruteforce_service
+    application.dependency_overrides[get_captcha_verifier] = lambda: captcha_verifier
     application.state.email_dispatcher = email_dispatcher
+    application.state.bruteforce_service = bruteforce_service
+    application.state.captcha_verifier = captcha_verifier
     return application
 
 

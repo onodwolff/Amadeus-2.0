@@ -16,8 +16,12 @@ except ModuleNotFoundError:  # pragma: no cover - fallback when running from bac
     from backend.gateway.db.base import create_session  # type: ignore
     from backend.gateway.db.models import Role, User, UserRole, user_roles_table  # type: ignore
 
+from .bruteforce import BruteForceProtector
+from .captcha import CaptchaVerifier
+from .config import settings
 from .email import EmailDispatcher
 from .security import TokenData, validate_bearer_token
+from .storage import build_cache
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -34,12 +38,40 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 
 _email_dispatcher = EmailDispatcher()
+_bruteforce_cache = build_cache(settings.redis_url)
+_bruteforce_service = BruteForceProtector(
+    cache=_bruteforce_cache,
+    max_attempts=settings.auth.login_rate_limit_attempts,
+    window_seconds=settings.auth.login_rate_limit_window_seconds,
+    captcha_threshold=settings.auth.login_captcha_failure_threshold,
+    captcha_ttl_seconds=settings.auth.login_captcha_failure_ttl_seconds,
+    namespace=settings.auth.login_rate_limit_namespace,
+)
+_captcha_verifier = CaptchaVerifier(
+    secret_key=settings.auth.captcha_secret_key,
+    verification_url=settings.auth.captcha_verification_url,
+    timeout_seconds=settings.auth.captcha_timeout_seconds,
+    site_key=settings.auth.captcha_site_key,
+    test_bypass_token=settings.auth.captcha_test_bypass_token,
+)
 
 
 def get_email_dispatcher() -> EmailDispatcher:
     """Return the configured e-mail dispatcher instance."""
 
     return _email_dispatcher
+
+
+def get_bruteforce_service() -> BruteForceProtector:
+    """Return the configured brute force protection helper."""
+
+    return _bruteforce_service
+
+
+def get_captcha_verifier() -> CaptchaVerifier:
+    """Return the configured CAPTCHA verifier."""
+
+    return _captcha_verifier
 
 
 _ROLE_SLUGS = {role.value for role in UserRole}
