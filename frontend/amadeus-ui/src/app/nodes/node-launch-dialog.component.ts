@@ -173,6 +173,13 @@ export class NodeLaunchDialogComponent {
     return template?.description ?? 'Select a template';
   });
   readonly venueOptions = computed<LaunchVenueOption[]>(() => this.computeVenueOptions());
+  readonly needsLiveApiKeyWarning = computed(() => {
+    return (
+      this.form.controls.nodeType.value === 'live' &&
+      !this.isKeysLoading() &&
+      this.apiKeys().length === 0
+    );
+  });
 
   readonly form = this.fb.nonNullable.group({
     nodeType: this.fb.nonNullable.control<NodeMode>('backtest'),
@@ -232,6 +239,11 @@ export class NodeLaunchDialogComponent {
 
   submit(): void {
     if (!this.validateCurrentStep(true)) {
+      return;
+    }
+    if (this.form.controls.nodeType.value === 'live' && this.apiKeys().length === 0) {
+      this.currentStep.set(0);
+      this.stepError.set('Add at least one exchange API key in Settings before launching live trading.');
       return;
     }
     const payload = this.buildPayload();
@@ -504,8 +516,13 @@ export class NodeLaunchDialogComponent {
       case 0: {
         const control = this.form.controls.nodeType;
         control.markAsTouched();
-        if (!control.value) {
+        const mode = control.value as NodeMode | null;
+        if (!mode) {
           this.stepError.set('Please select the bot execution mode.');
+          return false;
+        }
+        if (mode === 'live' && this.apiKeys().length === 0) {
+          this.stepError.set('Add at least one exchange API key in Settings before launching live trading.');
           return false;
         }
         return true;

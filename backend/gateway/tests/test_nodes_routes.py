@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from backend.gateway.app.crypto import mask_key
 from backend.gateway.app.nautilus_service import NodeHandle
 from backend.gateway.app.routes import nodes as nodes_routes
 from backend.gateway.app.security import create_test_access_token
@@ -113,6 +114,35 @@ async def trader_headers(db_session):
 
 
 @pytest_asyncio.fixture
+async def trader_headers_with_key(db_session):
+    user = await create_user(
+        db_session,
+        email=f"trader-key-{uuid4()}@example.com",
+        username=f"trader-key-{uuid4().hex[:8]}",
+        password="password",
+        roles=[db_models.UserRole.TRADER.value],
+    )
+
+    api_key = db_models.ApiKey(
+        user_id=user.id,
+        venue="BINANCE",
+        label="Primary",
+        key_id=f"key-{uuid4().hex[:8]}",
+        api_key_masked=mask_key("TESTKEY123456"),
+        secret_enc=b"{}",
+        scopes=[],
+    )
+    db_session.add(api_key)
+    await db_session.commit()
+
+    token, _ = create_test_access_token(
+        subject=user.id,
+        roles=[db_models.UserRole.TRADER.value],
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
 async def viewer_headers(db_session):
     user = await create_user(
         db_session,
@@ -169,24 +199,10 @@ async def test_manager_role_can_access_nodes(app, override_nautilus_service, man
     override_nautilus_service.list_nodes.assert_called_once_with()
 
 
-@pytest.mark.parametrize(
-    "node_type,service_method",
-    [
-        ("backtest", "start_backtest"),
-        ("live", "start_live"),
-        ("sandbox", "start_sandbox"),
-    ],
-)
 @pytest.mark.asyncio
-async def test_launch_node_dispatches_to_correct_service(
-    node_type: str,
-    service_method: str,
-    app,
-    override_nautilus_service,
-    trader_headers,
-):
+async def test_launch_backtest_dispatches_to_service(app, override_nautilus_service, trader_headers):
     payload = {
-        "type": node_type,
+        "type": "backtest",
         "strategy": {
             "id": "strategy-id",
             "name": "Strategy",
@@ -199,7 +215,7 @@ async def test_launch_node_dispatches_to_correct_service(
                 "keyId": "key-1",
                 "enableData": True,
                 "enableTrading": True,
-                "sandbox": node_type == "sandbox",
+                "sandbox": False,
             }
         ],
         "constraints": {
@@ -216,7 +232,116 @@ async def test_launch_node_dispatches_to_correct_service(
         response = await client.post("/nodes/launch", json=payload, headers=trader_headers)
 
     assert response.status_code == 201
-    getattr(override_nautilus_service, service_method).assert_called_once()
+    override_nautilus_service.start_backtest.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_live_dispatches_to_service(app, override_nautilus_service, trader_headers_with_key):
+    payload = {
+        "type": "live",
+        "strategy": {
+            "id": "strategy-id",
+            "name": "Strategy",
+            "parameters": [{"key": "symbol", "value": "BTCUSDT"}],
+        },
+        "adapters": [
+            {
+                "venue": "BINANCE",
+                "alias": "Primary",
+                "keyId": "key-1",
+                "enableData": True,
+                "enableTrading": True,
+                "sandbox": False,
+            }
+        ],
+        "constraints": {
+            "maxRuntimeMinutes": None,
+            "maxDrawdownPercent": None,
+            "autoStopOnError": True,
+            "concurrencyLimit": None,
+        },
+        "dataSources": [],
+        "keyReferences": [],
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post("/nodes/launch", json=payload, headers=trader_headers_with_key)
+
+    assert response.status_code == 201
+    override_nautilus_service.start_live.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_sandbox_dispatches_to_service(app, override_nautilus_service, trader_headers):
+    payload = {
+        "type": "sandbox",
+        "strategy": {
+            "id": "strategy-id",
+            "name": "Strategy",
+            "parameters": [{"key": "symbol", "value": "BTCUSDT"}],
+        },
+        "adapters": [
+            {
+                "venue": "BINANCE",
+                "alias": "Primary",
+                "keyId": "key-1",
+                "enableData": True,
+                "enableTrading": False,
+                "sandbox": True,
+            }
+        ],
+        "constraints": {
+            "maxRuntimeMinutes": None,
+            "maxDrawdownPercent": None,
+            "autoStopOnError": True,
+            "concurrencyLimit": None,
+        },
+        "dataSources": [],
+        "keyReferences": [],
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post("/nodes/launch", json=payload, headers=trader_headers)
+
+    assert response.status_code == 201
+    override_nautilus_service.start_sandbox.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_live_requires_api_key(app, override_nautilus_service, trader_headers):
+    payload = {
+        "type": "live",
+        "strategy": {
+            "id": "strategy-id",
+            "name": "Strategy",
+            "parameters": [{"key": "symbol", "value": "BTCUSDT"}],
+        },
+        "adapters": [
+            {
+                "venue": "BINANCE",
+                "alias": "Primary",
+                "keyId": "",
+                "enableData": True,
+                "enableTrading": True,
+                "sandbox": False,
+            }
+        ],
+        "constraints": {
+            "maxRuntimeMinutes": None,
+            "maxDrawdownPercent": None,
+            "autoStopOnError": True,
+            "concurrencyLimit": None,
+        },
+        "dataSources": [],
+        "keyReferences": [],
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post("/nodes/launch", json=payload, headers=trader_headers)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Add an exchange API key before launching live trading."
+    override_nautilus_service.start_live.assert_not_called()
 
 
 @pytest.mark.asyncio

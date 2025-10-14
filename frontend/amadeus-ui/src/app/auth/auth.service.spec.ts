@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { Subject, throwError } from 'rxjs';
 import { OAuthEvent, OAuthService } from 'angular-oauth2-oidc';
 import { HttpErrorResponse } from '@angular/common/http';
+import { Router } from '@angular/router';
 
 import { AuthService } from './auth.service';
 import { AuthApi } from '../api/clients/auth.api';
@@ -30,6 +31,7 @@ describe('AuthService', () => {
   let service: AuthService;
   let oauthService: OAuthServiceStub;
   let authApi: AuthApiStub;
+  let router: jasmine.SpyObj<Router>;
   const user: AuthUser = {
     id: 1,
     email: 'example@example.com',
@@ -52,11 +54,13 @@ describe('AuthService', () => {
         AuthService,
         { provide: OAuthService, useClass: OAuthServiceStub },
         { provide: AuthApi, useClass: AuthApiStub },
+        { provide: Router, useValue: jasmine.createSpyObj<Router>('Router', ['navigateByUrl']) },
       ],
     });
 
     oauthService = TestBed.inject(OAuthService) as unknown as OAuthServiceStub;
     authApi = TestBed.inject(AuthApi) as unknown as AuthApiStub;
+    router = TestBed.inject(Router) as jasmine.SpyObj<Router>;
 
     service = TestBed.inject(AuthService);
     await service.bootstrapMe();
@@ -99,6 +103,7 @@ describe('AuthService', () => {
 
       expect(oauthService.logOut).toHaveBeenCalled();
       expect(service.currentUser()).toBeNull();
+      expect(router.navigateByUrl).toHaveBeenCalledWith('/login');
     });
 
     it('keeps the current user when the refreshed profile request fails transiently', async () => {
@@ -109,6 +114,7 @@ describe('AuthService', () => {
 
       expect(oauthService.logOut).not.toHaveBeenCalled();
       expect(service.currentUser()).toEqual(user);
+      expect(router.navigateByUrl).not.toHaveBeenCalled();
     });
   });
 });

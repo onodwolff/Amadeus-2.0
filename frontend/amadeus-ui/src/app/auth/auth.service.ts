@@ -3,14 +3,17 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { OAuthService } from 'angular-oauth2-oidc';
 import { firstValueFrom } from 'rxjs';
 
+import { Router } from '@angular/router';
+
 import { AuthApi } from '../api/clients/auth.api';
-import { AuthUser, TokenResponse } from '../api/models';
+import { AuthUser, OidcCallbackRequest, TokenResponse } from '../api/models';
 import { authConfig } from './auth.config';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly authApi = inject(AuthApi);
   private readonly oauthService = inject(OAuthService);
+  private readonly router = inject(Router);
 
   private readonly currentUserSignal = signal<AuthUser | null>(null);
   private readonly isBootstrappedSignal = signal(false);
@@ -131,14 +134,18 @@ export class AuthService {
     }
 
     try {
-      const tokenResponse = await firstValueFrom(
-        this.authApi.completeOidcLogin({
-          code,
-          codeVerifier,
-          redirectUri: authConfig.redirectUri,
-          state: url.searchParams.get('state') ?? undefined,
-        }),
-      );
+      const redirectUri = authConfig.redirectUri ?? window.location.origin ?? '';
+      const payload: OidcCallbackRequest = {
+        code,
+        codeVerifier,
+        redirectUri,
+      };
+      const stateParam = url.searchParams.get('state');
+      if (stateParam) {
+        payload.state = stateParam;
+      }
+
+      const tokenResponse = await firstValueFrom(this.authApi.completeOidcLogin(payload));
       this.setSession(tokenResponse);
       return true;
     } catch (error) {
@@ -247,6 +254,7 @@ export class AuthService {
 
     if (this.isAuthenticationError(error)) {
       this.clearSession();
+      void this.router.navigateByUrl('/login');
     }
   }
 
@@ -259,14 +267,7 @@ export class AuthService {
     this.clearSession();
     this.isBootstrappedSignal.set(false);
     this.oauthService.logOut();
-  }
-
-  private handleSessionEnded(): void {
-    this.sessionRevision += 1;
-    this.clearSession();
-    this.isBootstrappedSignal.set(false);
-    this.bootstrapPromise = null;
-    this.refreshPromise = null;
+    void this.router.navigateByUrl('/login');
   }
 
   private getStoredPkceVerifier(): string | null {

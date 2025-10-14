@@ -586,7 +586,13 @@ export class AdminUsersPage {
     return value
       .replace(/[-_]+/g, ' ')
       .split(' ')
-      .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : ''))
+      .map((part) => {
+        if (!part) {
+          return '';
+        }
+        const first = part.charAt(0).toUpperCase();
+        return first + part.slice(1);
+      })
       .join(' ')
       .trim() || value;
   }

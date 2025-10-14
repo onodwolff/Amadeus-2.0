@@ -95,6 +95,10 @@ async def _seed_admin(
                 "View Gateway Users",
                 "View gateway user accounts and related information.",
             ),
+            "gateway.reports.view": (
+                "View Gateway Reports",
+                "Access analytics dashboards and reporting screens.",
+            ),
         }
 
         permission_lookup: dict[str, Permission] = {}
@@ -108,11 +112,17 @@ async def _seed_admin(
                 await session.flush()
             permission_lookup[code] = permission
 
+        # Ensure the administrator role inherits every permission currently known to the system.
+        existing_permissions = await session.execute(select(Permission))
+        for permission in existing_permissions.scalars():
+            permission_lookup.setdefault(permission.code, permission)
+
         role_permissions = {
             UserRole.ADMIN.value: (
                 "gateway.admin",
                 "gateway.users.manage",
                 "gateway.users.view",
+                "gateway.reports.view",
             ),
             UserRole.MANAGER.value: (
                 "gateway.users.manage",
@@ -127,6 +137,14 @@ async def _seed_admin(
             ),
             UserRole.VIEWER.value: ("gateway.users.view",),
         }
+
+        # Administrators should always gain the union of every registered permission code.
+        admin_codes = set(role_permissions.get(UserRole.ADMIN.value, ()))
+        admin_codes.update(permission_lookup.keys())
+        for role_slug, permission_codes in role_permissions.items():
+            if role_slug != UserRole.ADMIN.value:
+                admin_codes.update(permission_codes)
+        role_permissions[UserRole.ADMIN.value] = tuple(sorted(admin_codes))
 
         for role_slug, permission_codes in role_permissions.items():
             role = role_lookup[role_slug]
