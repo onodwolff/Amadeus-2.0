@@ -19,6 +19,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSlideToggleChange, MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSelectModule } from '@angular/material/select';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { debounceTime, finalize } from 'rxjs';
 
@@ -26,6 +27,19 @@ import { UsersApi } from '../../api/clients/users.api';
 import { AdminUser, RoleSummary } from '../../api/models';
 import { AuthStateService } from '../../shared/auth/auth-state.service';
 import { AdminUserCreateDialogComponent } from './create-user-dialog.component';
+
+type UserStatusFilter = 'all' | 'active' | 'suspended';
+
+interface UserTableFilters {
+  term: string;
+  role: string;
+  status: UserStatusFilter;
+}
+
+interface RoleFilterOption {
+  slug: string;
+  name: string;
+}
 
 @Component({
   standalone: true,
@@ -46,6 +60,7 @@ import { AdminUserCreateDialogComponent } from './create-user-dialog.component';
     MatProgressSpinnerModule,
     MatSlideToggleModule,
     MatTooltipModule,
+    MatSelectModule,
   ],
 })
 export class AdminUsersPage {
@@ -81,8 +96,19 @@ export class AdminUsersPage {
     'updatedAt',
   ];
 
-  readonly filterControl = new FormControl('', { nonNullable: true });
+  private readonly filterDefaults: UserTableFilters = {
+    term: '',
+    role: 'all',
+    status: 'all',
+  };
+
+  readonly filterControl = new FormControl<string>(this.filterDefaults.term, { nonNullable: true });
+  readonly roleFilterControl = new FormControl<string>(this.filterDefaults.role, { nonNullable: true });
+  readonly statusFilterControl = new FormControl<UserStatusFilter>(this.filterDefaults.status, {
+    nonNullable: true,
+  });
   readonly dataSource = new MatTableDataSource<AdminUser>([]);
+  readonly roleFilterOptions = signal<RoleFilterOption[]>([]);
 
   @ViewChild(MatSort)
   set matSort(sort: MatSort | null) {
@@ -93,7 +119,20 @@ export class AdminUsersPage {
 
   constructor() {
     this.dataSource.filterPredicate = (item, filter) => {
-      const term = filter.trim().toLowerCase();
+      const criteria = this.parseFilters(filter);
+
+      if (criteria.role !== 'all' && !item.roles.includes(criteria.role)) {
+        return false;
+      }
+
+      if (criteria.status !== 'all') {
+        const isActive = criteria.status === 'active';
+        if (item.active !== isActive) {
+          return false;
+        }
+      }
+
+      const term = criteria.term.trim().toLowerCase();
       if (!term) {
         return true;
       }
@@ -131,9 +170,18 @@ export class AdminUsersPage {
     this.filterControl.valueChanges
       .pipe(takeUntilDestroyed(), debounceTime(150))
       .subscribe((value) => {
-        this.dataSource.filter = value.trim().toLowerCase();
+        this.updateDataSourceFilter(value);
       });
 
+    this.roleFilterControl.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => {
+      this.updateDataSourceFilter(this.filterControl.value);
+    });
+
+    this.statusFilterControl.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => {
+      this.updateDataSourceFilter(this.filterControl.value);
+    });
+
+    this.updateDataSourceFilter(this.filterControl.value);
     this.refreshUsers(false);
     this.loadRoles();
   }
@@ -154,6 +202,8 @@ export class AdminUsersPage {
       .subscribe({
         next: (users) => {
           this.dataSource.data = [...(users ?? [])];
+          this.syncRoleFilterOptions(this.dataSource.data);
+          this.updateDataSourceFilter(this.filterControl.value);
         },
         error: (err: unknown) => {
           const message = this.resolveErrorMessage(err, 'Unable to load users.');
@@ -168,6 +218,7 @@ export class AdminUsersPage {
   loadRoles(): void {
     if (!this.canManageUsers()) {
       this.availableRoles.set([]);
+      this.syncRoleFilterOptions(this.dataSource.data);
       return;
     }
 
@@ -175,6 +226,7 @@ export class AdminUsersPage {
     this.usersApi.listRoles().subscribe({
       next: (roles) => {
         this.availableRoles.set(roles);
+        this.syncRoleFilterOptions(this.dataSource.data);
       },
       error: (err: unknown) => {
         this.rolesError.set(this.resolveErrorMessage(err, 'Unable to load available roles.'));
@@ -212,7 +264,10 @@ export class AdminUsersPage {
   }
 
   clearFilter(): void {
-    this.filterControl.setValue('');
+    this.filterControl.setValue(this.filterDefaults.term, { emitEvent: false });
+    this.roleFilterControl.setValue(this.filterDefaults.role, { emitEvent: false });
+    this.statusFilterControl.setValue(this.filterDefaults.status, { emitEvent: false });
+    this.updateDataSourceFilter(this.filterDefaults.term);
   }
 
   trackByUserId(_: number, item: AdminUser): number {
@@ -360,6 +415,8 @@ export class AdminUsersPage {
     this.dataSource.data = this.dataSource.data.map((entry) =>
       entry.id === userId ? { ...entry, ...changes } : entry,
     );
+    this.syncRoleFilterOptions(this.dataSource.data);
+    this.updateDataSourceFilter(this.filterControl.value);
   }
 
   private composeRoleToggleKey(userId: number, role: string): string {
@@ -372,5 +429,80 @@ export class AdminUsersPage {
       next.delete(key);
       return next;
     });
+  }
+
+  hasActiveFilters(): boolean {
+    return (
+      this.filterControl.value.trim().length > 0 ||
+      this.roleFilterControl.value !== this.filterDefaults.role ||
+      this.statusFilterControl.value !== this.filterDefaults.status
+    );
+  }
+
+  private updateDataSourceFilter(term: string): void {
+    const normalizedTerm = term.trim().toLowerCase();
+    const filter: UserTableFilters = {
+      term: normalizedTerm,
+      role: this.roleFilterControl.value,
+      status: this.statusFilterControl.value,
+    };
+
+    this.dataSource.filter = JSON.stringify(filter);
+  }
+
+  private parseFilters(raw: string): UserTableFilters {
+    if (!raw) {
+      return { ...this.filterDefaults };
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<UserTableFilters> | null;
+      return {
+        term: typeof parsed?.term === 'string' ? parsed.term : this.filterDefaults.term,
+        role: typeof parsed?.role === 'string' ? parsed.role : this.filterDefaults.role,
+        status: this.normalizeStatus(parsed?.status),
+      };
+    } catch {
+      return { ...this.filterDefaults };
+    }
+  }
+
+  private normalizeStatus(value: unknown): UserStatusFilter {
+    return value === 'active' || value === 'suspended' ? value : this.filterDefaults.status;
+  }
+
+  private syncRoleFilterOptions(users: AdminUser[]): void {
+    const roleMap = new Map<string, string>();
+    for (const role of this.availableRoles()) {
+      roleMap.set(role.slug, role.name);
+    }
+
+    for (const user of users) {
+      for (const role of user.roles) {
+        if (!roleMap.has(role)) {
+          roleMap.set(role, this.toTitleCase(role));
+        }
+      }
+    }
+
+    const currentRole = this.roleFilterControl.value;
+    if (currentRole !== this.filterDefaults.role && !roleMap.has(currentRole)) {
+      roleMap.set(currentRole, this.toTitleCase(currentRole));
+    }
+
+    const options: RoleFilterOption[] = Array.from(roleMap.entries())
+      .map(([slug, name]) => ({ slug, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    this.roleFilterOptions.set(options);
+  }
+
+  private toTitleCase(value: string): string {
+    return value
+      .replace(/[-_]+/g, ' ')
+      .split(' ')
+      .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : ''))
+      .join(' ')
+      .trim() || value;
   }
 }
