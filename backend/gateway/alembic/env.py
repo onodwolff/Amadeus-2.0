@@ -41,7 +41,6 @@ def _install_email_validator_stub() -> None:
         pass
 
     module = types.ModuleType("email_validator")
-    module.__all__ = ["validate_email", "EmailNotValidError"]
     module.__version__ = "2.0.0"
 
     class EmailNotValidError(ValueError):
@@ -52,6 +51,7 @@ def _install_email_validator_stub() -> None:
 
     module.EmailNotValidError = EmailNotValidError  # type: ignore[attr-defined]
     module.validate_email = validate_email  # type: ignore[attr-defined]
+    module.__all__ = ["validate_email", "EmailNotValidError"]
     sys.modules.setdefault("email_validator", module)
 
     if not getattr(importlib_metadata, "_email_validator_stub_installed", False):
