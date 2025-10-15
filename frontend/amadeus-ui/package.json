@@ -40,8 +40,7 @@
     "lightweight-charts": "^4.1.1",
     "qrcode": "^1.5.4",
     "rxjs": "~7.8.0",
-    "tslib": "^2.3.0",
-    "zone.js": "^0.15.1"
+    "tslib": "^2.3.0"
   },
   "devDependencies": {
     "@angular-eslint/builder": "^20.3.1-alpha.14",
