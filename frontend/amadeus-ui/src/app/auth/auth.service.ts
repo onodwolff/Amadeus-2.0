@@ -1,7 +1,7 @@
 import { Injectable, Injector, inject, signal } from '@angular/core';
 import { HttpErrorResponse, HttpResponse } from '@angular/common/http';
 import { OAuthService } from 'angular-oauth2-oidc';
-import { firstValueFrom } from 'rxjs';
+import { defaultIfEmpty, firstValueFrom } from 'rxjs';
 
 import { Router } from '@angular/router';
 
@@ -118,9 +118,16 @@ export class AuthService {
       return this.refreshPromise;
     }
 
-    this.refreshPromise = firstValueFrom(this.authApi.refreshTokens())
+    this.refreshPromise = firstValueFrom(
+      this.authApi.refreshTokens().pipe(defaultIfEmpty(null)),
+    )
       .then(response => {
-        this.setSession(response);
+        if (response) {
+          this.setSession(response);
+          return;
+        }
+
+        this.clearSession();
       })
       .catch(error => {
         if (this.isAuthenticationError(error)) {
@@ -259,7 +266,15 @@ export class AuthService {
 
   private async resumeSession(): Promise<void> {
     try {
-      const tokenResponse = await firstValueFrom(this.authApi.refreshTokens());
+      const tokenResponse = await firstValueFrom(
+        this.authApi.refreshTokens().pipe(defaultIfEmpty(null)),
+      );
+
+      if (!tokenResponse) {
+        this.clearSession();
+        return;
+      }
+
       this.setSession(tokenResponse);
     } catch (error) {
       if (this.isAuthenticationError(error)) {
@@ -364,7 +379,7 @@ export class AuthService {
 
   private handleRefreshFailure(error: unknown): void {
     const status = (error as HttpErrorResponse)?.status ?? null;
-    if (status && status !== 0) {
+    if (status && status !== 0 && status !== 401) {
       console.error('Token refresh failed.', error);
     }
 
