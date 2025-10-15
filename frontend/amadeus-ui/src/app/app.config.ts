@@ -11,6 +11,7 @@ import { provideAnimations } from '@angular/platform-browser/animations';
 
 import { routes } from './app.routes';
 import { tokenInterceptor } from './auth/token-interceptor';
+import { refreshInterceptor } from './auth/refresh-interceptor';
 import { AuthService } from './auth/auth.service';
 import { provideOAuthClient } from 'angular-oauth2-oidc';
 
@@ -19,7 +20,7 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZonelessChangeDetection(),
     provideOAuthClient(),
-    provideHttpClient(withFetch(), withInterceptors([tokenInterceptor])),
+    provideHttpClient(withFetch(), withInterceptors([tokenInterceptor, refreshInterceptor])),
     provideAnimations(),
     provideRouter(routes),
     {

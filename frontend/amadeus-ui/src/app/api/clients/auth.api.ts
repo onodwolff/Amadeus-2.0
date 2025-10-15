@@ -28,34 +28,60 @@ import {
 export class AuthApi {
   private readonly http = inject(HttpClient);
 
+  private withCredentials<T extends object>(options?: T): T & { withCredentials: true } {
+    return { ...(options ?? {}), withCredentials: true } as T & { withCredentials: true };
+  }
+
   getCurrentUser(): Observable<AuthUser> {
-    return this.http.get<AuthUser>(buildApiUrl('/api/auth/me'));
+    return this.http.get<AuthUser>(buildApiUrl('/api/auth/me'), this.withCredentials());
   }
 
   requestEmailChange(payload: EmailChangeRequest): Observable<EmailChangeResponse> {
-    return this.http.patch<EmailChangeResponse>(buildApiUrl('/api/auth/me/email'), payload);
+    return this.http.patch<EmailChangeResponse>(
+      buildApiUrl('/api/auth/me/email'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   confirmEmailChange(payload: EmailChangeConfirmRequest): Observable<AuthUser> {
-    return this.http.post<AuthUser>(buildApiUrl('/api/auth/me/email/confirm'), payload);
+    return this.http.post<AuthUser>(
+      buildApiUrl('/api/auth/me/email/confirm'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   setupMfa(): Observable<MfaSetupResponse> {
-    return this.http.post<MfaSetupResponse>(buildApiUrl('/api/auth/me/mfa/setup'), {});
+    return this.http.post<MfaSetupResponse>(
+      buildApiUrl('/api/auth/me/mfa/setup'),
+      {},
+      this.withCredentials(),
+    );
   }
 
   enableMfa(payload: MfaEnableRequest): Observable<MfaEnableResponse> {
-    return this.http.post<MfaEnableResponse>(buildApiUrl('/api/auth/me/mfa/enable'), payload);
+    return this.http.post<MfaEnableResponse>(
+      buildApiUrl('/api/auth/me/mfa/enable'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   disableMfa(payload: MfaDisableRequest): Observable<OperationStatus> {
-    return this.http.request<OperationStatus>('DELETE', buildApiUrl('/api/auth/me/mfa'), {
-      body: payload,
-    });
+    return this.http.request<OperationStatus>(
+      'DELETE',
+      buildApiUrl('/api/auth/me/mfa'),
+      this.withCredentials({ body: payload }),
+    );
   }
 
   regenerateBackupCodes(payload: MfaBackupCodesRequest): Observable<BackupCodesResponse> {
-    return this.http.post<BackupCodesResponse>(buildApiUrl('/api/auth/me/mfa/backup-codes'), payload);
+    return this.http.post<BackupCodesResponse>(
+      buildApiUrl('/api/auth/me/mfa/backup-codes'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   loginWithPassword(
@@ -64,37 +90,62 @@ export class AuthApi {
     return this.http.post<TokenResponse | MfaChallengeResponse>(
       buildApiUrl('/api/auth/login'),
       payload,
-      { observe: 'response' },
+      this.withCredentials({ observe: 'response' as const }),
     );
   }
 
   completeMfaLogin(payload: MfaChallengeRequest): Observable<TokenResponse> {
-    return this.http.post<TokenResponse>(buildApiUrl('/api/auth/login/mfa'), payload);
+    return this.http.post<TokenResponse>(
+      buildApiUrl('/api/auth/login/mfa'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   completeOidcLogin(payload: OidcCallbackRequest): Observable<TokenResponse> {
-    return this.http.post<TokenResponse>(buildApiUrl('/api/auth/oidc/callback'), payload);
+    return this.http.post<TokenResponse>(
+      buildApiUrl('/api/auth/oidc/callback'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   refreshTokens(): Observable<TokenResponse> {
-    return this.http.post<TokenResponse>(buildApiUrl('/api/auth/refresh'), {});
+    return this.http.post<TokenResponse>(
+      buildApiUrl('/api/auth/refresh'),
+      {},
+      this.withCredentials(),
+    );
   }
 
   revokeAllSessions(payload: SessionsRevokeRequest): Observable<OperationStatus> {
-    return this.http.post<OperationStatus>(buildApiUrl('/api/auth/me/sessions/revoke_all'), payload);
+    return this.http.post<OperationStatus>(
+      buildApiUrl('/api/auth/me/sessions/revoke_all'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   requestPasswordReset(payload: ForgotPasswordRequest): Observable<OperationStatus> {
-    return this.http.post<OperationStatus>(buildApiUrl('/api/auth/forgot-password'), payload);
+    return this.http.post<OperationStatus>(
+      buildApiUrl('/api/auth/forgot-password'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   resetPassword(payload: ResetPasswordRequest): Observable<OperationStatus> {
-    return this.http.post<OperationStatus>(buildApiUrl('/api/auth/reset-password'), payload);
+    return this.http.post<OperationStatus>(
+      buildApiUrl('/api/auth/reset-password'),
+      payload,
+      this.withCredentials(),
+    );
   }
 
   verifyEmail(token: string): Observable<OperationStatus> {
-    return this.http.get<OperationStatus>(buildApiUrl('/api/auth/verify-email'), {
-      params: { token },
-    });
+    return this.http.get<OperationStatus>(
+      buildApiUrl('/api/auth/verify-email'),
+      this.withCredentials({ params: { token } }),
+    );
   }
 }
