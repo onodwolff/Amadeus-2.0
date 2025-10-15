@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, Injector, inject, signal } from '@angular/core';
 import { HttpErrorResponse, HttpResponse } from '@angular/common/http';
 import { OAuthService } from 'angular-oauth2-oidc';
 import { firstValueFrom } from 'rxjs';
@@ -29,10 +29,9 @@ export class PasswordLoginError extends Error {
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly authApi = inject(AuthApi);
   private readonly oauthService = inject(OAuthService);
   private readonly router = inject(Router);
-
+  private readonly injector = inject(Injector);
   private readonly currentUserSignal = signal<AuthUser | null>(null);
   private readonly isBootstrappedSignal = signal(false);
 
@@ -42,6 +41,10 @@ export class AuthService {
   private sessionRevision = 0;
   private accessToken: string | null = null;
   private accessTokenExpiresAt = 0;
+
+  private get authApi(): AuthApi {
+    return this.injector.get(AuthApi);
+  }
 
   readonly currentUser = this.currentUserSignal.asReadonly();
   readonly isBootstrapped = this.isBootstrappedSignal.asReadonly();
