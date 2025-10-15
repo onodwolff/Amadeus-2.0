@@ -5,7 +5,11 @@ import { catchError, from, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
 
 export const tokenInterceptor: HttpInterceptorFn = (req, next) => {
-  const auth = inject(AuthService);
+  const auth = inject(AuthService, { optional: true });
+
+  if (!auth) {
+    return next(req);
+  }
   const token = auth.getAccessToken();
 
   const authReq = token
