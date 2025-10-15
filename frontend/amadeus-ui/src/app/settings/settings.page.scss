@@ -53,6 +53,12 @@
   gap: 16px;
 }
 
+.settings-page__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .settings-page__chip {
   display: inline-flex;
   align-items: center;
@@ -81,6 +87,10 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.settings-page__exit {
+  white-space: nowrap;
 }
 
 .settings-page__eyebrow {
