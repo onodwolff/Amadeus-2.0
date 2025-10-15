@@ -52,12 +52,12 @@ def upgrade() -> None:
     """
     )
 
-    op.execute(
-        f"""
-    ALTER TYPE {schema}.user_token_purpose ADD VALUE IF NOT EXISTS 'password_reset';
-    ALTER TYPE {schema}.user_token_purpose ADD VALUE IF NOT EXISTS 'email_verification';
-    """
-    )
+    for enum_value in ("password_reset", "email_verification"):
+        op.execute(
+            sa.text(
+                f"ALTER TYPE {schema}.user_token_purpose ADD VALUE IF NOT EXISTS '{enum_value}'"
+            )
+        )
 
     purpose_enum = sa.Enum(
         "password_reset",
