@@ -59,6 +59,38 @@ async def test_viewer_cannot_create_user(app, db_session):
 
 
 @pytest.mark.asyncio
+async def test_token_missing_scope_cannot_manage_users(app, db_session):
+    admin_user = await create_user(
+        db_session,
+        email="scoped-admin@example.com",
+        username="scopedadmin",
+        password="password",
+        roles=[UserRole.ADMIN.value],
+    )
+
+    limited_token, _ = create_test_access_token(
+        subject=admin_user.id,
+        roles=[UserRole.ADMIN.value],
+        scopes=["gateway.users.view"],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/admin/users",
+            json={
+                "email": "scoped-target@example.com",
+                "password": "temporary",
+                "username": "scopedtarget",
+                "roles": [UserRole.VIEWER.value],
+            },
+            headers={"Authorization": f"Bearer {limited_token}"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Insufficient scope"
+
+
+@pytest.mark.asyncio
 async def test_forged_admin_token_does_not_escalate_privileges(app, db_session):
     viewer = await create_user(
         db_session,
