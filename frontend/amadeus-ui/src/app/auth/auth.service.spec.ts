@@ -64,6 +64,7 @@ describe('AuthService', () => {
 
     service = TestBed.inject(AuthService);
     await service.bootstrapMe();
+    oauthService.initCodeFlow.calls.reset();
   });
 
   it('keeps current user cleared when logout occurs during pending load', async () => {
@@ -86,6 +87,7 @@ describe('AuthService', () => {
 
     expect(result).toBeFalse();
     expect(service.currentUser()).toBeNull();
+    expect(oauthService.initCodeFlow).toHaveBeenCalled();
   });
 
   describe('refreshToken', () => {
@@ -103,7 +105,7 @@ describe('AuthService', () => {
 
       expect(oauthService.logOut).toHaveBeenCalled();
       expect(service.currentUser()).toBeNull();
-      expect(router.navigateByUrl).toHaveBeenCalledWith('/login');
+      expect(oauthService.initCodeFlow).toHaveBeenCalled();
     });
 
     it('keeps the current user when the refreshed profile request fails transiently', async () => {

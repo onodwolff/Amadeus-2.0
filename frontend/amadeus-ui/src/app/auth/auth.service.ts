@@ -56,7 +56,7 @@ export class AuthService {
   }
 
   login(): void {
-    this.oauthService.initCodeFlow();
+    this.beginMonoLogin();
   }
 
   async loginWithPassword(credentials: PasswordLoginCredentials): Promise<PasswordLoginResult> {
@@ -100,6 +100,8 @@ export class AuthService {
     this.isBootstrappedSignal.set(false);
     this.bootstrapPromise = null;
     this.refreshPromise = null;
+
+    this.beginMonoLogin();
   }
 
   setCurrentUser(user: AuthUser | null): void {
@@ -373,7 +375,7 @@ export class AuthService {
 
     if (this.isAuthenticationError(error)) {
       this.clearSession();
-      void this.router.navigateByUrl('/login');
+      this.beginMonoLogin();
     }
   }
 
@@ -386,7 +388,7 @@ export class AuthService {
     this.clearSession();
     this.isBootstrappedSignal.set(false);
     this.oauthService.logOut();
-    void this.router.navigateByUrl('/login');
+    this.beginMonoLogin();
   }
 
   private getStoredPkceVerifier(): string | null {
@@ -466,6 +468,14 @@ export class AuthService {
     }
 
     return normalized.startsWith('/login');
+  }
+
+  private beginMonoLogin(): void {
+    try {
+      this.oauthService.initCodeFlow();
+    } catch (error) {
+      console.error('Unable to initiate the Mono login flow.', error);
+    }
   }
 }
 
