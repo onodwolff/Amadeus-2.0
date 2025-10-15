@@ -1,13 +1,13 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "amadeus-gateway"
 version = "0.1.0"
 description = "Backend services for the Amadeus 2.0 gateway"
-readme = "../README.md"
-requires-python = ">=3.10"
+readme = "../README.md"   # если файла нет, поменяй на "README.md"
+requires-python = ">=3.12"
 authors = [{ name = "Amadeus" }]
 dependencies = [
     "fastapi>=0.110.0,<1.0.0",
@@ -32,10 +32,28 @@ test = [
     "pytest-asyncio>=0.23.0,<0.24.0",
 ]
 
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gateway*"]
+
+# если нужно тащить алембик-скрипты и прочие ресурсы внутри пакета
+[tool.setuptools.package-data]
+gateway = [
+    "alembic.ini",
+    "alembic/**",
+    "alembic/versions/**",
+    "app/**/*.sql",
+    "app/**/templates/**",
+    "app/**/static/**"
+]
+
 [tool.ruff]
 line-length = 100
 src = ["backend"]
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.format]
 quote-style = "single"
