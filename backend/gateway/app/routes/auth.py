@@ -699,6 +699,23 @@ async def _issue_tokens(
     )
 
 
+def _clear_refresh_cookie(response: Response) -> dict[str, str]:
+    """Remove the refresh token cookie and return headers to persist the change."""
+
+    cookie_secure = settings.auth.cookie_secure
+    response.delete_cookie(
+        key="refreshToken",
+        path="/",
+        httponly=True,
+        secure=cookie_secure,
+        samesite="strict",
+    )
+    header_value = response.headers.get("set-cookie")
+    if header_value is None:
+        return {}
+    return {"set-cookie": header_value}
+
+
 async def _revoke_session_family(db: AsyncSession, family_id: str) -> int:
     now = datetime.now(timezone.utc)
     result = await db.execute(
@@ -1332,7 +1349,12 @@ async def refresh_tokens(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
     refresh_token = request.cookies.get("refreshToken")
     if not refresh_token:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token missing",
+            headers=headers or None,
+        )
 
     _ensure_test_schema()
     token_hash = hash_refresh_token(refresh_token)
@@ -1343,54 +1365,99 @@ async def refresh_tokens(
     result = await db.execute(stmt)
     session_record = result.scalars().first()
     if session_record is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+            headers=headers or None,
+        )
     if session_record.revoked_at is not None:
         revoked_count = await _revoke_session_family(db, session_record.family_id)
         await db.commit()
+        headers = _clear_refresh_cookie(response)
         logger.warning(
             "Refresh token reuse detected; revoked %s sessions in family %s",
             revoked_count,
             session_record.family_id,
         )
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+            headers=headers or None,
+        )
     now = datetime.now(timezone.utc)
     expires_at = session_record.expires_at
     if expires_at is not None and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if expires_at is not None and expires_at <= now:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token expired",
+            headers=headers or None,
+        )
 
     absolute_expires_at = session_record.absolute_expires_at
     if absolute_expires_at is None:
         await _revoke_session_family(db, session_record.family_id)
         await db.commit()
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired",
+            headers=headers or None,
+        )
     if absolute_expires_at.tzinfo is None:
         absolute_expires_at = absolute_expires_at.replace(tzinfo=timezone.utc)
     if absolute_expires_at <= now:
         await _revoke_session_family(db, session_record.family_id)
         await db.commit()
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired",
+            headers=headers or None,
+        )
 
     idle_expires_at = session_record.idle_expires_at
     if idle_expires_at is None:
         await _revoke_session_family(db, session_record.family_id)
         await db.commit()
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired",
+            headers=headers or None,
+        )
     if idle_expires_at.tzinfo is None:
         idle_expires_at = idle_expires_at.replace(tzinfo=timezone.utc)
     if idle_expires_at <= now:
         await _revoke_session_family(db, session_record.family_id)
         await db.commit()
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired due to inactivity")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired due to inactivity",
+            headers=headers or None,
+        )
 
     user = await _load_user(db, session_record.user_id)
     if not user.active:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Account is suspended",
+            headers=headers or None,
+        )
     if user.mfa_enabled and session_record.mfa_verified_at is None:
         await _revoke_session_family(db, session_record.family_id)
         await db.commit()
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="MFA verification required")
+        headers = _clear_refresh_cookie(response)
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="MFA verification required",
+            headers=headers or None,
+        )
 
     next_idle_deadline = now + IDLE_SESSION_TTL
     session_record.idle_expires_at = next_idle_deadline
