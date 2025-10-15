@@ -12,7 +12,6 @@ from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 CURRENT_DIR = Path(__file__).resolve()
 BACKEND_DIR = CURRENT_DIR.parents[2]
@@ -33,15 +32,6 @@ revision = "3bd5b0e1f5a5"
 down_revision = "7e8e4b973c3c"
 branch_labels = None
 depends_on = None
-
-
-user_token_purpose = postgresql.ENUM(
-    "password_reset",
-    "email_verification",
-    name="user_token_purpose",
-    schema=SCHEMA,
-    create_type=False,
-)
 
 
 def upgrade() -> None:
@@ -69,11 +59,19 @@ def upgrade() -> None:
     """
     )
 
+    purpose_enum = sa.Enum(
+        "password_reset",
+        "email_verification",
+        name="user_token_purpose",
+        schema=schema,
+        create_type=False,
+    )
+
     op.create_table(
         "user_tokens",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
-        sa.Column("purpose", user_token_purpose, nullable=False),
+        sa.Column("purpose", purpose_enum, nullable=False),
         sa.Column("token_hash", sa.String(length=128), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
