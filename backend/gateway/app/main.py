@@ -12,7 +12,7 @@ except ModuleNotFoundError:  # pragma: no cover - production installs
     from gateway.app.logging import setup_logging
 
 from .config import settings
-from .routes import admin, api_keys, auth, integrations, market, nodes, system, users
+from .routes import admin, api_keys, auth, integrations, market, nodes, oidc, system, users
 
 setup_logging()
 
@@ -59,6 +59,8 @@ def create_app(*, api_prefix: str | None = None) -> FastAPI:
         )
 
     router_prefix = prefix.rstrip("/") if prefix else ""
+
+    app.include_router(oidc.router)
 
     if router_prefix:
         if not router_prefix.startswith("/"):
