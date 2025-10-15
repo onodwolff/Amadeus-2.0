@@ -35,21 +35,32 @@ def _normalise_url(value: str | None) -> str | None:
 async def openid_configuration(realm: str) -> dict[str, Any]:
     """Return OpenID Connect discovery metadata for the requested realm."""
 
+    configured_authorization = _normalise_url(
+        getattr(settings.auth, "idp_authorization_url", None)
+    )
+    configured_token = _normalise_url(getattr(settings.auth, "idp_token_url", None))
+
+    if not configured_authorization or not configured_token:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="OpenID Connect provider not configured",
+        )
+
     configured_issuer = _normalise_url(getattr(settings.auth, "idp_issuer", None))
     public_base = _normalise_url(settings.auth.public_base_url)
     issuer = configured_issuer or f"{public_base}/realms/{realm}"
 
-    configured_authorization = _normalise_url(
-        getattr(settings.auth, "idp_authorization_url", None)
-    )
-    if configured_authorization and "{realm}" in configured_authorization:
+    if "{realm}" in configured_authorization:
         configured_authorization = configured_authorization.replace("{realm}", realm)
-    authorization_endpoint = configured_authorization or f"{issuer}/protocol/openid-connect/auth"
+    authorization_endpoint = configured_authorization
 
-    configured_token = _normalise_url(getattr(settings.auth, "idp_token_url", None))
-    token_endpoint = configured_token or f"{issuer}/protocol/openid-connect/token"
+    if "{realm}" in configured_token:
+        configured_token = configured_token.replace("{realm}", realm)
+    token_endpoint = configured_token
 
     configured_jwks = _normalise_url(getattr(settings.auth, "idp_jwks_url", None))
+    if configured_jwks and "{realm}" in configured_jwks:
+        configured_jwks = configured_jwks.replace("{realm}", realm)
     jwks_uri = configured_jwks or f"{issuer}/protocol/openid-connect/certs"
 
     return {
