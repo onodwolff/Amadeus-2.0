@@ -1393,11 +1393,13 @@ async def refresh_tokens(
 
     next_idle_deadline = now + IDLE_SESSION_TTL
     session_record.idle_expires_at = next_idle_deadline
-    session_record.revoked_at = now
+
+    rotate_session = True
 
     issued_access_token: str | None = None
     access_token_expires_in: int | None = None
     issued_refresh_token: str | None = None
+    refresh_token_expires_at: datetime | None = None
 
     if config.uses_identity_provider:
         if not (config.idp_token_url and config.idp_client_id):
@@ -1464,6 +1466,32 @@ async def refresh_tokens(
                 detail="Identity provider response missing refresh_token",
             )
 
+        refresh_token_changed = new_refresh_token != refresh_token
+
+        refresh_expires_in = refresh_payload.get("refresh_expires_in")
+        if refresh_expires_in is not None:
+            try:
+                refresh_expires_seconds = int(refresh_expires_in)
+            except (TypeError, ValueError):
+                logger.error(
+                    "OIDC refresh token response provided invalid refresh_expires_in value: %s",
+                    refresh_expires_in,
+                )
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY,
+                    detail="Identity provider response contained an invalid refresh_expires_in value",
+                )
+            if refresh_expires_seconds <= 0:
+                logger.error(
+                    "OIDC refresh token response provided non-positive refresh_expires_in value: %s",
+                    refresh_expires_in,
+                )
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY,
+                    detail="Identity provider response contained an invalid refresh_expires_in value",
+                )
+            refresh_token_expires_at = now + timedelta(seconds=refresh_expires_seconds)
+
         new_expires_in = refresh_payload.get("expires_in")
         expires_in_seconds: int | None = None
         if new_expires_in is not None:
@@ -1489,20 +1517,62 @@ async def refresh_tokens(
                 )
 
         issued_access_token = new_access_token
-        issued_refresh_token = new_refresh_token
         access_token_expires_in = expires_in_seconds
+        if refresh_token_changed:
+            issued_refresh_token = new_refresh_token
+        else:
+            rotate_session = False
 
-    return await _issue_tokens(
-        db,
-        user=user,
-        response=response,
-        request=request,
-        parent_session=session_record,
-        absolute_expires_at=absolute_expires_at,
-        idle_expires_at=next_idle_deadline,
-        issued_access_token=issued_access_token,
-        access_token_expires_in=access_token_expires_in,
-        issued_refresh_token=issued_refresh_token,
+    if rotate_session:
+        session_record.revoked_at = now
+
+        return await _issue_tokens(
+            db,
+            user=user,
+            response=response,
+            request=request,
+            parent_session=session_record,
+            absolute_expires_at=absolute_expires_at,
+            idle_expires_at=next_idle_deadline,
+            issued_access_token=issued_access_token,
+            access_token_expires_in=access_token_expires_in,
+            issued_refresh_token=issued_refresh_token,
+            refresh_token_expires_at=refresh_token_expires_at,
+        )
+
+    session_record.revoked_at = None
+    if refresh_token_expires_at is not None:
+        session_record.expires_at = refresh_token_expires_at
+
+    refresh_expires_at = session_record.expires_at
+    if refresh_expires_at.tzinfo is None:
+        refresh_expires_at = refresh_expires_at.replace(tzinfo=timezone.utc)
+
+    await db.commit()
+
+    refreshed_user = await _load_user(db, user.id)
+
+    ttl_delta = refresh_expires_at - now
+    ttl_seconds = int(ttl_delta.total_seconds()) if ttl_delta.total_seconds() > 0 else 0
+    cookie_secure = settings.auth.cookie_secure
+    response.set_cookie(
+        key="refreshToken",
+        value=refresh_token,
+        httponly=True,
+        secure=cookie_secure,
+        samesite="strict",
+        max_age=ttl_seconds,
+        expires=refresh_expires_at,
+        path="/",
+    )
+
+    expires_in = access_token_expires_in or settings.auth.access_token_ttl_seconds
+
+    return TokenResponse(
+        access_token=issued_access_token,
+        expires_in=int(expires_in),
+        refresh_expires_at=refresh_expires_at,
+        user=serialize_user(refreshed_user),
     )
 
 

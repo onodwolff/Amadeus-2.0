@@ -244,6 +244,113 @@ async def test_oidc_login_and_refresh_flow(
 
 
 @pytest.mark.asyncio
+async def test_oidc_refresh_allows_non_rotating_tokens(
+    configure_idp,
+    idp_token_validation,
+    app,
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class DummyResponse:
+        def __init__(self, payload: dict[str, object], status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+            self.text = json.dumps(payload)
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    class DummyAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self) -> "DummyAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, url: str, data=None, headers=None):  # type: ignore[override]
+            grant_type = (data or {}).get("grant_type")
+            if grant_type == "authorization_code":
+                return DummyResponse(
+                    {
+                        "id_token": "idp-id-token",
+                        "access_token": "idp-access-token-initial",
+                        "refresh_token": "idp-refresh-token-static",
+                        "expires_in": 120,
+                        "refresh_expires_in": 7200,
+                        "token_type": "bearer",
+                    }
+                )
+            if grant_type == "refresh_token":
+                assert data["refresh_token"] == "idp-refresh-token-static"
+                return DummyResponse(
+                    {
+                        "access_token": "idp-access-token-updated",
+                        "refresh_token": "idp-refresh-token-static",
+                        "expires_in": 300,
+                        "refresh_expires_in": 7100,
+                        "token_type": "bearer",
+                    }
+                )
+            raise AssertionError(f"Unexpected grant_type: {grant_type}")
+
+    monkeypatch.setattr(
+        "backend.gateway.app.routes.auth.httpx.AsyncClient",
+        DummyAsyncClient,
+    )
+
+    await create_user(
+        db_session,
+        email="oidc@example.com",
+        username="oidc-static",
+        password="irrelevant",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        login_response = await client.post(
+            "/auth/oidc/callback",
+            json={
+                "code": "auth-code",
+                "codeVerifier": "v" * 64,
+                "redirectUri": "https://app.example.com/callback",
+            },
+        )
+        assert login_response.status_code == 200
+        login_cookie = login_response.cookies.get("refreshToken")
+        assert login_cookie == "idp-refresh-token-static"
+
+        initial_session_result = await db_session.execute(select(AuthSession))
+        initial_session = initial_session_result.scalars().first()
+        assert initial_session is not None
+        initial_expires_at = _ensure_aware(initial_session.expires_at)
+
+        refresh_response = await client.post(
+            "/auth/refresh",
+            cookies={"refreshToken": login_cookie},
+        )
+        assert refresh_response.status_code == 200
+        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        assert refreshed_cookie == "idp-refresh-token-static"
+        refreshed_payload = refresh_response.json()
+        assert refreshed_payload["accessToken"] == "idp-access-token-updated"
+        assert refreshed_payload["expiresIn"] == 300
+
+    result = await db_session.execute(select(AuthSession))
+    sessions = result.scalars().all()
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert session.revoked_at is None
+    assert session.refresh_token_hash == hash_refresh_token("idp-refresh-token-static")
+    updated_expires_at = _ensure_aware(session.expires_at)
+    assert updated_expires_at != initial_expires_at
+    remaining_seconds = (updated_expires_at - datetime.now(timezone.utc)).total_seconds()
+    assert 6800 <= remaining_seconds <= 7205
+
+
+@pytest.mark.asyncio
 async def test_login_rejects_invalid_credentials(app, db_session):
     await create_user(
         db_session,
