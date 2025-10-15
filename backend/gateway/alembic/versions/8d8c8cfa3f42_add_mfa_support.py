@@ -23,6 +23,10 @@ def _enum_type(values: tuple[str, ...]) -> sa.Enum:
 
 def upgrade() -> None:
     bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {
+        column["name"] for column in inspector.get_columns("auth_sessions")
+    }
 
     if bind.dialect.name == "postgresql":
         op.execute("ALTER TYPE user_token_purpose ADD VALUE IF NOT EXISTS 'mfa_challenge'")
@@ -53,23 +57,37 @@ def upgrade() -> None:
     )
 
     with op.batch_alter_table("auth_sessions") as batch_op:
-        batch_op.add_column(sa.Column("mfa_verified_at", sa.DateTime(timezone=True), nullable=True))
-        batch_op.add_column(sa.Column("mfa_method", sa.String(length=32), nullable=True))
-        batch_op.add_column(
-            sa.Column(
-                "mfa_remember_device",
-                sa.Boolean(),
-                nullable=False,
-                server_default=sa.text("false"),
+        if "mfa_verified_at" not in existing_columns:
+            batch_op.add_column(
+                sa.Column("mfa_verified_at", sa.DateTime(timezone=True), nullable=True)
             )
-        )
+        if "mfa_method" not in existing_columns:
+            batch_op.add_column(sa.Column("mfa_method", sa.String(length=32), nullable=True))
+        if "mfa_remember_device" not in existing_columns:
+            batch_op.add_column(
+                sa.Column(
+                    "mfa_remember_device",
+                    sa.Boolean(),
+                    nullable=False,
+                    server_default=sa.text("false"),
+                )
+            )
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {
+        column["name"] for column in inspector.get_columns("auth_sessions")
+    }
+
     with op.batch_alter_table("auth_sessions") as batch_op:
-        batch_op.drop_column("mfa_remember_device")
-        batch_op.drop_column("mfa_method")
-        batch_op.drop_column("mfa_verified_at")
+        if "mfa_remember_device" in existing_columns:
+            batch_op.drop_column("mfa_remember_device")
+        if "mfa_method" in existing_columns:
+            batch_op.drop_column("mfa_method")
+        if "mfa_verified_at" in existing_columns:
+            batch_op.drop_column("mfa_verified_at")
 
     op.drop_index(op.f("ix_user_mfa_backup_codes_user_id"), table_name="user_mfa_backup_codes")
     op.drop_table("user_mfa_backup_codes")
