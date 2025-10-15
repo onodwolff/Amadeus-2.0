@@ -33,14 +33,17 @@ export class AuthApi {
   }
 
   getCurrentUser(): Observable<AuthUser> {
-    return this.http.get<AuthUser>(buildApiUrl('/api/auth/me'), this.withCredentials());
+    return this.http.get<AuthUser>(
+      buildApiUrl('/api/auth/me'),
+      this.withCredentials({ observe: 'body' as const }),
+    );
   }
 
   requestEmailChange(payload: EmailChangeRequest): Observable<EmailChangeResponse> {
     return this.http.patch<EmailChangeResponse>(
       buildApiUrl('/api/auth/me/email'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -48,7 +51,7 @@ export class AuthApi {
     return this.http.post<AuthUser>(
       buildApiUrl('/api/auth/me/email/confirm'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -56,7 +59,7 @@ export class AuthApi {
     return this.http.post<MfaSetupResponse>(
       buildApiUrl('/api/auth/me/mfa/setup'),
       {},
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -64,7 +67,7 @@ export class AuthApi {
     return this.http.post<MfaEnableResponse>(
       buildApiUrl('/api/auth/me/mfa/enable'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -72,7 +75,7 @@ export class AuthApi {
     return this.http.request<OperationStatus>(
       'DELETE',
       buildApiUrl('/api/auth/me/mfa'),
-      this.withCredentials({ body: payload }),
+      this.withCredentials({ body: payload, observe: 'body' as const }),
     );
   }
 
@@ -80,7 +83,7 @@ export class AuthApi {
     return this.http.post<BackupCodesResponse>(
       buildApiUrl('/api/auth/me/mfa/backup-codes'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -98,7 +101,7 @@ export class AuthApi {
     return this.http.post<TokenResponse>(
       buildApiUrl('/api/auth/login/mfa'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -106,7 +109,7 @@ export class AuthApi {
     return this.http.post<TokenResponse>(
       buildApiUrl('/api/auth/oidc/callback'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -114,7 +117,7 @@ export class AuthApi {
     return this.http.post<TokenResponse>(
       buildApiUrl('/api/auth/refresh'),
       {},
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -122,7 +125,7 @@ export class AuthApi {
     return this.http.post<OperationStatus>(
       buildApiUrl('/api/auth/me/sessions/revoke_all'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -130,7 +133,7 @@ export class AuthApi {
     return this.http.post<OperationStatus>(
       buildApiUrl('/api/auth/forgot-password'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
@@ -138,14 +141,14 @@ export class AuthApi {
     return this.http.post<OperationStatus>(
       buildApiUrl('/api/auth/reset-password'),
       payload,
-      this.withCredentials(),
+      this.withCredentials({ observe: 'body' as const }),
     );
   }
 
   verifyEmail(token: string): Observable<OperationStatus> {
     return this.http.get<OperationStatus>(
       buildApiUrl('/api/auth/verify-email'),
-      this.withCredentials({ params: { token } }),
+      this.withCredentials({ params: { token }, observe: 'body' as const }),
     );
   }
 }
