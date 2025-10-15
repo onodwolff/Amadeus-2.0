@@ -1,6 +1,7 @@
 """Authentication API endpoints."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import uuid
@@ -12,6 +13,7 @@ import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+import sqlalchemy as sa
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -56,6 +58,128 @@ def _ensure_test_schema() -> None:
         UserMFABackupCode.__table__,
     ):
         table.schema = None
+
+
+_AUTH_SESSION_FAMILY_SCHEMA_VERIFIED = False
+_AUTH_SESSION_FAMILY_SCHEMA_LOCK: asyncio.Lock | None = None
+
+
+async def _ensure_auth_session_family_schema(db: AsyncSession) -> None:
+    """Ensure the refresh token family schema exists even on stale databases."""
+
+    global _AUTH_SESSION_FAMILY_SCHEMA_VERIFIED
+
+    if _AUTH_SESSION_FAMILY_SCHEMA_VERIFIED:
+        return
+
+    global _AUTH_SESSION_FAMILY_SCHEMA_LOCK
+
+    if _AUTH_SESSION_FAMILY_SCHEMA_LOCK is None:
+        _AUTH_SESSION_FAMILY_SCHEMA_LOCK = asyncio.Lock()
+
+    async with _AUTH_SESSION_FAMILY_SCHEMA_LOCK:
+        if _AUTH_SESSION_FAMILY_SCHEMA_VERIFIED:
+            return
+
+        table = AuthSession.__table__
+
+        def _ensure_schema(sync_session) -> None:
+            bind = sync_session.get_bind()
+            if bind is None or bind.dialect.name != "postgresql":
+                return
+
+            sync_conn = sync_session.connection()
+
+            inspector = sa.inspect(sync_conn)
+            schema = table.schema
+            table_name = table.name
+            columns = {
+                column["name"]: column
+                for column in inspector.get_columns(table_name, schema=schema)
+            }
+            indexes = {
+                index["name"]
+                for index in inspector.get_indexes(table_name, schema=schema)
+            }
+            foreign_keys = {
+                fk["name"]: fk
+                for fk in inspector.get_foreign_keys(table_name, schema=schema)
+            }
+
+            preparer = sa.sql.compiler.IdentifierPreparer(sync_conn.dialect)
+            if schema:
+                qualified_table = (
+                    f"{preparer.quote_schema(schema)}.{preparer.quote(table_name)}"
+                )
+            else:
+                qualified_table = preparer.quote(table_name)
+
+            parent_fk_name = "fk_auth_sessions_parent_session_id_auth_sessions"
+
+            if "family_id" not in columns:
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} ADD COLUMN family_id VARCHAR(36)"
+                )
+                columns["family_id"] = {"nullable": True}
+
+            if "parent_session_id" not in columns:
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} ADD COLUMN parent_session_id INTEGER"
+                )
+
+            if "ix_auth_sessions_family_id" not in indexes:
+                sync_conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_auth_sessions_family_id "
+                    f"ON {qualified_table} (family_id)"
+                )
+
+            parent_fk = foreign_keys.get(parent_fk_name)
+            if parent_fk is not None:
+                options = parent_fk.get("options") or {}
+                ondelete = (options.get("ondelete") or "").upper()
+            else:
+                ondelete = ""
+
+            if ondelete != "SET NULL":
+                if parent_fk is not None:
+                    sync_conn.exec_driver_sql(
+                        "ALTER TABLE {table} DROP CONSTRAINT {constraint}".format(
+                            table=qualified_table,
+                            constraint=preparer.quote(parent_fk_name),
+                        )
+                    )
+                sync_conn.exec_driver_sql(
+                    "ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+                    "FOREIGN KEY (parent_session_id) REFERENCES {table} (id) "
+                    "ON DELETE SET NULL".format(
+                        table=qualified_table,
+                        constraint=preparer.quote(parent_fk_name),
+                    )
+                )
+
+            family_column = columns.get("family_id") or {}
+            if family_column.get("nullable", True):
+                rows = sync_conn.execute(
+                    sa.text(
+                        f"SELECT id FROM {qualified_table} "
+                        "WHERE family_id IS NULL"
+                    )
+                ).fetchall()
+                for (session_id,) in rows:
+                    sync_conn.execute(
+                        sa.text(
+                            f"UPDATE {qualified_table} "
+                            "SET family_id = :family_id WHERE id = :session_id"
+                        ),
+                        {"family_id": str(uuid.uuid4()), "session_id": session_id},
+                    )
+
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} ALTER COLUMN family_id SET NOT NULL"
+                )
+
+        await db.run_sync(_ensure_schema)
+        _AUTH_SESSION_FAMILY_SCHEMA_VERIFIED = True
 
 from ..audit import record_audit_event
 from ..bruteforce import BruteForceProtector
@@ -393,6 +517,7 @@ async def _issue_tokens(
     refresh_token_expires_at: datetime | None = None,
 ) -> TokenResponse:
     _ensure_test_schema()
+    await _ensure_auth_session_family_schema(db)
     now = datetime.now(timezone.utc)
 
     if issued_access_token is None:
