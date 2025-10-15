@@ -1510,6 +1510,7 @@ async def setup_mfa(
     current_user: User = Security(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> MfaSetupResponse:
+    current_user = await _load_user(db, current_user.id)
     if current_user.mfa_enabled:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Two-factor authentication is already enabled")
 
@@ -1527,6 +1528,7 @@ async def enable_mfa(
     current_user: User = Security(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> MfaEnableResponse:
+    current_user = await _load_user(db, current_user.id)
     secret = current_user.mfa_secret
     if secret is None:
         secret = _generate_totp_secret()
@@ -1571,6 +1573,7 @@ async def disable_mfa(
     current_user: User = Security(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> OperationStatus:
+    current_user = await _load_user(db, current_user.id)
     if not current_user.mfa_enabled:
         await _record_auth_event(
             db,
@@ -1628,6 +1631,7 @@ async def regenerate_backup_codes(
     current_user: User = Security(get_current_user),
     db: AsyncSession = Depends(get_session),
 ) -> BackupCodesResponse:
+    current_user = await _load_user(db, current_user.id)
     if not current_user.mfa_enabled:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Two-factor authentication is not enabled")
 
