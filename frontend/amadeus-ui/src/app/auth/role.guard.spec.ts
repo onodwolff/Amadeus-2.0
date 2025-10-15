@@ -22,7 +22,7 @@ describe('RoleGuard', () => {
 
     auth = jasmine.createSpyObj<AuthService>(
       'AuthService',
-      ['bootstrapMe', 'getAccessToken'],
+      ['bootstrapMe', 'getAccessToken', 'login'],
       { currentUser: currentUserSignal.asReadonly() },
     );
     auth.bootstrapMe.and.resolveTo();
@@ -59,7 +59,7 @@ describe('RoleGuard', () => {
     expect(auth.bootstrapMe).toHaveBeenCalled();
   });
 
-  it('redirects to /login when the user is not authenticated', async () => {
+  it('initiates Mono login when the user is not authenticated', async () => {
     accessToken = null;
 
     const route: Route = {
@@ -71,8 +71,8 @@ describe('RoleGuard', () => {
     const result = await guard.canMatch(route, [] as UrlSegment[]);
 
     expect(auth.bootstrapMe).toHaveBeenCalled();
-    expect(result instanceof UrlTree).toBeTrue();
-    expect(router.serializeUrl(result as UrlTree)).toEqual(router.serializeUrl(router.parseUrl('/login')));
+    expect(result).toBeFalse();
+    expect(auth.login).toHaveBeenCalled();
   });
 
   it('redirects to /403 when the user lacks a required role', async () => {

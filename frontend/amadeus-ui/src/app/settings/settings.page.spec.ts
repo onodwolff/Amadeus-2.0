@@ -202,7 +202,7 @@ describe('SettingsPage advanced settings', () => {
     await fixture.whenStable();
 
     expect(authStateStub.logout).toHaveBeenCalled();
-    expect(routerStub.navigate).toHaveBeenCalledWith(['/login']);
+    expect(routerStub.navigate).not.toHaveBeenCalled();
     expect(notificationServiceStub.info).toHaveBeenCalledWith('You have been signed out.', 'Security');
   });
 
@@ -219,7 +219,7 @@ describe('SettingsPage advanced settings', () => {
     await fixture.whenStable();
 
     expect(authStateStub.logout).toHaveBeenCalled();
-    expect(routerStub.navigate).toHaveBeenCalledWith(['/login']);
+    expect(routerStub.navigate).not.toHaveBeenCalled();
     expect(notificationServiceStub.info).toHaveBeenCalledWith('You have been signed out.', 'Security');
   });
 
