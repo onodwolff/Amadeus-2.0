@@ -240,6 +240,14 @@
         </div>
       </header>
       <footer class="settings-card__actions">
+        <button
+          type="button"
+          class="btn btn--ghost"
+          data-testid="logout-current-session"
+          (click)="logoutCurrentSession()"
+        >
+          Log out
+        </button>
         <button type="button" class="btn btn--ghost" (click)="openLogoutDialog()">Log out of all sessions</button>
       </footer>
     </article>
