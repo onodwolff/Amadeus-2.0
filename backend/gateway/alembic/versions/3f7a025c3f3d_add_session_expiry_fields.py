@@ -28,53 +28,66 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "auth_sessions",
-        sa.Column("absolute_expires_at", sa.DateTime(timezone=True), nullable=True),
-        schema=SCHEMA,
-    )
-    op.add_column(
-        "auth_sessions",
-        sa.Column("idle_expires_at", sa.DateTime(timezone=True), nullable=True),
-        schema=SCHEMA,
-    )
-
-    auth_sessions = sa.table(
-        "auth_sessions",
-        sa.column("id", sa.Integer()),
-        sa.column("expires_at", sa.DateTime(timezone=True)),
-        sa.column("absolute_expires_at", sa.DateTime(timezone=True)),
-        sa.column("idle_expires_at", sa.DateTime(timezone=True)),
-    )
-
     bind = op.get_bind()
-    now = sa.func.now()
+    inspector = sa.inspect(bind)
 
-    bind.execute(
-        sa.update(auth_sessions)
-        .where(auth_sessions.c.absolute_expires_at.is_(None))
-        .values(absolute_expires_at=auth_sessions.c.expires_at)
-    )
-    bind.execute(
-        sa.update(auth_sessions)
-        .where(auth_sessions.c.idle_expires_at.is_(None))
-        .values(idle_expires_at=now)
-    )
+    schema_kwargs = {"schema": SCHEMA} if SCHEMA is not None else {}
 
-    op.alter_column(
-        "auth_sessions",
-        "absolute_expires_at",
-        existing_type=sa.DateTime(timezone=True),
-        nullable=False,
-        schema=SCHEMA,
-    )
-    op.alter_column(
-        "auth_sessions",
-        "idle_expires_at",
-        existing_type=sa.DateTime(timezone=True),
-        nullable=False,
-        schema=SCHEMA,
-    )
+    added_absolute_expires_at = False
+    if not inspector.has_column("auth_sessions", "absolute_expires_at", **schema_kwargs):
+        op.add_column(
+            "auth_sessions",
+            sa.Column("absolute_expires_at", sa.DateTime(timezone=True), nullable=True),
+            schema=SCHEMA,
+        )
+        added_absolute_expires_at = True
+
+    added_idle_expires_at = False
+    if not inspector.has_column("auth_sessions", "idle_expires_at", **schema_kwargs):
+        op.add_column(
+            "auth_sessions",
+            sa.Column("idle_expires_at", sa.DateTime(timezone=True), nullable=True),
+            schema=SCHEMA,
+        )
+        added_idle_expires_at = True
+
+    if added_absolute_expires_at or added_idle_expires_at:
+        auth_sessions = sa.table(
+            "auth_sessions",
+            sa.column("id", sa.Integer()),
+            sa.column("expires_at", sa.DateTime(timezone=True)),
+            sa.column("absolute_expires_at", sa.DateTime(timezone=True)),
+            sa.column("idle_expires_at", sa.DateTime(timezone=True)),
+        )
+
+        if added_absolute_expires_at:
+            bind.execute(
+                sa.update(auth_sessions)
+                .where(auth_sessions.c.absolute_expires_at.is_(None))
+                .values(absolute_expires_at=auth_sessions.c.expires_at)
+            )
+            op.alter_column(
+                "auth_sessions",
+                "absolute_expires_at",
+                existing_type=sa.DateTime(timezone=True),
+                nullable=False,
+                schema=SCHEMA,
+            )
+
+        if added_idle_expires_at:
+            now = sa.func.now()
+            bind.execute(
+                sa.update(auth_sessions)
+                .where(auth_sessions.c.idle_expires_at.is_(None))
+                .values(idle_expires_at=now)
+            )
+            op.alter_column(
+                "auth_sessions",
+                "idle_expires_at",
+                existing_type=sa.DateTime(timezone=True),
+                nullable=False,
+                schema=SCHEMA,
+            )
 
 
 def downgrade() -> None:
