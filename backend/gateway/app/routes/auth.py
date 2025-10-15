@@ -677,7 +677,8 @@ async def _issue_tokens(
 
     refreshed_user = await _load_user(db, user.id)
 
-    ttl_seconds = int(settings.auth.refresh_token_ttl_seconds)
+    ttl_delta = refresh_expires - now
+    ttl_seconds = max(0, int(ttl_delta.total_seconds()))
     cookie_secure = settings.auth.cookie_secure
     response.set_cookie(
         key="refreshToken",

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -9,8 +10,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 import pyotp
+from fastapi import Response
 
 from backend.gateway.app.security import TokenData, hash_refresh_token
+from backend.gateway.app.routes.auth import _issue_tokens
 from backend.gateway.config import settings
 from backend.gateway.db.models import AuthSession, UserRole
 
@@ -452,6 +455,54 @@ async def test_refresh_reuse_revokes_new_generation(app, db_session):
     assert all(session.revoked_at is not None for session in sessions)
     family_ids = {session.family_id for session in sessions}
     assert len(family_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_issue_tokens_cookie_respects_refresh_expiry(db_session):
+    user = await create_user(
+        db_session,
+        email="expiry-cookie@example.com",
+        username="expiry-cookie",
+        password="temporary-pass",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    response = Response()
+    issued_at = datetime.now(timezone.utc)
+    refresh_expiry = issued_at + timedelta(minutes=5)
+    refresh_token_value = f"explicit-refresh-{uuid.uuid4()}"
+
+    token = await _issue_tokens(
+        db_session,
+        user=user,
+        response=response,
+        request=None,
+        issued_access_token="static-access-token",
+        access_token_expires_in=60,
+        issued_refresh_token=refresh_token_value,
+        refresh_token_expires_at=refresh_expiry,
+    )
+
+    completed_at = datetime.now(timezone.utc)
+
+    assert token.refresh_expires_at == refresh_expiry
+
+    cookie_header = response.headers.get("set-cookie", "")
+    assert "refreshToken=" in cookie_header
+
+    max_age_value: int | None = None
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if part.lower().startswith("max-age="):
+            max_age_value = int(part.split("=", 1)[1])
+            break
+
+    assert max_age_value is not None
+
+    expected_max = max(0, int((refresh_expiry - issued_at).total_seconds()))
+    expected_min = max(0, int((refresh_expiry - completed_at).total_seconds()))
+
+    assert expected_min <= max_age_value <= expected_max
 
 
 @pytest.mark.asyncio
