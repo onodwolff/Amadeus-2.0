@@ -105,6 +105,15 @@ class AuthSettings(BaseModel):
         ),
         description="JWKS endpoint exposed by the identity provider.",
     )
+    idp_authorization_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_IDP_AUTHORIZATION_URL",
+            "AUTH__IDP_AUTHORIZATION_URL",
+            "SECURITY_OIDC_AUTHORIZATION_URL",
+        ),
+        description="Authorization endpoint exposed by the identity provider.",
+    )
     idp_token_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices(

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 
 from ..config import settings
 from ..security import get_local_jwk
@@ -41,6 +42,8 @@ async def openid_configuration(realm: str) -> dict[str, Any]:
     configured_authorization = _normalise_url(
         getattr(settings.auth, "idp_authorization_url", None)
     )
+    if configured_authorization and "{realm}" in configured_authorization:
+        configured_authorization = configured_authorization.replace("{realm}", realm)
     authorization_endpoint = configured_authorization or f"{issuer}/protocol/openid-connect/auth"
 
     configured_token = _normalise_url(getattr(settings.auth, "idp_token_url", None))
@@ -68,6 +71,29 @@ async def openid_jwks(realm: str) -> dict[str, Any]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="JWKS not configured")
 
     return {"keys": [get_local_jwk()]}
+
+
+@router.get("/realms/{realm}/protocol/openid-connect/auth")
+async def openid_authorization(realm: str, request: Request) -> RedirectResponse:
+    """Redirect the authorization request to the configured identity provider."""
+
+    configured_authorization = _normalise_url(
+        getattr(settings.auth, "idp_authorization_url", None)
+    )
+    if not configured_authorization:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Authorization endpoint not configured"
+        )
+
+    if "{realm}" in configured_authorization:
+        configured_authorization = configured_authorization.replace("{realm}", realm)
+
+    target = configured_authorization
+    if request.url.query:
+        separator = "&" if "?" in target else "?"
+        target = f"{target}{separator}{request.url.query}"
+
+    return RedirectResponse(url=target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 __all__ = ["router"]
