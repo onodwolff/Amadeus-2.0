@@ -189,6 +189,23 @@ describe('SettingsPage advanced settings', () => {
     component.availableExchanges.set([{ code: 'BINANCE', name: 'Binance' }]);
   });
 
+  it('renders exit button that logs out the current session', async () => {
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const exitButton = host.querySelector('[data-testid="settings-exit"]') as HTMLButtonElement | null;
+
+    expect(exitButton).withContext('exit button should be rendered').not.toBeNull();
+
+    exitButton?.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(authStateStub.logout).toHaveBeenCalled();
+    expect(routerStub.navigate).toHaveBeenCalledWith(['/login']);
+    expect(notificationServiceStub.info).toHaveBeenCalledWith('You have been signed out.', 'Security');
+  });
+
   it('logs out current session and redirects to login', async () => {
     fixture.detectChanges();
 

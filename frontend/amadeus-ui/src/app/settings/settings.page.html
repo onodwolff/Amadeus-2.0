@@ -8,9 +8,21 @@
         Nautilus Trader.
       </p>
     </div>
-    <div class="settings-page__chip" *ngIf="user() as user">
-      <span class="settings-page__chip-email">{{ user.email }}</span>
-      <span class="settings-page__chip-badge" *ngIf="isAdmin">Admin</span>
+    <div class="settings-page__actions">
+      <ng-container *ngIf="user() as user">
+        <div class="settings-page__chip">
+          <span class="settings-page__chip-email">{{ user.email }}</span>
+          <span class="settings-page__chip-badge" *ngIf="isAdmin">Admin</span>
+        </div>
+      </ng-container>
+      <button
+        type="button"
+        class="btn btn--ghost settings-page__exit"
+        data-testid="settings-exit"
+        (click)="logoutCurrentSession()"
+      >
+        Exit
+      </button>
     </div>
   </header>
 
