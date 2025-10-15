@@ -27,14 +27,19 @@ branch_labels = None
 depends_on = None
 
 
+def _has_column(inspector, table_name: str, column_name: str, *, schema: str | None) -> bool:
+    """Return True if the given column exists on the table."""
+
+    columns = inspector.get_columns(table_name, schema=schema)
+    return any(column["name"] == column_name for column in columns)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
-    schema_kwargs = {"schema": SCHEMA} if SCHEMA is not None else {}
-
     added_absolute_expires_at = False
-    if not inspector.has_column("auth_sessions", "absolute_expires_at", **schema_kwargs):
+    if not _has_column(inspector, "auth_sessions", "absolute_expires_at", schema=SCHEMA):
         op.add_column(
             "auth_sessions",
             sa.Column("absolute_expires_at", sa.DateTime(timezone=True), nullable=True),
@@ -43,7 +48,7 @@ def upgrade() -> None:
         added_absolute_expires_at = True
 
     added_idle_expires_at = False
-    if not inspector.has_column("auth_sessions", "idle_expires_at", **schema_kwargs):
+    if not _has_column(inspector, "auth_sessions", "idle_expires_at", schema=SCHEMA):
         op.add_column(
             "auth_sessions",
             sa.Column("idle_expires_at", sa.DateTime(timezone=True), nullable=True),
