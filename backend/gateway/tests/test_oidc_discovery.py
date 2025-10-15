@@ -21,6 +21,11 @@ def configure_oidc(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(
         settings.auth,
+        "idp_authorization_url",
+        "https://idp.example.com/realms/amadeus/protocol/openid-connect/auth",
+    )
+    monkeypatch.setattr(
+        settings.auth,
         "idp_token_url",
         "https://idp.example.com/realms/amadeus/protocol/openid-connect/token",
     )
@@ -79,6 +84,32 @@ async def test_oidc_jwks_document_disabled_when_external_idp_configured(
     monkeypatch.setattr(settings.auth, "idp_jwks_url", "https://idp.example.com/jwks")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.get("/realms/amadeus/protocol/openid-connect/certs")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_oidc_authorization_redirects_to_configured_idp(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(
+            "/realms/amadeus/protocol/openid-connect/auth",
+            params={"client_id": "amadeus-ui", "scope": "openid"},
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == (
+        "https://idp.example.com/realms/amadeus/protocol/openid-connect/auth"
+        "?client_id=amadeus-ui&scope=openid"
+    )
+
+
+@pytest.mark.asyncio
+async def test_oidc_authorization_returns_not_found_when_unconfigured(
+    app, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(settings.auth, "idp_authorization_url", None)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/realms/amadeus/protocol/openid-connect/auth")
 
     assert response.status_code == 404
 
