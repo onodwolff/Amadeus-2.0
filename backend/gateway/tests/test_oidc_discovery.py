@@ -54,6 +54,19 @@ async def test_oidc_well_known_configuration(app):
 
 
 @pytest.mark.asyncio
+async def test_oidc_well_known_configuration_returns_not_found_when_unconfigured(
+    app, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(settings.auth, "idp_authorization_url", None)
+    monkeypatch.setattr(settings.auth, "idp_token_url", None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/realms/amadeus/.well-known/openid-configuration")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_oidc_jwks_document_exposes_local_secret(app, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings.auth, "idp_jwks_url", None)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
