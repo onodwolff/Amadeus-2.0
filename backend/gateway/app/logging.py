@@ -65,7 +65,19 @@ def _resolve_log_level(level: str | int | None) -> int:
 def setup_logging(*, level: str | int | None = None) -> None:
     env_level = os.getenv("LOG_LEVEL")
     resolved = _resolve_log_level(level or env_level)
-    logging.basicConfig(format="%(message)s", stream=sys.stdout, level=resolved, force=True)
+
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        root_logger.setLevel(resolved)
+        for handler in root_logger.handlers:
+            handler.setLevel(resolved)
+    else:
+        logging.basicConfig(
+            format="%(message)s",
+            stream=sys.stdout,
+            level=resolved,
+            force=False,
+        )
     if structlog is None:
         logging.getLogger(__name__).warning(
             "structlog is not installed; falling back to standard logging output."
