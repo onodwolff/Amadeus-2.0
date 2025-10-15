@@ -235,16 +235,39 @@ def RequirePermissions(*permissions: str, roles: Iterable[UserRole | str] | None
 
     if not permissions:
         raise ValueError("At least one permission must be provided")
-    required_permissions: Set[str] = set(permissions)
-    required_roles = [
-        _normalise_role(role)
-        for role in (roles or [])
-    ]
+
+    normalised_permissions: list[str] = []
+    normalised_roles: list[str] = []
+    seen_scopes: set[str] = set()
+
+    for permission in permissions:
+        cleaned = _normalise_scope(permission)
+        if not cleaned or cleaned in seen_scopes:
+            continue
+        seen_scopes.add(cleaned)
+        normalised_permissions.append(cleaned)
+
+    for role in roles or []:
+        cleaned_role = _normalise_scope(_normalise_role(role))
+        if not cleaned_role or cleaned_role in seen_scopes:
+            continue
+        seen_scopes.add(cleaned_role)
+        normalised_roles.append(cleaned_role)
+
+    if not normalised_permissions:
+        raise ValueError("At least one permission must be provided")
+
+    combined_scopes = [*normalised_permissions, *normalised_roles]
+    required_permissions: Set[str] = set(normalised_permissions)
 
     async def dependency(
-        current_user: User = Security(get_current_user, scopes=required_roles),
+        current_user: User = Security(get_current_user, scopes=combined_scopes),
     ) -> User:
-        granted = set(current_user.permissions)
+        granted = {
+            cleaned
+            for permission in current_user.permissions
+            if (cleaned := _normalise_scope(permission))
+        }
         if required_permissions.issubset(granted):
             return current_user
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
