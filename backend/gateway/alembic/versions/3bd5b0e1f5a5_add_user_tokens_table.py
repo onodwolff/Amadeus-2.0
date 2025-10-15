@@ -12,6 +12,7 @@ from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 CURRENT_DIR = Path(__file__).resolve()
 BACKEND_DIR = CURRENT_DIR.parents[2]
@@ -59,11 +60,12 @@ def upgrade() -> None:
             )
         )
 
-    purpose_enum = sa.Enum(
+    purpose_enum = postgresql.ENUM(
         "password_reset",
         "email_verification",
         name="user_token_purpose",
         schema=schema,
+        inherit_schema=True,
         create_type=False,
     )
 
