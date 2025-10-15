@@ -165,6 +165,11 @@ class AuthSettings(BaseModel):
         validation_alias=AliasChoices("AUTH_ALLOW_TEST_TOKENS", "AUTH__ALLOW_TEST_TOKENS"),
         description="Enable legacy locally signed tokens for test environments.",
     )
+    cookie_secure: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AUTH_COOKIE_SECURE", "AUTH__COOKIE_SECURE"),
+        description="Mark refresh token cookies as secure (HTTPS only).",
+    )
     public_base_url: str = Field(
         default="http://localhost:8000",
         validation_alias=AliasChoices("AUTH_PUBLIC_BASE_URL", "AUTH__PUBLIC_BASE_URL"),
