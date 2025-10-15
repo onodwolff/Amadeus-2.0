@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -161,6 +161,7 @@ export class SettingsPage implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly notifications = inject(NotificationService);
   private readonly authState = inject(AuthStateService);
+  private readonly router = inject(Router);
 
   readonly keys = signal<ApiKey[]>([]);
   readonly isLoading = signal(false);
@@ -304,6 +305,17 @@ export class SettingsPage implements OnInit {
 
   closeLogoutDialog(): void {
     this.isLogoutDialogOpen.set(false);
+  }
+
+  async logoutCurrentSession(): Promise<void> {
+    this.authState.logout();
+    this.notifications.info('You have been signed out.', 'Security');
+
+    try {
+      await this.router.navigate(['/login']);
+    } catch {
+      this.notifications.error('Unable to redirect to the login page. Please refresh.', 'Security');
+    }
   }
 
   openDisableTwoFactorDialog(): void {

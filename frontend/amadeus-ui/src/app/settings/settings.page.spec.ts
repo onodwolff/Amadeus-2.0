@@ -1,6 +1,8 @@
 import { provideZonelessChangeDetection, signal, WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
+import { Router } from '@angular/router';
+import { RouterTestingModule } from '@angular/router/testing';
 
 import { AuthApi } from '../api/clients/auth.api';
 import { IntegrationsApi } from '../api/clients/integrations.api';
@@ -58,6 +60,7 @@ describe('SettingsPage advanced settings', () => {
   let authStateStub: Partial<AuthStateService>;
   let currentUserSignal: WritableSignal<AuthUser | null>;
   let permissionsSignal: WritableSignal<string[]>;
+  let routerStub: jasmine.SpyObj<Router>;
 
   beforeEach(async () => {
     authApiStub = jasmine.createSpyObj<AuthApi>('AuthApi', [
@@ -156,12 +159,16 @@ describe('SettingsPage advanced settings', () => {
       initialize: jasmine.createSpy('initialize'),
       setCurrentUser: jasmine.createSpy('setCurrentUser'),
       clear: jasmine.createSpy('clear'),
+      logout: jasmine.createSpy('logout'),
       currentUser: currentUserSignal,
       permissions: permissionsSignal,
     };
 
+    routerStub = jasmine.createSpyObj<Router>('Router', ['navigate']);
+    routerStub.navigate.and.returnValue(Promise.resolve(true));
+
     await TestBed.configureTestingModule({
-      imports: [SettingsPage],
+      imports: [SettingsPage, RouterTestingModule],
       providers: [
         provideZonelessChangeDetection(),
         { provide: AuthApi, useValue: authApiStub },
@@ -172,6 +179,7 @@ describe('SettingsPage advanced settings', () => {
         { provide: IntegrationsApi, useValue: integrationsApiStub },
         { provide: NotificationService, useValue: notificationServiceStub },
         { provide: AuthStateService, useValue: authStateStub as AuthStateService },
+        { provide: Router, useValue: routerStub },
       ],
     }).compileComponents();
 
@@ -179,6 +187,23 @@ describe('SettingsPage advanced settings', () => {
     component = fixture.componentInstance;
     component.ngOnInit = () => {};
     component.availableExchanges.set([{ code: 'BINANCE', name: 'Binance' }]);
+  });
+
+  it('logs out current session and redirects to login', async () => {
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const logoutButton = host.querySelector('[data-testid="logout-current-session"]') as HTMLButtonElement | null;
+
+    expect(logoutButton).withContext('log out button should be rendered').not.toBeNull();
+
+    logoutButton?.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(authStateStub.logout).toHaveBeenCalled();
+    expect(routerStub.navigate).toHaveBeenCalledWith(['/login']);
+    expect(notificationServiceStub.info).toHaveBeenCalledWith('You have been signed out.', 'Security');
   });
 
   it('should hide create dialog advanced settings until expanded', () => {
