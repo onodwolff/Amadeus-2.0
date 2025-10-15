@@ -28,46 +28,72 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "auth_sessions",
-        sa.Column("family_id", sa.String(length=36), nullable=True),
-        schema=SCHEMA,
-    )
-    op.add_column(
-        "auth_sessions",
-        sa.Column("parent_session_id", sa.Integer(), nullable=True),
-        schema=SCHEMA,
-    )
-    op.create_index(
-        "ix_auth_sessions_family_id",
-        "auth_sessions",
-        ["family_id"],
-        unique=False,
-        schema=SCHEMA,
-    )
-    op.create_foreign_key(
-        op.f("fk_auth_sessions_parent_session_id_auth_sessions"),
-        "auth_sessions",
-        "auth_sessions",
-        local_cols=["parent_session_id"],
-        remote_cols=["id"],
-        ondelete="CASCADE",
-        source_schema=SCHEMA,
-        referent_schema=SCHEMA,
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    columns = {
+        column["name"]: column
+        for column in inspector.get_columns("auth_sessions", schema=SCHEMA)
+    }
+    indexes = {
+        index["name"]
+        for index in inspector.get_indexes("auth_sessions", schema=SCHEMA)
+    }
+    foreign_keys = {
+        fk["name"]: fk
+        for fk in inspector.get_foreign_keys("auth_sessions", schema=SCHEMA)
+    }
+
+    if "family_id" not in columns:
+        op.add_column(
+            "auth_sessions",
+            sa.Column("family_id", sa.String(length=36), nullable=True),
+            schema=SCHEMA,
+        )
+
+    if "parent_session_id" not in columns:
+        op.add_column(
+            "auth_sessions",
+            sa.Column("parent_session_id", sa.Integer(), nullable=True),
+            schema=SCHEMA,
+        )
+
+    if "ix_auth_sessions_family_id" not in indexes:
+        op.create_index(
+            "ix_auth_sessions_family_id",
+            "auth_sessions",
+            ["family_id"],
+            unique=False,
+            schema=SCHEMA,
+        )
+
+    fk_name = op.f("fk_auth_sessions_parent_session_id_auth_sessions")
+    if fk_name not in foreign_keys:
+        op.create_foreign_key(
+            fk_name,
+            "auth_sessions",
+            "auth_sessions",
+            local_cols=["parent_session_id"],
+            remote_cols=["id"],
+            ondelete="CASCADE",
+            source_schema=SCHEMA,
+            referent_schema=SCHEMA,
+        )
 
     auth_sessions = sa.table(
         "auth_sessions",
         sa.column("id", sa.Integer()),
         sa.column("family_id", sa.String(length=36)),
+        schema=SCHEMA,
     )
-    bind = op.get_bind()
-    result = bind.execute(sa.select(auth_sessions.c.id))
-    rows = result.fetchall()
-    for row in rows:
+
+    rows = bind.execute(
+        sa.select(auth_sessions.c.id).where(auth_sessions.c.family_id.is_(None))
+    ).fetchall()
+    for (session_id,) in rows:
         bind.execute(
             sa.update(auth_sessions)
-            .where(auth_sessions.c.id == row.id)
+            .where(auth_sessions.c.id == session_id)
             .values(family_id=str(uuid.uuid4()))
         )
 
