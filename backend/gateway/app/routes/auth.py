@@ -64,6 +64,10 @@ _AUTH_SESSION_FAMILY_SCHEMA_VERIFIED = False
 _AUTH_SESSION_FAMILY_SCHEMA_LOCK: asyncio.Lock | None = None
 
 
+_AUTH_SESSION_MFA_SCHEMA_VERIFIED = False
+_AUTH_SESSION_MFA_SCHEMA_LOCK: asyncio.Lock | None = None
+
+
 async def _ensure_auth_session_family_schema(db: AsyncSession) -> None:
     """Ensure the refresh token family schema exists even on stale databases."""
 
@@ -180,6 +184,86 @@ async def _ensure_auth_session_family_schema(db: AsyncSession) -> None:
 
         await db.run_sync(_ensure_schema)
         _AUTH_SESSION_FAMILY_SCHEMA_VERIFIED = True
+
+
+async def _ensure_auth_session_mfa_schema(db: AsyncSession) -> None:
+    """Ensure MFA related columns exist for backwards compatibility."""
+
+    global _AUTH_SESSION_MFA_SCHEMA_VERIFIED
+
+    if _AUTH_SESSION_MFA_SCHEMA_VERIFIED:
+        return
+
+    global _AUTH_SESSION_MFA_SCHEMA_LOCK
+
+    if _AUTH_SESSION_MFA_SCHEMA_LOCK is None:
+        _AUTH_SESSION_MFA_SCHEMA_LOCK = asyncio.Lock()
+
+    async with _AUTH_SESSION_MFA_SCHEMA_LOCK:
+        if _AUTH_SESSION_MFA_SCHEMA_VERIFIED:
+            return
+
+        table = AuthSession.__table__
+
+        def _ensure_schema(sync_session) -> None:
+            bind = sync_session.get_bind()
+            if bind is None or bind.dialect.name != "postgresql":
+                return
+
+            sync_conn = sync_session.connection()
+            inspector = sa.inspect(sync_conn)
+            schema = table.schema
+            table_name = table.name
+            columns = {
+                column["name"]: column
+                for column in inspector.get_columns(table_name, schema=schema)
+            }
+
+            preparer = sa.sql.compiler.IdentifierPreparer(sync_conn.dialect)
+            if schema:
+                qualified_table = (
+                    f"{preparer.quote_schema(schema)}.{preparer.quote(table_name)}"
+                )
+            else:
+                qualified_table = preparer.quote(table_name)
+
+            if "mfa_verified_at" not in columns:
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} ADD COLUMN mfa_verified_at TIMESTAMPTZ"
+                )
+
+            if "mfa_method" not in columns:
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} ADD COLUMN mfa_method VARCHAR(32)"
+                )
+
+            remember_column = columns.get("mfa_remember_device")
+            if remember_column is None:
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} "
+                    "ADD COLUMN mfa_remember_device BOOLEAN DEFAULT FALSE"
+                )
+                sync_conn.exec_driver_sql(
+                    f"UPDATE {qualified_table} SET mfa_remember_device = FALSE "
+                    "WHERE mfa_remember_device IS NULL"
+                )
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} "
+                    "ALTER COLUMN mfa_remember_device SET NOT NULL"
+                )
+            elif remember_column.get("nullable", True):
+                sync_conn.exec_driver_sql(
+                    f"UPDATE {qualified_table} SET mfa_remember_device = FALSE "
+                    "WHERE mfa_remember_device IS NULL"
+                )
+                sync_conn.exec_driver_sql(
+                    f"ALTER TABLE {qualified_table} "
+                    "ALTER COLUMN mfa_remember_device SET NOT NULL"
+                )
+
+        await db.run_sync(_ensure_schema)
+        _AUTH_SESSION_MFA_SCHEMA_VERIFIED = True
+
 
 from ..audit import record_audit_event
 from ..bruteforce import BruteForceProtector
@@ -518,6 +602,7 @@ async def _issue_tokens(
 ) -> TokenResponse:
     _ensure_test_schema()
     await _ensure_auth_session_family_schema(db)
+    await _ensure_auth_session_mfa_schema(db)
     now = datetime.now(timezone.utc)
 
     if issued_access_token is None:
