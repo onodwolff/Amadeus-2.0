@@ -40,12 +40,34 @@ user_token_purpose = postgresql.ENUM(
     "email_verification",
     name="user_token_purpose",
     schema=SCHEMA,
+    create_type=False,
 )
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    user_token_purpose.create(bind, checkfirst=True)
+    schema = SCHEMA or "public"
+
+    op.execute(
+        f"""
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE t.typname = 'user_token_purpose' AND n.nspname = '{schema}'
+      ) THEN
+        CREATE TYPE {schema}.user_token_purpose AS ENUM ('password_reset', 'email_verification');
+      END IF;
+    END$$;
+    """
+    )
+
+    op.execute(
+        f"""
+    ALTER TYPE {schema}.user_token_purpose ADD VALUE IF NOT EXISTS 'password_reset';
+    ALTER TYPE {schema}.user_token_purpose ADD VALUE IF NOT EXISTS 'email_verification';
+    """
+    )
 
     op.create_table(
         "user_tokens",
@@ -91,4 +113,3 @@ def downgrade() -> None:
         schema=SCHEMA,
     )
     op.drop_table("user_tokens", schema=SCHEMA)
-    user_token_purpose.drop(op.get_bind(), checkfirst=False)
