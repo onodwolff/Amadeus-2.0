@@ -730,7 +730,7 @@ class AuthSession(Base):
     refresh_token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     family_id: Mapped[str] = mapped_column(String(36), nullable=False)
     parent_session_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("auth_sessions.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("auth_sessions.id", ondelete="SET NULL"), nullable=True
     )
     user_agent: Mapped[Optional[str]] = mapped_column(String(255))
     ip_address: Mapped[Optional[str]] = mapped_column(String(45))
