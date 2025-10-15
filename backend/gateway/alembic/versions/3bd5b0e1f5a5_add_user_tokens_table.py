@@ -44,6 +44,9 @@ user_token_purpose = postgresql.ENUM(
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    user_token_purpose.create(bind, checkfirst=True)
+
     op.create_table(
         "user_tokens",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -53,14 +56,19 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(
-            ["user_id"],
-            [f"{SCHEMA}.users.id"],
-            ondelete="CASCADE",
-        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("token_hash", name="uq_user_tokens_hash"),
         schema=SCHEMA,
+    )
+    op.create_foreign_key(
+        "fk_user_tokens_user_id_users",
+        "user_tokens",
+        "users",
+        ["user_id"],
+        ["id"],
+        source_schema=SCHEMA,
+        referent_schema=SCHEMA,
+        ondelete="CASCADE",
     )
     op.create_index(
         "ix_user_tokens_user_purpose",
@@ -71,6 +79,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_constraint(
+        "fk_user_tokens_user_id_users",
+        "user_tokens",
+        type_="foreignkey",
+        schema=SCHEMA,
+    )
     op.drop_index(
         "ix_user_tokens_user_purpose",
         table_name="user_tokens",
