@@ -678,11 +678,12 @@ async def _issue_tokens(
     refreshed_user = await _load_user(db, user.id)
 
     ttl_seconds = int(settings.auth.refresh_token_ttl_seconds)
+    cookie_secure = settings.auth.cookie_secure
     response.set_cookie(
         key="refreshToken",
         value=refresh_token,
         httponly=True,
-        secure=True,
+        secure=cookie_secure,
         samesite="strict",
         max_age=ttl_seconds,
         expires=refresh_expires,
@@ -1714,11 +1715,12 @@ async def logout(
         await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing")
 
+    cookie_secure = settings.auth.cookie_secure
     response.delete_cookie(
         key="refreshToken",
         path="/",
         httponly=True,
-        secure=True,
+        secure=cookie_secure,
         samesite="strict",
     )
     return OperationStatus(detail="Logged out")
