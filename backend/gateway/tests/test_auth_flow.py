@@ -448,6 +448,9 @@ async def test_refresh_reuse_revokes_new_generation(app, db_session):
 
         assert reuse_response.status_code == 401
         assert reuse_response.json()["detail"] == "Invalid refresh token"
+        cookie_header = reuse_response.headers.get("set-cookie", "")
+        assert "refreshToken=" in cookie_header
+        assert "Max-Age=0" in cookie_header
 
     result = await db_session.execute(select(AuthSession))
     sessions = result.scalars().all()
@@ -537,6 +540,9 @@ async def test_refresh_rejects_absolute_timeout(app, db_session):
 
     assert refresh_response.status_code == 401
     assert refresh_response.json()["detail"] == "Session expired"
+    cookie_header = refresh_response.headers.get("set-cookie", "")
+    assert "refreshToken=" in cookie_header
+    assert "Max-Age=0" in cookie_header
 
     await db_session.refresh(session)
     assert session.revoked_at is not None
@@ -574,6 +580,9 @@ async def test_refresh_rejects_idle_timeout(app, db_session):
 
     assert refresh_response.status_code == 401
     assert refresh_response.json()["detail"] == "Session expired due to inactivity"
+    cookie_header = refresh_response.headers.get("set-cookie", "")
+    assert "refreshToken=" in cookie_header
+    assert "Max-Age=0" in cookie_header
 
     await db_session.refresh(session)
     assert session.revoked_at is not None
@@ -807,6 +816,9 @@ async def test_admin_can_disable_mfa_and_revoke_sessions(app, db_session):
             cookies={"refreshToken": refresh_cookie},
         )
         assert refresh_attempt.status_code == 401
+        cookie_header = refresh_attempt.headers.get("set-cookie", "")
+        assert "refreshToken=" in cookie_header
+        assert "Max-Age=0" in cookie_header
 
     result = await db_session.execute(select(AuthSession).where(AuthSession.user_id == user.id))
     sessions = result.scalars().all()
