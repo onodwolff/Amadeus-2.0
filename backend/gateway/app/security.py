@@ -1,6 +1,7 @@
 """Security helpers and token utilities for the gateway API."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -285,6 +286,21 @@ async def validate_bearer_token_async(token: str) -> TokenData:
     return await validator.validate_async(token)
 
 
+def get_local_jwk() -> dict[str, str]:
+    """Return a JSON Web Key describing the locally signed test tokens."""
+
+    secret = settings.auth.jwt_secret.encode("utf-8")
+    kid = hashlib.sha256(secret).hexdigest()[:32]
+    key_material = base64.urlsafe_b64encode(secret).rstrip(b"=").decode("ascii")
+    return {
+        "kty": "oct",
+        "use": "sig",
+        "alg": "HS256",
+        "kid": kid,
+        "k": key_material,
+    }
+
+
 def create_test_access_token(
     *,
     subject: int | str,
@@ -332,7 +348,13 @@ def create_test_access_token(
         if unique_scopes:
             payload["scope"] = " ".join(unique_scopes)
 
-    token = jwt.encode(payload, settings.auth.jwt_secret, algorithm="HS256")
+    jwk = get_local_jwk()
+    token = jwt.encode(
+        payload,
+        settings.auth.jwt_secret,
+        algorithm="HS256",
+        headers={"kid": jwk["kid"]},
+    )
     return token, exp
 
 
@@ -355,6 +377,7 @@ __all__ = [
     "TokenValidator",
     "create_test_access_token",
     "create_test_refresh_token",
+    "get_local_jwk",
     "hash_password",
     "hash_refresh_token",
     "validate_bearer_token_async",

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 
 from ..config import settings
+from ..security import get_local_jwk
 
 router = APIRouter()
 
@@ -56,6 +57,17 @@ async def openid_configuration(realm: str) -> dict[str, Any]:
         "scopes_supported": list(_DEFAULT_SCOPES_SUPPORTED),
         "response_types_supported": list(_DEFAULT_RESPONSE_TYPES_SUPPORTED),
     }
+
+
+@router.get("/realms/{realm}/protocol/openid-connect/certs")
+async def openid_jwks(realm: str) -> dict[str, Any]:
+    """Expose a JWKS document when using locally signed development tokens."""
+
+    configured_jwks = _normalise_url(getattr(settings.auth, "idp_jwks_url", None))
+    if configured_jwks or not settings.auth.allow_test_tokens:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="JWKS not configured")
+
+    return {"keys": [get_local_jwk()]}
 
 
 __all__ = ["router"]
