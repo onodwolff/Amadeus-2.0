@@ -125,5 +125,6 @@ export class AuthStateService {
   logout(): void {
     this.auth.logout();
     this.clear();
+    this.auth.login();
   }
 }
