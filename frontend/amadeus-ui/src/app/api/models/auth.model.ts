@@ -92,6 +92,7 @@ export interface OidcCallbackRequest {
   codeVerifier: string;
   redirectUri?: string;
   state?: string;
+  nonce: string;
 }
 
 export interface SessionsRevokeRequest {

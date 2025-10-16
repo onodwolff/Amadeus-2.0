@@ -240,16 +240,27 @@ export class AuthService {
       return false;
     }
 
+    const storedNonce = this.getStoredNonce();
+    const stateParam = url.searchParams.get('state');
+    const { nonce: stateNonce, state } = this.extractStateMetadata(stateParam);
+    if (!storedNonce || !stateNonce || storedNonce !== stateNonce) {
+      console.error('Unable to complete OIDC login. OAuth state verification failed.');
+      this.clearSession();
+      this.beginMonoLogin();
+      this.cleanupAuthorizationArtifacts(url);
+      return false;
+    }
+
     try {
       const redirectUri = authConfig.redirectUri ?? window.location.origin ?? '';
       const payload: OidcCallbackRequest = {
         code,
         codeVerifier,
         redirectUri,
+        nonce: storedNonce,
       };
-      const stateParam = url.searchParams.get('state');
-      if (stateParam) {
-        payload.state = stateParam;
+      if (state) {
+        payload.state = state;
       }
 
       const tokenResponse = await firstValueFrom(this.authApi.completeOidcLogin(payload));
@@ -441,6 +452,7 @@ export class AuthService {
     }
 
     this.clearPkceVerifier();
+    this.clearStoredNonce();
 
     const params = url.searchParams;
     params.delete('code');
@@ -475,6 +487,75 @@ export class AuthService {
       this.oauthService.initCodeFlow();
     } catch (error) {
       console.error('Unable to initiate the Mono login flow.', error);
+    }
+  }
+
+  private getStoredNonce(): string | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      const persisted = window.localStorage?.getItem('nonce');
+      if (persisted) {
+        return persisted;
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+
+    try {
+      const sessionValue = window.sessionStorage?.getItem('nonce');
+      if (sessionValue) {
+        return sessionValue;
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+
+    return null;
+  }
+
+  private clearStoredNonce(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage?.removeItem('nonce');
+    } catch {
+      /* ignore storage errors */
+    }
+
+    try {
+      window.sessionStorage?.removeItem('nonce');
+    } catch {
+      /* ignore storage errors */
+    }
+  }
+
+  private extractStateMetadata(stateParam: string | null): { nonce: string | null; state: string | null } {
+    if (!stateParam) {
+      return { nonce: null, state: null };
+    }
+
+    const separator = authConfig.nonceStateSeparator ?? ';';
+    const separatorIndex = stateParam.indexOf(separator);
+
+    if (separatorIndex === -1) {
+      return { nonce: stateParam, state: null };
+    }
+
+    const nonce = stateParam.slice(0, separatorIndex) || null;
+    const encodedState = stateParam.slice(separatorIndex + separator.length);
+    if (!encodedState) {
+      return { nonce, state: null };
+    }
+
+    try {
+      return { nonce, state: decodeURIComponent(encodedState) };
+    } catch {
+      return { nonce, state: encodedState };
     }
   }
 }

@@ -15,7 +15,7 @@ from fastapi import Response
 from backend.gateway.app.security import TokenData, hash_refresh_token
 from backend.gateway.app.routes.auth import _issue_tokens
 from backend.gateway.config import settings
-from backend.gateway.db.models import AuthSession, UserRole
+from backend.gateway.db.models import AuditEvent, AuthSession, UserRole
 
 from .utils import create_user
 
@@ -116,7 +116,7 @@ def idp_token_validation(monkeypatch: pytest.MonkeyPatch) -> TokenData:
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
         roles=(),
         scopes=("openid",),
-        claims={"email": "oidc@example.com", "email_verified": True},
+        claims={"email": "oidc@example.com", "email_verified": True, "nonce": "expected-nonce"},
     )
 
     async def _fake_validate(token: str) -> TokenData:
@@ -209,6 +209,8 @@ async def test_oidc_login_and_refresh_flow(
                 "code": "auth-code",
                 "codeVerifier": "v" * 64,
                 "redirectUri": "https://app.example.com/callback",
+                "nonce": "expected-nonce",
+                "state": "login/complete",
             },
         )
         assert response.status_code == 200
@@ -244,6 +246,48 @@ async def test_oidc_login_and_refresh_flow(
     assert second_session.parent_session_id == first_session.id
     assert first_session.refresh_token_hash == hash_refresh_token("idp-refresh-token-1")
     assert second_session.refresh_token_hash == hash_refresh_token("idp-refresh-token-2")
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_rejected_on_nonce_mismatch(
+    configure_idp,
+    idp_token_validation,
+    idp_http_client,
+    app,
+    db_session,
+):
+    idp_token_validation.claims["nonce"] = "server-nonce"
+
+    await create_user(
+        db_session,
+        email="oidc@example.com",
+        username="oidc",
+        password="irrelevant",
+        roles=[UserRole.MEMBER.value],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/auth/oidc/callback",
+            json={
+                "code": "auth-code",
+                "codeVerifier": "v" * 64,
+                "redirectUri": "https://app.example.com/callback",
+                "nonce": "expected-nonce",
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Nonce mismatch"
+
+    result = await db_session.execute(select(AuditEvent).order_by(AuditEvent.id))
+    events = result.scalars().all()
+    assert any(
+        event.action == "auth.login_oidc"
+        and event.result == "failure"
+        and event.metadata_json.get("reason") == "nonce_mismatch"
+        for event in events
+    )
 
 
 @pytest.mark.asyncio

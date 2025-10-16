@@ -1,12 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { Subject, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { OAuthEvent, OAuthService } from 'angular-oauth2-oidc';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 
 import { AuthService } from './auth.service';
 import { AuthApi } from '../api/clients/auth.api';
-import { AuthUser } from '../api/models';
+import { AuthUser, TokenResponse } from '../api/models';
 
 class OAuthServiceStub {
   readonly events = new Subject<OAuthEvent>();
@@ -25,6 +25,7 @@ class OAuthServiceStub {
 
 class AuthApiStub {
   getCurrentUser = jasmine.createSpy('getCurrentUser');
+  completeOidcLogin = jasmine.createSpy('completeOidcLogin');
 }
 
 describe('AuthService', () => {
@@ -117,6 +118,75 @@ describe('AuthService', () => {
       expect(oauthService.logOut).not.toHaveBeenCalled();
       expect(service.currentUser()).toEqual(user);
       expect(router.navigateByUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tryProcessAuthorizationCode', () => {
+    const invokeTryProcess = () =>
+      (service as unknown as { tryProcessAuthorizationCode: () => Promise<boolean> }).tryProcessAuthorizationCode();
+
+    const tokenResponse: TokenResponse = {
+      accessToken: 'token',
+      tokenType: 'bearer',
+      expiresIn: 120,
+      refreshExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      user,
+    };
+
+    let originalUrl: string;
+
+    beforeEach(() => {
+      originalUrl = window.location.href;
+      authApi.completeOidcLogin.and.returnValue(of(tokenResponse));
+    });
+
+    afterEach(() => {
+      window.history.replaceState({}, '', originalUrl);
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+      authApi.completeOidcLogin.calls.reset();
+    });
+
+    it('submits the verified nonce when the callback parameters are valid', async () => {
+      window.localStorage.setItem('PKCE_verifier', 'verifier');
+      window.localStorage.setItem('nonce', 'expected-nonce');
+      window.history.replaceState(
+        {},
+        '',
+        `${window.location.origin}/callback?code=auth-code&state=expected-nonce;login%2Fcomplete`,
+      );
+
+      const result = await invokeTryProcess();
+
+      expect(result).toBeTrue();
+      expect(authApi.completeOidcLogin).toHaveBeenCalledWith(
+        jasmine.objectContaining({
+          code: 'auth-code',
+          codeVerifier: 'verifier',
+          nonce: 'expected-nonce',
+          state: 'login/complete',
+        }),
+      );
+      expect(window.localStorage.getItem('nonce')).toBeNull();
+      expect(window.location.search).not.toContain('code=');
+      expect(window.location.search).not.toContain('state=');
+    });
+
+    it('rejects the callback when the nonce does not match the stored value', async () => {
+      window.localStorage.setItem('PKCE_verifier', 'verifier');
+      window.localStorage.setItem('nonce', 'expected-nonce');
+      window.history.replaceState(
+        {},
+        '',
+        `${window.location.origin}/callback?code=auth-code&state=unexpected-nonce`,
+      );
+
+      const result = await invokeTryProcess();
+
+      expect(result).toBeFalse();
+      expect(authApi.completeOidcLogin).not.toHaveBeenCalled();
+      expect(window.localStorage.getItem('nonce')).toBeNull();
+      expect(window.location.search).not.toContain('code=');
     });
   });
 });
