@@ -60,6 +60,8 @@ cd frontend/amadeus-ui
 npm run start
 ```
 
+The dev server now proxies API and Keycloak traffic through `proxy.conf.json`, so start the FastAPI backend on `http://127.0.0.1:8000` (for example with `make run`) before launching `npm run start` to keep authentication cookies flowing during development.
+
 You can also stay at the repository root and prefix commands:
 
 ```bash
