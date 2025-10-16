@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from backend.gateway.app.routes import admin as admin_routes
 from backend.gateway.app.security import create_test_access_token
+from backend.gateway.config import settings
 from backend.gateway.db.models import AuthSession, User, UserRole
 
 from .utils import create_user
@@ -265,7 +266,7 @@ async def test_admin_can_revoke_user_sessions(app, db_session):
             json={"email": member.email, "password": "password"},
         )
         assert member_login.status_code == 200
-        refresh_cookie = member_login.cookies.get("refreshToken")
+        refresh_cookie = member_login.cookies.get(settings.auth.refresh_cookie_name)
         assert refresh_cookie
 
         admin_login = await client.post(
@@ -285,7 +286,7 @@ async def test_admin_can_revoke_user_sessions(app, db_session):
 
         refresh_attempt = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={settings.auth.refresh_cookie_name: refresh_cookie},
         )
         assert refresh_attempt.status_code == 401
 

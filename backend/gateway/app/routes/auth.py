@@ -680,16 +680,11 @@ async def _issue_tokens(
 
     ttl_delta = refresh_expires - now
     ttl_seconds = max(0, int(ttl_delta.total_seconds()))
-    cookie_secure = settings.auth.cookie_secure
-    response.set_cookie(
-        key="refreshToken",
+    _set_refresh_cookie(
+        response=response,
         value=refresh_token,
-        httponly=True,
-        secure=cookie_secure,
-        samesite="strict",
         max_age=ttl_seconds,
         expires=refresh_expires,
-        path="/",
     )
 
     return TokenResponse(
@@ -700,16 +695,36 @@ async def _issue_tokens(
     )
 
 
+def _set_refresh_cookie(
+    response: Response, *, value: str, max_age: int, expires: datetime
+) -> None:
+    """Persist the refresh token cookie with consistent attributes."""
+
+    cookie_secure = settings.auth.cookie_secure
+    same_site = "none" if cookie_secure else "lax"
+    response.set_cookie(
+        key=settings.auth.refresh_cookie_name,
+        value=value,
+        httponly=True,
+        secure=cookie_secure,
+        samesite=same_site,
+        max_age=max_age,
+        expires=expires,
+        path="/api/auth",
+    )
+
+
 def _clear_refresh_cookie(response: Response) -> dict[str, str]:
     """Remove the refresh token cookie and return headers to persist the change."""
 
     cookie_secure = settings.auth.cookie_secure
+    same_site = "none" if cookie_secure else "lax"
     response.delete_cookie(
-        key="refreshToken",
-        path="/",
+        key=settings.auth.refresh_cookie_name,
+        path="/api/auth",
         httponly=True,
         secure=cookie_secure,
-        samesite="strict",
+        samesite=same_site,
     )
     header_value = response.headers.get("set-cookie")
     if header_value is None:
@@ -1383,7 +1398,7 @@ async def refresh_tokens(
     config = settings.auth
     if not config.allow_test_tokens and not config.uses_identity_provider:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
-    refresh_token = request.cookies.get("refreshToken")
+    refresh_token = request.cookies.get(settings.auth.refresh_cookie_name)
     if not refresh_token:
         headers = _clear_refresh_cookie(response)
         raise HTTPException(
@@ -1658,16 +1673,11 @@ async def refresh_tokens(
 
     ttl_delta = refresh_expires_at - now
     ttl_seconds = int(ttl_delta.total_seconds()) if ttl_delta.total_seconds() > 0 else 0
-    cookie_secure = settings.auth.cookie_secure
-    response.set_cookie(
-        key="refreshToken",
+    _set_refresh_cookie(
+        response=response,
         value=refresh_token,
-        httponly=True,
-        secure=cookie_secure,
-        samesite="strict",
         max_age=ttl_seconds,
         expires=refresh_expires_at,
-        path="/",
     )
 
     expires_in = access_token_expires_in or settings.auth.access_token_ttl_seconds
@@ -1845,7 +1855,7 @@ async def logout(
         )
         await db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local token issuance is disabled")
-    refresh_token = request.cookies.get("refreshToken")
+    refresh_token = request.cookies.get(settings.auth.refresh_cookie_name)
     if refresh_token:
         _ensure_test_schema()
         token_hash = hash_refresh_token(refresh_token)
@@ -1889,14 +1899,7 @@ async def logout(
         await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing")
 
-    cookie_secure = settings.auth.cookie_secure
-    response.delete_cookie(
-        key="refreshToken",
-        path="/",
-        httponly=True,
-        secure=cookie_secure,
-        samesite="strict",
-    )
+    _clear_refresh_cookie(response)
     return OperationStatus(detail="Logged out")
 
 

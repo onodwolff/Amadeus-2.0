@@ -24,6 +24,9 @@ def _ensure_aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+COOKIE_NAME = settings.auth.refresh_cookie_name
+
+
 @pytest.mark.asyncio
 async def test_login_and_refresh_flow(app, db_session):
     await create_user(
@@ -46,10 +49,20 @@ async def test_login_and_refresh_flow(app, db_session):
         assert token_payload["user"]["isAdmin"] is True
         assert token_payload["user"]["emailVerified"] is False
         assert token_payload["user"]["mfaEnabled"] is False
-        assert "refreshToken" not in token_payload
+        assert COOKIE_NAME not in token_payload
 
-        refresh_cookie = login_response.cookies.get("refreshToken")
+        refresh_cookie = login_response.cookies.get(COOKIE_NAME)
         assert refresh_cookie
+        login_cookie_header = login_response.headers.get("set-cookie")
+        assert login_cookie_header is not None
+        assert f"{COOKIE_NAME}=" in login_cookie_header
+        assert "Path=/api/auth" in login_cookie_header
+        assert "HttpOnly" in login_cookie_header
+        assert "Domain=" not in login_cookie_header
+        same_site_value = "none" if settings.auth.cookie_secure else "lax"
+        assert f"samesite={same_site_value}" in login_cookie_header.lower()
+        if settings.auth.cookie_secure:
+            assert "secure" in login_cookie_header.lower()
 
         access_token = token_payload["accessToken"]
 
@@ -67,7 +80,7 @@ async def test_login_and_refresh_flow(app, db_session):
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={COOKIE_NAME: refresh_cookie},
         )
         assert refresh_response.status_code == 200
         refreshed = refresh_response.json()
@@ -76,11 +89,20 @@ async def test_login_and_refresh_flow(app, db_session):
         assert refreshed["user"]["email"] == "admin@example.com"
         assert refreshed["user"]["emailVerified"] is False
         assert refreshed["user"]["mfaEnabled"] is False
-        assert "refreshToken" not in refreshed
+        assert COOKIE_NAME not in refreshed
 
-        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        refreshed_cookie = refresh_response.cookies.get(COOKIE_NAME)
         assert refreshed_cookie
         assert refreshed_cookie != refresh_cookie
+        refresh_cookie_header = refresh_response.headers.get("set-cookie")
+        assert refresh_cookie_header is not None
+        assert f"{COOKIE_NAME}=" in refresh_cookie_header
+        assert "Path=/api/auth" in refresh_cookie_header
+        assert "HttpOnly" in refresh_cookie_header
+        assert "Domain=" not in refresh_cookie_header
+        assert f"samesite={same_site_value}" in refresh_cookie_header.lower()
+        if settings.auth.cookie_secure:
+            assert "secure" in refresh_cookie_header.lower()
 
     result = await db_session.execute(select(AuthSession))
     sessions = result.scalars().all()
@@ -220,12 +242,12 @@ async def test_oidc_login_and_refresh_flow(
         assert payload["user"]["email"] == "oidc@example.com"
         assert payload["user"]["emailVerified"] is True
         assert payload["user"]["mfaEnabled"] is False
-        login_cookie = response.cookies.get("refreshToken")
+        login_cookie = response.cookies.get(COOKIE_NAME)
         assert login_cookie == "idp-refresh-token-1"
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": login_cookie},
+            cookies={COOKIE_NAME: login_cookie},
         )
 
     assert refresh_response.status_code == 200
@@ -235,7 +257,7 @@ async def test_oidc_login_and_refresh_flow(
     assert refreshed_payload["user"]["email"] == "oidc@example.com"
     assert refreshed_payload["user"]["emailVerified"] is True
     assert refreshed_payload["user"]["mfaEnabled"] is False
-    rotated_cookie = refresh_response.cookies.get("refreshToken")
+    rotated_cookie = refresh_response.cookies.get(COOKIE_NAME)
     assert rotated_cookie == "idp-refresh-token-2"
 
     result = await db_session.execute(select(AuthSession).order_by(AuthSession.id))
@@ -366,7 +388,7 @@ async def test_oidc_refresh_allows_non_rotating_tokens(
             },
         )
         assert login_response.status_code == 200
-        login_cookie = login_response.cookies.get("refreshToken")
+        login_cookie = login_response.cookies.get(COOKIE_NAME)
         assert login_cookie == "idp-refresh-token-static"
 
         initial_session_result = await db_session.execute(select(AuthSession))
@@ -376,10 +398,10 @@ async def test_oidc_refresh_allows_non_rotating_tokens(
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": login_cookie},
+            cookies={COOKIE_NAME: login_cookie},
         )
         assert refresh_response.status_code == 200
-        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        refreshed_cookie = refresh_response.cookies.get(COOKIE_NAME)
         assert refreshed_cookie == "idp-refresh-token-static"
         refreshed_payload = refresh_response.json()
         assert refreshed_payload["accessToken"] == "idp-access-token-updated"
@@ -431,24 +453,24 @@ async def test_logout_revokes_entire_family(app, db_session):
             "/auth/login",
             json={"email": "viewer@example.com", "password": "logout-pass"},
         )
-        refresh_cookie = login_response.cookies.get("refreshToken")
+        refresh_cookie = login_response.cookies.get(COOKIE_NAME)
         assert refresh_cookie
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={COOKIE_NAME: refresh_cookie},
         )
-        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        refreshed_cookie = refresh_response.cookies.get(COOKIE_NAME)
         assert refreshed_cookie
 
         logout_response = await client.post(
             "/auth/logout",
-            cookies={"refreshToken": refreshed_cookie},
+            cookies={COOKIE_NAME: refreshed_cookie},
         )
         assert logout_response.status_code == 200
         assert logout_response.json()["detail"] == "Logged out"
         cookie_header = logout_response.headers.get("set-cookie", "")
-        assert "refreshToken=" in cookie_header
+        assert f"{COOKIE_NAME}=" in cookie_header
 
     result = await db_session.execute(select(AuthSession))
     sessions = result.scalars().all()
@@ -474,26 +496,26 @@ async def test_refresh_reuse_revokes_new_generation(app, db_session):
             json={"email": "reuse@example.com", "password": "reuse-pass"},
         )
         assert login_response.status_code == 200
-        original_cookie = login_response.cookies.get("refreshToken")
+        original_cookie = login_response.cookies.get(COOKIE_NAME)
         assert original_cookie
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": original_cookie},
+            cookies={COOKIE_NAME: original_cookie},
         )
         assert refresh_response.status_code == 200
-        fresh_cookie = refresh_response.cookies.get("refreshToken")
+        fresh_cookie = refresh_response.cookies.get(COOKIE_NAME)
         assert fresh_cookie and fresh_cookie != original_cookie
 
         reuse_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": original_cookie},
+            cookies={COOKIE_NAME: original_cookie},
         )
 
         assert reuse_response.status_code == 401
         assert reuse_response.json()["detail"] == "Invalid refresh token"
         cookie_header = reuse_response.headers.get("set-cookie", "")
-        assert "refreshToken=" in cookie_header
+        assert f"{COOKIE_NAME}=" in cookie_header
         assert "Max-Age=0" in cookie_header
 
     result = await db_session.execute(select(AuthSession))
@@ -535,7 +557,7 @@ async def test_issue_tokens_cookie_respects_refresh_expiry(db_session):
     assert token.refresh_expires_at == refresh_expiry
 
     cookie_header = response.headers.get("set-cookie", "")
-    assert "refreshToken=" in cookie_header
+    assert f"{COOKIE_NAME}=" in cookie_header
 
     max_age_value: int | None = None
     for part in cookie_header.split(";"):
@@ -567,7 +589,7 @@ async def test_refresh_rejects_absolute_timeout(app, db_session):
             "/auth/login",
             json={"email": "absolute@example.com", "password": "timeout-pass"},
         )
-        refresh_cookie = login_response.cookies.get("refreshToken")
+        refresh_cookie = login_response.cookies.get(COOKIE_NAME)
         assert refresh_cookie
 
         result = await db_session.execute(select(AuthSession))
@@ -579,13 +601,13 @@ async def test_refresh_rejects_absolute_timeout(app, db_session):
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={COOKIE_NAME: refresh_cookie},
         )
 
     assert refresh_response.status_code == 401
     assert refresh_response.json()["detail"] == "Session expired"
     cookie_header = refresh_response.headers.get("set-cookie", "")
-    assert "refreshToken=" in cookie_header
+    assert f"{COOKIE_NAME}=" in cookie_header
     assert "Max-Age=0" in cookie_header
 
     await db_session.refresh(session)
@@ -607,7 +629,7 @@ async def test_refresh_rejects_idle_timeout(app, db_session):
             "/auth/login",
             json={"email": "idle@example.com", "password": "idle-pass"},
         )
-        refresh_cookie = login_response.cookies.get("refreshToken")
+        refresh_cookie = login_response.cookies.get(COOKIE_NAME)
         assert refresh_cookie
 
         result = await db_session.execute(select(AuthSession))
@@ -619,13 +641,13 @@ async def test_refresh_rejects_idle_timeout(app, db_session):
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={COOKIE_NAME: refresh_cookie},
         )
 
     assert refresh_response.status_code == 401
     assert refresh_response.json()["detail"] == "Session expired due to inactivity"
     cookie_header = refresh_response.headers.get("set-cookie", "")
-    assert "refreshToken=" in cookie_header
+    assert f"{COOKIE_NAME}=" in cookie_header
     assert "Max-Age=0" in cookie_header
 
     await db_session.refresh(session)
@@ -648,7 +670,7 @@ async def test_refresh_preserves_absolute_and_resets_idle_deadline(app, db_sessi
             json={"email": "idleclock@example.com", "password": "idleclock-pass"},
         )
         assert login_response.status_code == 200
-        refresh_cookie = login_response.cookies.get("refreshToken")
+        refresh_cookie = login_response.cookies.get(COOKIE_NAME)
         assert refresh_cookie
 
         result = await db_session.execute(select(AuthSession))
@@ -663,11 +685,11 @@ async def test_refresh_preserves_absolute_and_resets_idle_deadline(app, db_sessi
 
         refresh_response = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={COOKIE_NAME: refresh_cookie},
         )
         assert refresh_response.status_code == 200
 
-        refreshed_cookie = refresh_response.cookies.get("refreshToken")
+        refreshed_cookie = refresh_response.cookies.get(COOKIE_NAME)
         assert refreshed_cookie and refreshed_cookie != refresh_cookie
 
     all_sessions = await db_session.execute(select(AuthSession).order_by(AuthSession.id))
@@ -762,7 +784,7 @@ async def test_mfa_setup_enable_and_backup_code_flow(app, db_session):
         assert complete_response.status_code == 200
         token_payload = complete_response.json()
         assert token_payload["user"]["mfaEnabled"] is True
-        refresh_cookie = complete_response.cookies.get("refreshToken")
+        refresh_cookie = complete_response.cookies.get(COOKIE_NAME)
         assert refresh_cookie
 
         backup_challenge = await client.post(
@@ -836,7 +858,7 @@ async def test_admin_can_disable_mfa_and_revoke_sessions(app, db_session):
             json={"challengeToken": token, "code": totp.now()},
         )
         assert mfa_login.status_code == 200
-        refresh_cookie = mfa_login.cookies.get("refreshToken")
+        refresh_cookie = mfa_login.cookies.get(COOKIE_NAME)
         assert refresh_cookie
 
         # Login admin to call disable endpoint
@@ -857,11 +879,11 @@ async def test_admin_can_disable_mfa_and_revoke_sessions(app, db_session):
 
         refresh_attempt = await client.post(
             "/auth/refresh",
-            cookies={"refreshToken": refresh_cookie},
+            cookies={COOKIE_NAME: refresh_cookie},
         )
         assert refresh_attempt.status_code == 401
         cookie_header = refresh_attempt.headers.get("set-cookie", "")
-        assert "refreshToken=" in cookie_header
+        assert f"{COOKIE_NAME}=" in cookie_header
         assert "Max-Age=0" in cookie_header
 
     result = await db_session.execute(select(AuthSession).where(AuthSession.user_id == user.id))

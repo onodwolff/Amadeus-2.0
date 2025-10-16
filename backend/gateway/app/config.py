@@ -179,6 +179,14 @@ class AuthSettings(BaseModel):
         validation_alias=AliasChoices("AUTH_COOKIE_SECURE", "AUTH__COOKIE_SECURE"),
         description="Mark refresh token cookies as secure (HTTPS only).",
     )
+    refresh_cookie_name: str = Field(
+        default="refreshToken",
+        validation_alias=AliasChoices(
+            "AUTH_REFRESH_COOKIE_NAME",
+            "AUTH__REFRESH_COOKIE_NAME",
+        ),
+        description="Cookie name used to persist refresh tokens.",
+    )
     public_base_url: str = Field(
         default="http://localhost:8000",
         validation_alias=AliasChoices("AUTH_PUBLIC_BASE_URL", "AUTH__PUBLIC_BASE_URL"),
