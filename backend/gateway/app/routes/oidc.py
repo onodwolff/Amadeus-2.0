@@ -31,6 +31,15 @@ def _normalise_url(value: str | None) -> str | None:
     return cleaned.rstrip("/") or cleaned
 
 
+def _dev_oidc_enabled() -> bool:
+    """Return ``True`` when deterministic dev metadata should be exposed."""
+
+    override = getattr(settings.auth, "dev_oidc_fallback", None)
+    if override is not None:
+        return override
+    return settings.env == "dev"
+
+
 @router.get("/realms/{realm}/.well-known/openid-configuration")
 async def openid_configuration(realm: str) -> dict[str, Any]:
     """Return OpenID Connect discovery metadata for the requested realm."""
@@ -40,33 +49,47 @@ async def openid_configuration(realm: str) -> dict[str, Any]:
     )
     configured_token = _normalise_url(getattr(settings.auth, "idp_token_url", None))
 
-    if not configured_authorization or not configured_token:
+    if configured_authorization and configured_token:
+        configured_issuer = _normalise_url(getattr(settings.auth, "idp_issuer", None))
+        public_base = _normalise_url(settings.auth.public_base_url)
+        issuer = configured_issuer or f"{public_base}/realms/{realm}"
+
+        if "{realm}" in configured_authorization:
+            configured_authorization = configured_authorization.replace("{realm}", realm)
+        authorization_endpoint = configured_authorization
+
+        if "{realm}" in configured_token:
+            configured_token = configured_token.replace("{realm}", realm)
+        token_endpoint = configured_token
+
+        configured_jwks = _normalise_url(getattr(settings.auth, "idp_jwks_url", None))
+        if configured_jwks and "{realm}" in configured_jwks:
+            configured_jwks = configured_jwks.replace("{realm}", realm)
+        jwks_uri = configured_jwks or f"{issuer}/protocol/openid-connect/certs"
+
+        return {
+            "issuer": issuer,
+            "authorization_endpoint": authorization_endpoint,
+            "token_endpoint": token_endpoint,
+            "jwks_uri": jwks_uri,
+            "scopes_supported": list(_DEFAULT_SCOPES_SUPPORTED),
+            "response_types_supported": list(_DEFAULT_RESPONSE_TYPES_SUPPORTED),
+        }
+
+    if not _dev_oidc_enabled():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             detail="OpenID Connect provider not configured",
         )
 
-    configured_issuer = _normalise_url(getattr(settings.auth, "idp_issuer", None))
-    public_base = _normalise_url(settings.auth.public_base_url)
-    issuer = configured_issuer or f"{public_base}/realms/{realm}"
-
-    if "{realm}" in configured_authorization:
-        configured_authorization = configured_authorization.replace("{realm}", realm)
-    authorization_endpoint = configured_authorization
-
-    if "{realm}" in configured_token:
-        configured_token = configured_token.replace("{realm}", realm)
-    token_endpoint = configured_token
-
-    configured_jwks = _normalise_url(getattr(settings.auth, "idp_jwks_url", None))
-    if configured_jwks and "{realm}" in configured_jwks:
-        configured_jwks = configured_jwks.replace("{realm}", realm)
-    jwks_uri = configured_jwks or f"{issuer}/protocol/openid-connect/certs"
+    public_base = _normalise_url(settings.auth.public_base_url) or "http://localhost:8000"
+    issuer = f"{public_base}/realms/{realm}"
+    jwks_uri = f"{issuer}/protocol/openid-connect/certs"
 
     return {
         "issuer": issuer,
-        "authorization_endpoint": authorization_endpoint,
-        "token_endpoint": token_endpoint,
+        "authorization_endpoint": f"{issuer}/protocol/openid-connect/auth",
+        "token_endpoint": f"{issuer}/protocol/openid-connect/token",
         "jwks_uri": jwks_uri,
         "scopes_supported": list(_DEFAULT_SCOPES_SUPPORTED),
         "response_types_supported": list(_DEFAULT_RESPONSE_TYPES_SUPPORTED),
@@ -78,7 +101,10 @@ async def openid_jwks(realm: str) -> dict[str, Any]:
     """Expose a JWKS document when using locally signed development tokens."""
 
     configured_jwks = _normalise_url(getattr(settings.auth, "idp_jwks_url", None))
-    if configured_jwks or not settings.auth.allow_test_tokens:
+    if configured_jwks:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="JWKS not configured")
+
+    if not _dev_oidc_enabled():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="JWKS not configured")
 
     return {"keys": [get_local_jwk()]}

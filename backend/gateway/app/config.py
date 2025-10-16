@@ -174,6 +174,18 @@ class AuthSettings(BaseModel):
         validation_alias=AliasChoices("AUTH_ALLOW_TEST_TOKENS", "AUTH__ALLOW_TEST_TOKENS"),
         description="Enable legacy locally signed tokens for test environments.",
     )
+    dev_oidc_fallback: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AUTH_DEV_OIDC_FALLBACK",
+            "AUTH__DEV_OIDC_FALLBACK",
+        ),
+        description=(
+            "Expose deterministic discovery metadata and JWKS when an identity provider "
+            "is not configured. When unset the behaviour defaults to being enabled in dev "
+            "environments."
+        ),
+    )
     cookie_secure: bool = Field(
         default=True,
         validation_alias=AliasChoices("AUTH_COOKIE_SECURE", "AUTH__COOKIE_SECURE"),
