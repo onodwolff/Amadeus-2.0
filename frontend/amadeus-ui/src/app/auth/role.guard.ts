@@ -12,7 +12,7 @@ export class RoleGuard implements CanMatch {
 
     if (!this.auth.getAccessToken()) {
       this.auth.login();
-      return false;
+      return this.router.parseUrl('/login');
     }
 
     const requiredRoles = (route.data?.['requiredRoles'] as string[] | undefined) ?? [];
@@ -25,7 +25,7 @@ export class RoleGuard implements CanMatch {
     const user = this.auth.currentUser();
     if (!user) {
       this.auth.login();
-      return false;
+      return this.router.parseUrl('/login');
     }
 
     const grantedRoles = new Set(user.roles ?? []);
