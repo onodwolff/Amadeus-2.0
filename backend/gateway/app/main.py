@@ -52,9 +52,19 @@ def create_app(*, api_prefix: str | None = None) -> FastAPI:
     if settings.env == "dev":
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origins=[
+                "http://localhost:4200",
+                "http://127.0.0.1:4200",
+            ],
             allow_credentials=True,
-            allow_methods=["*"],
+            allow_methods=[
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+            ],
             allow_headers=["*"],
         )
 
