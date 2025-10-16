@@ -57,14 +57,7 @@ def create_app(*, api_prefix: str | None = None) -> FastAPI:
                 "http://127.0.0.1:4200",
             ],
             allow_credentials=True,
-            allow_methods=[
-                "GET",
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-                "OPTIONS",
-            ],
+            allow_methods=["*"],
             allow_headers=["*"],
         )
 
