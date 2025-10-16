@@ -461,6 +461,17 @@ class StorageSettings(BaseModel):
         default=None,
         validation_alias=AliasChoices("REDIS_URL", "STORAGE__REDIS_URL"),
     )
+    sqlalchemy_echo: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SQLALCHEMY_ECHO",
+            "DATABASE_ECHO",
+            "STORAGE__SQLALCHEMY_ECHO",
+        ),
+        description=(
+            "When set, overrides the default behaviour for SQLAlchemy's echo flag."
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True, protected_namespaces=())
 
@@ -555,6 +566,12 @@ class Settings(BaseSettings):
     @property
     def database_schema(self) -> str:
         return self.storage.schema
+
+    @property
+    def sqlalchemy_echo(self) -> bool:
+        if self.storage.sqlalchemy_echo is not None:
+            return self.storage.sqlalchemy_echo
+        return self.env == "dev"
 
     @property
     def default_engine_mode(self) -> str:
