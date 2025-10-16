@@ -41,6 +41,9 @@ export class AuthService {
   private sessionRevision = 0;
   private accessToken: string | null = null;
   private accessTokenExpiresAt = 0;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private static readonly REFRESH_LEEWAY_MS = 5000;
 
   private get authApi(): AuthApi {
     return this.injector.get(AuthApi);
@@ -306,6 +309,7 @@ export class AuthService {
     this.accessTokenExpiresAt = Date.now() + expiresInSeconds * 1000;
     this.currentUserSignal.set(tokenResponse.user);
     this.isBootstrappedSignal.set(true);
+    this.scheduleTokenRefresh();
 
     if (!wasAuthenticated && this.shouldRedirectAfterLogin(currentUrl)) {
       void this.router.navigateByUrl('/dashboard');
@@ -316,10 +320,42 @@ export class AuthService {
     this.accessToken = null;
     this.accessTokenExpiresAt = 0;
     this.currentUserSignal.set(null);
+    this.clearRefreshTimer();
   }
 
   private hasValidAccessToken(): boolean {
     return !!this.accessToken && Date.now() < this.accessTokenExpiresAt;
+  }
+
+  private scheduleTokenRefresh(): void {
+    this.clearRefreshTimer();
+
+    if (!this.accessToken) {
+      return;
+    }
+
+    const refreshInMs = Math.max(
+      0,
+      this.accessTokenExpiresAt - Date.now() - AuthService.REFRESH_LEEWAY_MS,
+    );
+
+    if (!Number.isFinite(refreshInMs)) {
+      return;
+    }
+
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.refreshToken().catch(() => {
+        /* refreshToken handles its own errors */
+      });
+    }, refreshInMs);
+  }
+
+  private clearRefreshTimer(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
   }
 
   private loadCurrentUser(options?: LoadCurrentUserOptions): Promise<boolean> {
