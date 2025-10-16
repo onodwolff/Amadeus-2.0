@@ -26,6 +26,7 @@ class OAuthServiceStub {
 class AuthApiStub {
   getCurrentUser = jasmine.createSpy('getCurrentUser');
   completeOidcLogin = jasmine.createSpy('completeOidcLogin');
+  refreshTokens = jasmine.createSpy('refreshTokens');
 }
 
 describe('AuthService', () => {
@@ -187,6 +188,87 @@ describe('AuthService', () => {
       expect(authApi.completeOidcLogin).not.toHaveBeenCalled();
       expect(window.localStorage.getItem('nonce')).toBeNull();
       expect(window.location.search).not.toContain('code=');
+    });
+  });
+
+  describe('token refresh scheduling', () => {
+    const tokenResponse: TokenResponse = {
+      accessToken: 'token',
+      tokenType: 'bearer',
+      expiresIn: 30,
+      refreshExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      user,
+    };
+
+    const expectedDelayMs = () => Math.max(0, (tokenResponse.expiresIn - 5) * 1000 - 5000);
+
+    beforeEach(() => {
+      jasmine.clock().install();
+      jasmine.clock().mockDate(new Date('2024-01-01T00:00:00.000Z'));
+    });
+
+    afterEach(() => {
+      jasmine.clock().uninstall();
+      authApi.refreshTokens.calls.reset();
+    });
+
+    it('schedules a token refresh ahead of expiration', () => {
+      const refreshSpy = spyOn(service, 'refreshToken').and.returnValue(Promise.resolve());
+      try {
+        (service as unknown as { setSession: (response: TokenResponse) => void }).setSession(tokenResponse);
+
+        const delay = expectedDelayMs();
+        if (delay > 0) {
+          jasmine.clock().tick(delay - 1);
+          expect(refreshSpy).not.toHaveBeenCalled();
+          jasmine.clock().tick(1);
+        } else {
+          jasmine.clock().tick(0);
+        }
+
+        expect(refreshSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        refreshSpy.and.callThrough();
+      }
+    });
+
+    it('cancels the scheduled refresh when the session is cleared', () => {
+      const refreshSpy = spyOn(service, 'refreshToken').and.returnValue(Promise.resolve());
+      const internalService = service as unknown as {
+        setSession: (response: TokenResponse) => void;
+        clearSession: () => void;
+      };
+
+      try {
+        internalService.setSession(tokenResponse);
+        internalService.clearSession();
+
+        jasmine.clock().tick(expectedDelayMs() + 1);
+        expect(refreshSpy).not.toHaveBeenCalled();
+      } finally {
+        refreshSpy.and.callThrough();
+      }
+    });
+
+    it('avoids overlapping refresh requests when a refresh is already in progress', async () => {
+      const refreshSubject = new Subject<TokenResponse | null>();
+      authApi.refreshTokens.and.returnValue(refreshSubject.asObservable());
+      const internalService = service as unknown as { setSession: (response: TokenResponse) => void };
+
+      internalService.setSession(tokenResponse);
+
+      const refreshPromise = service.refreshToken();
+
+      expect(authApi.refreshTokens).toHaveBeenCalledTimes(1);
+
+      jasmine.clock().tick(expectedDelayMs() + 1);
+
+      expect(authApi.refreshTokens).toHaveBeenCalledTimes(1);
+
+      refreshSubject.next(tokenResponse);
+      refreshSubject.complete();
+
+      await refreshPromise;
     });
   });
 });
