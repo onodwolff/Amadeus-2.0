@@ -34,6 +34,7 @@ def configure_oidc(monkeypatch: pytest.MonkeyPatch):
         "idp_jwks_url",
         "https://idp.example.com/realms/amadeus/protocol/openid-connect/certs",
     )
+    monkeypatch.setattr(settings.auth, "dev_oidc_fallback", None)
 
 
 @pytest.mark.asyncio
@@ -54,11 +55,13 @@ async def test_oidc_well_known_configuration(app):
 
 
 @pytest.mark.asyncio
-async def test_oidc_well_known_configuration_returns_not_found_when_unconfigured(
+async def test_oidc_well_known_configuration_returns_not_found_when_fallback_disabled(
     app, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(settings.auth, "idp_authorization_url", None)
     monkeypatch.setattr(settings.auth, "idp_token_url", None)
+    monkeypatch.setattr(settings.auth, "dev_oidc_fallback", False)
+    monkeypatch.setattr(settings, "env", "prod")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.get("/realms/amadeus/.well-known/openid-configuration")
@@ -69,6 +72,8 @@ async def test_oidc_well_known_configuration_returns_not_found_when_unconfigured
 @pytest.mark.asyncio
 async def test_oidc_jwks_document_exposes_local_secret(app, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings.auth, "idp_jwks_url", None)
+    monkeypatch.setattr(settings.auth, "dev_oidc_fallback", True)
+    monkeypatch.setattr(settings, "env", "prod")
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.get("/realms/amadeus/protocol/openid-connect/certs")
 
@@ -133,4 +138,86 @@ def test_create_test_access_token_includes_local_kid(monkeypatch: pytest.MonkeyP
     header = jwt.get_unverified_header(token)
     expected_kid = hashlib.sha256("super-secret-key".encode("utf-8")).hexdigest()[:32]
     assert header["kid"] == expected_kid
+
+
+@pytest.mark.asyncio
+async def test_oidc_well_known_configuration_dev_fallback(app, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings.auth, "idp_authorization_url", None)
+    monkeypatch.setattr(settings.auth, "idp_token_url", None)
+    monkeypatch.setattr(settings.auth, "idp_jwks_url", None)
+    monkeypatch.setattr(settings.auth, "dev_oidc_fallback", None)
+    monkeypatch.setattr(settings, "env", "dev")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/realms/amadeus/.well-known/openid-configuration")
+
+    assert response.status_code == 200
+    payload = response.json()
+    public_base = settings.auth.public_base_url.rstrip("/")
+    expected_issuer = f"{public_base}/realms/amadeus"
+    assert payload == {
+        "issuer": expected_issuer,
+        "authorization_endpoint": f"{expected_issuer}/protocol/openid-connect/auth",
+        "token_endpoint": f"{expected_issuer}/protocol/openid-connect/token",
+        "jwks_uri": f"{expected_issuer}/protocol/openid-connect/certs",
+        "scopes_supported": ["openid", "profile", "email", "offline_access"],
+        "response_types_supported": ["code"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_oidc_well_known_configuration_forced_fallback_in_prod(
+    app, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(settings.auth, "idp_authorization_url", None)
+    monkeypatch.setattr(settings.auth, "idp_token_url", None)
+    monkeypatch.setattr(settings.auth, "idp_jwks_url", None)
+    monkeypatch.setattr(settings.auth, "dev_oidc_fallback", True)
+    monkeypatch.setattr(settings, "env", "prod")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/realms/amadeus/.well-known/openid-configuration")
+
+    assert response.status_code == 200
+    payload = response.json()
+    public_base = settings.auth.public_base_url.rstrip("/")
+    expected_issuer = f"{public_base}/realms/amadeus"
+    assert payload == {
+        "issuer": expected_issuer,
+        "authorization_endpoint": f"{expected_issuer}/protocol/openid-connect/auth",
+        "token_endpoint": f"{expected_issuer}/protocol/openid-connect/token",
+        "jwks_uri": f"{expected_issuer}/protocol/openid-connect/certs",
+        "scopes_supported": ["openid", "profile", "email", "offline_access"],
+        "response_types_supported": ["code"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_oidc_jwks_dev_fallback_ignores_test_token_flag(
+    app, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(settings.auth, "idp_jwks_url", None)
+    monkeypatch.setattr(settings.auth, "allow_test_tokens", False)
+    monkeypatch.setattr(settings.auth, "dev_oidc_fallback", None)
+    monkeypatch.setattr(settings, "env", "dev")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/realms/amadeus/protocol/openid-connect/certs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    secret = settings.auth.jwt_secret.encode("utf-8")
+    expected_k = base64.urlsafe_b64encode(secret).rstrip(b"=").decode("ascii")
+    expected_kid = hashlib.sha256(secret).hexdigest()[:32]
+    assert payload == {
+        "keys": [
+            {
+                "kty": "oct",
+                "use": "sig",
+                "alg": "HS256",
+                "kid": expected_kid,
+                "k": expected_k,
+            }
+        ]
+    }
 
