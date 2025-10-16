@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,13 +30,37 @@ async def _ensure_audit_table(session: AsyncSession) -> bool:
     if _audit_table_exists is False:
         return False
 
+    table_name = AuditEvent.__table__.name
+    schema = AuditEvent.__table__.schema
+
     try:
-        exists = await session.run_sync(
-            lambda sync_session: inspect(sync_session.connection()).has_table(
-                AuditEvent.__table__.name,
-                schema=AuditEvent.__table__.schema,
-            )
+        bind = session.get_bind()
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        logger.warning(
+            "audit_event_table_check_failed",
+            error=str(exc),
         )
+        _audit_table_exists = False
+        return False
+
+    try:
+        if bind.dialect.name == "postgresql":
+            # ``inspect.has_table`` issues several catalog queries that are fairly
+            # noisy in the logs when the gateway boots before migrations have run.
+            # ``to_regclass`` performs a single lookup and is available on
+            # PostgreSQL, so prefer it there.
+            table_identifier = f"{schema}.{table_name}" if schema else table_name
+            exists = await session.scalar(
+                text("SELECT to_regclass(:table_identifier) IS NOT NULL"),
+                {"table_identifier": table_identifier},
+            )
+        else:
+            exists = await session.run_sync(
+                lambda sync_session: inspect(sync_session.connection()).has_table(
+                    table_name,
+                    schema=schema,
+                )
+            )
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
         logger.warning(
             "audit_event_table_check_failed",
