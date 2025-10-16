@@ -1,18 +1,12 @@
 {
-  "/api/*": {
+  "/api": {
     "target": "http://127.0.0.1:8000",
     "secure": false,
-    "changeOrigin": true,
-    "logLevel": "debug",
-    "cookieDomainRewrite": "localhost",
-    "cookiePathRewrite": "/"
+    "changeOrigin": true
   },
-  "/realms/*": {
+  "/realms": {
     "target": "http://127.0.0.1:8000",
     "secure": false,
-    "changeOrigin": true,
-    "logLevel": "debug",
-    "cookieDomainRewrite": "localhost",
-    "cookiePathRewrite": "/"
+    "changeOrigin": true
   }
 }
