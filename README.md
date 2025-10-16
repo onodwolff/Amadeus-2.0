@@ -62,6 +62,8 @@ npm run start
 
 The dev server now proxies API and Keycloak traffic through `proxy.conf.json`, so start the FastAPI backend on `http://127.0.0.1:8000` (for example with `make run`) before launching `npm run start` to keep authentication cookies flowing during development.
 
+When you stay on HTTP (`ng serve` default), set `AUTH__COOKIE_SECURE=false` in your `.env` so browsers keep the refresh cookie instead of dropping the Secure-only version. Reverse the toggle once you deploy behind HTTPS.
+
 You can also stay at the repository root and prefix commands:
 
 ```bash
