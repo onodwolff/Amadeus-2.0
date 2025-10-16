@@ -26,7 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover - support running from backend/
 async def _lifespan(app: FastAPI):  # pragma: no cover - exercised via integration tests
     """Initialise and tear down shared application resources."""
 
-    create_engine(settings.database_url, echo=settings.env == "dev")
+    create_engine(settings.database_url, echo=settings.sqlalchemy_echo)
     try:
         yield
     finally:
