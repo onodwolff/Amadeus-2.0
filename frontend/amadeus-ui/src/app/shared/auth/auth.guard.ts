@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { CanActivate, CanActivateChild, UrlTree } from '@angular/router';
+import { CanActivate, CanActivateChild, Router, UrlTree } from '@angular/router';
 
 import { AuthStateService } from './auth-state.service';
 import { AuthService } from '../../auth/auth.service';
@@ -8,6 +8,7 @@ import { AuthService } from '../../auth/auth.service';
 export class AuthGuard implements CanActivate, CanActivateChild {
   private readonly authState = inject(AuthStateService);
   private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
 
   canActivate(): Promise<boolean | UrlTree> {
     return this.resolve();
@@ -27,6 +28,6 @@ export class AuthGuard implements CanActivate, CanActivateChild {
     }
 
     this.auth.login();
-    return false;
+    return this.router.parseUrl('/login');
   }
 }

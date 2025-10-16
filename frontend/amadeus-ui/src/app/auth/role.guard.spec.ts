@@ -71,8 +71,9 @@ describe('RoleGuard', () => {
     const result = await guard.canMatch(route, [] as UrlSegment[]);
 
     expect(auth.bootstrapMe).toHaveBeenCalled();
-    expect(result).toBeFalse();
     expect(auth.login).toHaveBeenCalled();
+    expect(result instanceof UrlTree).toBeTrue();
+    expect(router.serializeUrl(result as UrlTree)).toEqual(router.serializeUrl(router.parseUrl('/login')));
   });
 
   it('redirects to /403 when the user lacks a required role', async () => {
