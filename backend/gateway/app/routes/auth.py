@@ -346,6 +346,7 @@ class OidcCallbackRequest(BaseModel):
     code_verifier: str = Field(alias="codeVerifier", min_length=43, max_length=128)
     redirect_uri: str | None = Field(default=None, alias="redirectUri")
     state: str | None = None
+    nonce: str
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -881,6 +882,10 @@ async def complete_oidc_login(
     if config.idp_redirect_uri and redirect_uri != config.idp_redirect_uri:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Redirect URI mismatch")
 
+    nonce = payload.nonce.strip()
+    if not nonce:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Nonce is required")
+
     token_request_data: dict[str, str] = {
         "grant_type": "authorization_code",
         "code": code,
@@ -1018,6 +1023,36 @@ async def complete_oidc_login(
         await db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is suspended")
 
+    nonce_claim_raw = claims.get("nonce")
+    if not isinstance(nonce_claim_raw, str) or not nonce_claim_raw.strip():
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_oidc",
+            result="failure",
+            metadata={"reason": "nonce_missing", "issuer": validated.issuer},
+        )
+        await db.commit()
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Identity provider response missing nonce")
+
+    nonce_claim = nonce_claim_raw.strip()
+
+    if nonce_claim != nonce:
+        await _record_auth_event(
+            db,
+            request,
+            action="auth.login_oidc",
+            result="failure",
+            metadata={
+                "reason": "nonce_mismatch",
+                "expected_nonce": nonce,
+                "received_nonce": nonce_claim,
+                "issuer": validated.issuer,
+            },
+        )
+        await db.commit()
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Nonce mismatch")
+
     now = datetime.now(timezone.utc)
     user.last_login_at = now
     email_verified_claim = claims.get("email_verified")
@@ -1036,6 +1071,7 @@ async def complete_oidc_login(
             "idp_subject": validated.subject,
             "idp_issuer": validated.issuer,
             "idp_audience": list(validated.audience),
+            "idp_nonce": nonce_claim,
         },
     )
 
